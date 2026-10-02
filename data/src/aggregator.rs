@@ -223,15 +223,15 @@ impl Aggregator {
         let iv = interval_secs;
         let age = max_age_secs.unwrap_or(iv * 2);
         let now = hyperliquid_api::now_ms() as i64;
-        // Kapanmış mum varsa onun zamanı; yoksa canlı mum bucket'ı
+        // Kapanmış mum varsa onun KAPANIŞ zamanı (t + interval); yoksa canlı mum bucket'ı
         let key = (coin.to_string(), iv);
         if let Some(hist) = self.history.get(&key) {
             if let Some(last) = hist.back() {
-                let last_ts = last.t;
-                return (now - last_ts) / 1000 > age as i64;
+                let last_close_ts = last.t + (iv as i64 * 1000); // mum kapanış zamanı
+                return (now - last_close_ts) / 1000 > age as i64;
             }
         }
-        // kapanmış yok → canlı mum bucket zamanı
+        // kapanmış yok → canlı mum bucket zamanı (henüz kapanmamış)
         if let Some(live) = self.live.get(&key) {
             let bucket_ts = live.bucket;
             return (now - bucket_ts) / 1000 > age as i64;

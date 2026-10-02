@@ -110,7 +110,7 @@ pub struct TrailState {
     pub ratchets: u32,
 }
 
-/// Giriş atribüsyonu: (katkı veren stratejiler, pozisyon yönü, giriş fiyatı)
+/// Giriş atribüsyonu: (katkı veren stratejiler, pozisyon yönü, giriş fiyatı, çıkış sebebi)
 pub struct EntryAttr {
     pub voters: Vec<String>,
     pub side: SmSide,
@@ -120,6 +120,21 @@ pub struct EntryAttr {
     /// giriş boyutu — risk_usd = risk_px × size
     pub size: f64,
     pub ts: u64,
+    /// çıkış sebebi: gerçek kapanış sebebi (MFE>0 TP demek DEĞİL)
+    pub exit_reason: Option<ExitReason>,
+}
+
+/// Gerçek çıkış sebebi — MFE/MAE analizi için critical
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Default)]
+pub enum ExitReason {
+    #[default]
+    Unknown,
+    StopLoss,          // borsa SL tetiklendi
+    TakeProfit,        // TP limit order doldu
+    TrailingStop,      // trailing ratchet tetiklendi
+    SignalExit,        // ensemble sinyali ters (ExitNow)
+    EmergencyFlatten,  // kill-switch / black-swan flatten
+    Manual,            // manuel müdahale
 }
 
 pub struct Engine {
@@ -175,6 +190,8 @@ pub struct Engine {
     git_sha: String,
     /// trade_exits.jsonl dosya yolu (ENV `TRADE_EXITS_PATH`, default: config/trade_exits.jsonl)
     trade_exits_path: String,
+    /// P1-3: Son recon zamanı (mutex yerine engine field)
+    last_recon_ms: u64,
 }
 
 impl Engine {
@@ -376,6 +393,7 @@ impl Engine {
             },
             trade_exits_path: std::env::var("TRADE_EXITS_PATH")
                 .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into()),
+            last_recon_ms: 0,
         })
     }
 
@@ -869,8 +887,12 @@ impl Engine {
         }
     }
 
-    /// ACİL DÜZLEŞTİRME (kill-switch): tüm pozisyonları kapat.
+    /// ACİL DÜZLEŞTİRME (kill-switch / black-swan): tüm pozisyonları kapat.
     pub async fn flatten_positions(&mut self) {
+        // Tüm açık pozisyonların exit_reason'ını EmergencyFlatten olarak işaretle
+        for attr in self.entry_attr.values_mut() {
+            attr.exit_reason = Some(ExitReason::EmergencyFlatten);
+        }
         let mids: HashMap<String, f64> = self
             .info
             .all_mids()
@@ -980,9 +1002,16 @@ impl Engine {
                             t.last_px,
                         );
                     }
-                    let Some(attr) = self.entry_attr.remove(&c) else {
+                    // ÇIKIŞ SEBEBİ: trail state'ten belirle (ratchets > 0 = TrailingStop)
+                    let exit_reason = if let Some((_, _, t)) = &excursion {
+                        if t.ratchets > 0 { ExitReason::TrailingStop } else { ExitReason::StopLoss }
+                    } else {
+                        ExitReason::StopLoss
+                    };
+                    let Some(mut attr) = self.entry_attr.remove(&c) else {
                         continue;
                     };
+                    attr.exit_reason = Some(exit_reason);
                     // R = net PnL / giriş riski. Pozisyon adedini bildiğimiz
                     // için risk_usd = risk_px × |szi|; `closed_pnl_by_coin`
                     // `user` dolumundaki `closedPnl` toplamıdır.
@@ -1003,6 +1032,16 @@ impl Engine {
                             );
                             // A2 — trade_exits.jsonl yaz (append-only, epoch+git taşıyor)
                             if let Some((fav, adv, t)) = &excursion {
+                                let exit_reason = attr.exit_reason.unwrap_or(ExitReason::Unknown);
+                                let exit_str = match exit_reason {
+                                    ExitReason::StopLoss => "stop",
+                                    ExitReason::TakeProfit => "tp",
+                                    ExitReason::TrailingStop => "trailing",
+                                    ExitReason::SignalExit => "signal",
+                                    ExitReason::EmergencyFlatten => "emergency",
+                                    ExitReason::Manual => "manual",
+                                    ExitReason::Unknown => "unknown",
+                                };
                                 let exit = TradeExit {
                                     ts: hyperliquid_api::now_ms(),
                                     epoch: self.epoch.clone(),
@@ -1014,7 +1053,7 @@ impl Engine {
                                     mae_r: *adv,
                                     dur_sn: (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
                                     ratchet: t.ratchets,
-                                    cikis: if *fav > 0.0 { "tp" } else { "stop" }.into(),
+                                    cikis: exit_str.into(),
                                     r_kapanis: r,
                                     atr_bps: if t.atr_px > 0.0 { t.atr_px / t.entry_px * 10_000.0 } else { 0.0 },
                                     k: self.loop_cfg.trail_atr_k,
@@ -1068,26 +1107,23 @@ impl Engine {
         }
         self.dyn_weights();
 
-        // == P1-3: S5 PERİYODİK RECON (30 sn) — cycle-sayacı yerine zaman ==
-        static LAST_RECON: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+        // == P1-3: S5 PERİYODİK RECON (30 sn) — cycle-sayacı yerine zaman
+        // Mutex guard'ı await ÖNCESİNE serbest bırak (engine field kullan)
         let now_ms = hyperliquid_api::now_ms();
         let mut recon_notes: Vec<String> = Vec::new();
-        {
-            let mut last = LAST_RECON.lock().unwrap();
-            if now_ms.saturating_sub(*last) >= 30_000 {
-                *last = now_ms;
-                let cands = self.executor.refresh_orders().await;
-                let cands = match cands {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("[RECON] refresh_orders: {e}");
-                        Vec::new()
-                    }
-                };
-                let n = self.executor.dedupe_sl(cands).await;
-                if n > 0 {
-                    tracing::info!("[RECON] {n} artık stop temizlendi");
+        if now_ms.saturating_sub(self.last_recon_ms) >= 30_000 {
+            self.last_recon_ms = now_ms;
+            let cands = self.executor.refresh_orders().await;
+            let cands = match cands {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("[RECON] refresh_orders: {e}");
+                    Vec::new()
                 }
+            };
+            let n = self.executor.dedupe_sl(cands).await;
+            if n > 0 {
+                tracing::info!("[RECON] {n} artık stop temizlendi");
             }
         }
         // Yetim emir temizliği (S5): makineye bağlı olmayan açık emirleri iptal
@@ -1257,10 +1293,26 @@ impl Engine {
             let crisis = universe_returns.iter().map(|e2| e2.1.abs()).sum::<f64>()
                 / universe_returns.len().max(1) as f64 > 0.05;
             self.am.cfg.max_correlation = if crisis { 0.35 } else { crate::allocation_manager::LOOSE_CORR };
-            // black-swan: işaretli ort < −%15 → TÜM pozisyonları İPTTAL (kill-switch)
+            // black-swan: işaretli ort < −%15 → TÜM pozisyonları KAPAT (gerçek flatten)
             if !universe_returns.is_empty() && s.0 < -0.15 {
-                tracing::error!("BLACK SWAN: evren ort {:+.1}% — TÜM pozisyonlar kapatılıyor", s.0 * 100.0);
-                for m in self.machines.values_mut() { m.state = PosState::Flat; }
+                tracing::error!("BLACK SWAN: evren ort {:+.1}% — TÜM pozisyonlar kapatılıyor (gerçek flatten)", s.0 * 100.0);
+                // Sadece internal state değil, BORSADA kapat (kill-switch ile aynı mekanizma)
+                let mids: HashMap<String, f64> = self
+                    .info
+                    .all_mids()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(k, v)| v.parse::<f64>().ok().map(|x| (k, x)))
+                    .collect();
+                let left = self.executor.flatten_all(&mids).await;
+                if !left.is_empty() {
+                    tracing::error!("[BLACK SWAN] {} pozisyon kapanamadı — borsa SL'ye emanet", left.len());
+                }
+                // Internal state'i de temizle
+                for m in self.machines.values_mut() {
+                    m.state = PosState::Flat;
+                }
             }
         }
 
@@ -1623,6 +1675,7 @@ impl Engine {
                         entry_px,
                         risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
                         size: sz,
+                        exit_reason: None,
                     };
                     // EMİR FİYATI: ALO(post-only) KALDIRILDI. Long'da ask'a,
                     // short'ta bid'e post-only yazmak spread'i kestiği için
@@ -1700,6 +1753,10 @@ impl Engine {
                         self.entry_attr.insert(e.coin.clone(), attr);
                 }
                 Action::ExitNow(o) => {
+                    // ÇIKIŞ SEBEBİ: SignalExit olarak işaretle (entry_attr'a yazılacak)
+                    if let Some(attr) = self.entry_attr.get_mut(&e.coin) {
+                        attr.exit_reason = Some(ExitReason::SignalExit);
+                    }
                     // HAYALET EMİR KORUMASI (çıkış yolu da): makine boyutu
                     // bilmiyorsa pozisyonun kendisinden al; 0 kalırsa emir
                     // GÖNDERİLMEZ (borsada reduce-only 0-lot = kapatılmayan

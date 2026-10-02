@@ -30,24 +30,32 @@
 //! Şema: epoch, git_sha, coin, side, strategies, mfe_r, mae_r, dur_sn, ratchet,
 //! cikis, r_kapanis, atr_bps, k. Log rotasyonu/restart veriyi yok etmez.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 /// TID dedup ring buffer (S6). Son ~10k transaction ID saklanır; aynı tid →
 /// atla + [DEDUP] sayacı. Win/loss + R yalnız `user` kanalından gelir.
-static TID_DEDUP: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::with_capacity(10_000)));
+/// O(1) için HashSet (membership) + VecDeque (eviction order) kombinasyonu.
+static TID_DEDUP: Lazy<Mutex<(HashSet<String>, VecDeque<String>)>> = Lazy::new(|| {
+    Mutex::new((HashSet::with_capacity(10_000), VecDeque::with_capacity(10_000)))
+});
 const TID_DEDUP_CAP: usize = 10_000;
 
 /// `tid_seen` — aynı transaction ID iki kez işlenirse `true` döner (atlanır).
+/// O(1) membership + O(1) eviction.
 pub fn tid_seen(tid: &str) -> bool {
-    let mut v = TID_DEDUP.lock().unwrap();
-    if v.contains(&tid.to_string()) {
+    let mut guard = TID_DEDUP.lock().unwrap();
+    let (seen, order) = &mut *guard;
+    if seen.contains(tid) {
         return true;
     }
-    v.push(tid.to_string());
-    if v.len() > TID_DEDUP_CAP {
-        v.remove(0);
+    seen.insert(tid.to_string());
+    order.push_back(tid.to_string());
+    if seen.len() > TID_DEDUP_CAP {
+        if let Some(old) = order.pop_front() {
+            seen.remove(&old);
+        }
     }
     false
 }
@@ -468,7 +476,8 @@ impl StrategyTracker {
 
     /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
     /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
-    /// yüklenemesin diye.
+    /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
+    /// restart'ta birebir yüklenir — sentetik ±1R YOK.
     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
         use std::fmt::Write as _;
         let mut names: Vec<&String> = self.stats.keys().collect();
@@ -476,13 +485,25 @@ impl StrategyTracker {
         let mut s = String::from("{\n  \"origin\": \"live\",\n  \"schema_version\": 1,\n  \"strategies\": {\n");
         for (i, k) in names.iter().enumerate() {
             let st = &self.stats[*k];
+            if st.rs.is_empty() {
+                continue;
+            }
             let wr = st.win_rate(0).unwrap_or(0.0);
             let pf = st.profit_factor().unwrap_or(0.0);
             let sr: f64 = st.rs.iter().sum();
             let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
+            // R history'yi array olarak sakla: [[ts, r], ...]
+            let mut r_hist = String::new();
+            for (idx, (ts, _win)) in st.outcomes.iter().enumerate() {
+                let r = st.rs[idx];
+                let _ = write!(r_hist, "[{ts},{r:.6}],");
+            }
+            if !r_hist.is_empty() {
+                r_hist.pop(); // trailing comma
+            }
             let _ = write!(
                 s,
-                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":1}}",
+                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":1,\"r_hist\":[{r_hist}]}}",
                 st.rs.len(),
                 wr,
                 pf,
@@ -509,6 +530,7 @@ impl StrategyTracker {
     /// - `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
     /// - `schema_version != 1` → WARN + **reddet** (migrate yok, nötr sıfırla)
     /// - yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
+    /// **Gerçek R history** (`r_hist`) yüklenir — sentetik ±1R YOK.
     pub fn load_state(&mut self, path: &str) -> bool {
         let Ok(txt) = std::fs::read_to_string(path) else {
             return false;
@@ -535,13 +557,30 @@ impl StrategyTracker {
         let mut loaded = 0usize;
         for (name, e) in map {
             let n = e.get("n").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
-            let wr = e.get("win").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-            let last = e.get("last_ts").and_then(serde_json::Value::as_u64).unwrap_or(0);
             if n == 0 {
                 continue;
             }
-            let wins = ((wr * n as f64).round().max(0.0) as usize).min(n);
+            // Gerçek R history'yi yükle (r_hist array)
+            let r_hist = e.get("r_hist").and_then(|x| x.as_array());
             let st = self.stats.entry(name.clone()).or_default();
+            if let Some(hist) = r_hist {
+                for entry in hist {
+                    if let Some(arr) = entry.as_array() {
+                        if arr.len() == 2 {
+                            let ts = arr[0].as_u64().unwrap_or(0);
+                            let r = arr[1].as_f64().unwrap_or(0.0);
+                            st.record_r(ts, r);
+                        }
+                    }
+                }
+                loaded += 1;
+                continue;
+            }
+            // Fallback: eski format (win/last_ts) - sentetik recon, ama logla
+            let wr = e.get("win").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let last = e.get("last_ts").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let wins = ((wr * n as f64).round().max(0.0) as usize).min(n);
+            tracing::warn!("[LEARN] {name}: eski format (r_hist yok) — sentetik ±1R recon");
             for i in 0..n {
                 let is_win = i < wins;
                 st.record_r(last.saturating_sub((n - i - 1) as u64 * 60_000), if is_win { 1.0 } else { -1.0 });
@@ -551,7 +590,7 @@ impl StrategyTracker {
         if loaded > 0 {
             tracing::info!(
                 "[LEARN] tracker durumu yüklendi: {loaded} strateji ← {path} \
-                 (n, win, PF, ΣR korundu — cold-start YOK, origin=live)"
+                 (gerçek R history korundu — cold-start YOK, origin=live)"
             );
         }
         loaded > 0

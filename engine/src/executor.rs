@@ -1095,6 +1095,12 @@ impl Executor {
         let sz: f64 = f["sz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let oid = f["oid"].as_u64().unwrap_or(0) as i64;
         let closed: f64 = f["closedPnl"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        // P0-4: TID DEDUP — aynı transaction ID iki kez işlenmesin
+        let tid = f["tid"].as_str().unwrap_or("");
+        if !tid.is_empty() && crate::track::tid_seen(tid) {
+            tracing::warn!("[DEDUP] duplicate fill tid={tid} coin={coin} — atlandı");
+            return;
+        }
         self.realized_pnl += closed;
         if !coin.is_empty() && closed != 0.0 {
             *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;
