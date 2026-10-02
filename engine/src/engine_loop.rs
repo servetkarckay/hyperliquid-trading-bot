@@ -28,7 +28,7 @@ use crate::executor::Executor;
 use crate::state_machine::{
     Action, Decision, Machines, PosState, PositionStateMachine, SmConfig, Side as SmSide,
 };
-use crate::track::{StrategyTracker};
+use crate::track::{StrategyTracker, tid_seen, write_trade_exit, TradeExit};
 
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -169,6 +169,12 @@ pub struct Engine {
     funding_freeze_until: HashMap<String, u64>,
     oid_counter: i64,
     pub equity: f64,
+    /// Veri toplama dönemi (A1): her deploy/parametre değişikliğinde yeni epoch.
+    epoch: String,
+    /// Git SHA (kısaltılmış) — trade_exits.jsonl'ye yazılır.
+    git_sha: String,
+    /// trade_exits.jsonl dosya yolu (ENV `TRADE_EXITS_PATH`, default: config/trade_exits.jsonl)
+    trade_exits_path: String,
 }
 
 impl Engine {
@@ -359,6 +365,17 @@ impl Engine {
             }),
             oid_counter: 1,
             equity: 0.0,
+            epoch: {
+                // Her deploy/parametre değişikliğinde yeni epoch: YYYY-MM-DD-harf
+                let base = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                format!("{}-a", base)
+            },
+            git_sha: {
+                // build.rs ile enjekte edilebilir; yoksa "unknown"
+                option_env!("GIT_SHA").unwrap_or("unknown").to_string()
+            },
+            trade_exits_path: std::env::var("TRADE_EXITS_PATH")
+                .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into()),
         })
     }
 
@@ -494,6 +511,8 @@ impl Engine {
                             .get("last_ts")
                             .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0),
+                        origin: "live".into(),
+                        schema_version: 1,
                     },
                 );
             }
@@ -978,10 +997,30 @@ impl Engine {
                         Some(p) => {
                             let r = p / risk_usd.max(f64::EPSILON);
                             self.tracker.record_outcome_r(
-                                attr.voters,
+                                attr.voters.clone(),
                                 hyperliquid_api::now_ms(),
                                 r,
                             );
+                            // A2 — trade_exits.jsonl yaz (append-only, epoch+git taşıyor)
+                            if let Some((fav, adv, t)) = &excursion {
+                                let exit = TradeExit {
+                                    ts: hyperliquid_api::now_ms(),
+                                    epoch: self.epoch.clone(),
+                                    git: self.git_sha.clone(),
+                                    coin: c.clone(),
+                                    side: if t.is_long { "LONG" } else { "SHORT" }.into(),
+                                    strategies: attr.voters.clone(),
+                                    mfe_r: *fav,
+                                    mae_r: *adv,
+                                    dur_sn: (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
+                                    ratchet: t.ratchets,
+                                    cikis: if *fav > 0.0 { "tp" } else { "stop" }.into(),
+                                    r_kapanis: r,
+                                    atr_bps: if t.atr_px > 0.0 { t.atr_px / t.entry_px * 10_000.0 } else { 0.0 },
+                                    k: self.loop_cfg.trail_atr_k,
+                                };
+                                let _ = write_trade_exit(&self.trade_exits_path, &exit);
+                            }
                         }
                         // WS dolumu kaçtıysa R bilinmiyor: kayıt yine de düşer
                         // (24h bias'ının kaynağı), ama yanlış R yazmak daha kötü.
@@ -1029,37 +1068,48 @@ impl Engine {
         }
         self.dyn_weights();
 
-        // == S5 WATCHDOG: her 10 döngüde yetim emir matrisi ==
+        // == P1-3: S5 PERİYODİK RECON (30 sn) — cycle-sayacı yerine zaman ==
+        static LAST_RECON: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+        let now_ms = hyperliquid_api::now_ms();
         let mut recon_notes: Vec<String> = Vec::new();
-        if self.n_cycles % 10 == 0 {
-            let cands = self.executor.refresh_orders().await;
-            let cands = match cands {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("watchdog refresh_orders: {e}");
-                    Vec::new()
-                }
-            };
-            self.executor.dedupe_sl(cands).await;
-            {
-                for (cn, oid) in self.executor.open_orders_view() {
-                    let known = self.machines.get(&cn).map(|m| {
-                        matches!(m.state, PosState::Pending { oid: k, .. } | PosState::PendingExit { oid: k, .. } if k == oid)
-                    }).unwrap_or(false);
-                    // BORSA STOP'U yetim DEĞİLDİR: `machines` yalnız botun kendi
-                    // giriş/çıkış emirlerini bilir, `sl_orders` stop'ları
-                    // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
-                    // pozisyonunu borsada korumasız bırakırdı.
-                    let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid);
-                    if !known && !is_sl {
-                        if let Err(e2) = self.executor.cancel(&cn, oid).await {
-                            tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
-                        } else {
-                            recon_notes.push(format!("[RECON] yetim emir iptal: {cn}/{oid}"));
-                        }
+        {
+            let mut last = LAST_RECON.lock().unwrap();
+            if now_ms.saturating_sub(*last) >= 30_000 {
+                *last = now_ms;
+                let cands = self.executor.refresh_orders().await;
+                let cands = match cands {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("[RECON] refresh_orders: {e}");
+                        Vec::new()
                     }
+                };
+                let n = self.executor.dedupe_sl(cands).await;
+                if n > 0 {
+                    tracing::info!("[RECON] {n} artık stop temizlendi");
                 }
             }
+        }
+        // Yetim emir temizliği (S5): makineye bağlı olmayan açık emirleri iptal
+        for (cn, oid) in self.executor.open_orders_view() {
+            let known = self.machines.get(&cn).map(|m| {
+                matches!(m.state, PosState::Pending { oid: k, .. } | PosState::PendingExit { oid: k, .. } if k == oid)
+            }).unwrap_or(false);
+            // BORSA STOP'U yetim DEĞİLDİR: `machines` yalnız botun kendi
+            // giriş/çıkış emirlerini bilir, `sl_orders` stop'ları
+            // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
+            // pozisyonunu borsada korumasız bırakırdı.
+            let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid);
+            if !known && !is_sl {
+                if let Err(e2) = self.executor.cancel(&cn, oid).await {
+                    tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
+                } else {
+                    recon_notes.push(format!("[RECON] yetim emir iptal: {cn}/{oid}"));
+                }
+            }
+        }
+        for a in recon_notes {
+            tracing::info!("{a}");
         }
 
         let universe_returns: Vec<(String, f64)> = self
@@ -1082,6 +1132,11 @@ impl Engine {
             }
             if candles.len() < 60 {
                 summaries.push((coin.clone(), "SKIP: mum yetersiz".into()));
+                continue;
+            }
+            // P1-4: STALE-SKIP — verisi donmuş coin sinyali öğrenmeye karışmasın
+            if self.agg.is_stale(&coin, self.loop_cfg.interval_secs, None) {
+                summaries.push((coin.clone(), "STALE: veri donmuş".into()));
                 continue;
             }
             // STALE-PROTECT: makineye kapanış tiki (trailing/timeout — WS kopsa bile döngü işler)
@@ -1730,9 +1785,6 @@ impl Engine {
         // BORSA STOP SENKRONU: her döngü sonunda (açılışta devralınan
         // pozisyonlar dahil) her açık pozisyonun borsada SL'si var mı?
         self.sync_exchange_sl().await;
-        for a in recon_notes {
-            tracing::info!("{a}");
-        }
         Ok(summaries)
     }
 }

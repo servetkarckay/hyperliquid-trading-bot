@@ -4,6 +4,18 @@ description = "Emir motoru: yerel orderbook, executor, risk yonetimi"
 edition.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "bot"
+path = "src/bin/bot.rs"
+
+[[bin]]
+name = "probe_px"
+path = "src/bin/probe_px.rs"
+
+[[bin]]
+name = "trail_report"
+path = "src/bin/trail_report.rs"
+
 [dependencies]
 hyperliquid-api = { path = "../api" }
 strategy = { path = "../strategy" }
@@ -17,3 +29,5 @@ serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+chrono.workspace = true
+once_cell.workspace = true

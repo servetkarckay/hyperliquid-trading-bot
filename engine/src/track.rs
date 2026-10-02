@@ -23,8 +23,69 @@
 //! | `n ≥ LEARN_FULL_N` (30) | tam kurallar (`win < %35` → 0) |
 //!
 //! ENV: `LEARN_MIN_N`, `LEARN_FULL_N`.
+//!
+//! # VERİ TOPLAMA DÖNEMİ (A2) — trade_exits.jsonl
+//!
+//! Her işlem kapanışında append-only JSONL yazılır (config/trade_exits.jsonl).
+//! Şema: epoch, git_sha, coin, side, strategies, mfe_r, mae_r, dur_sn, ratchet,
+//! cikis, r_kapanis, atr_bps, k. Log rotasyonu/restart veriyi yok etmez.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
+/// TID dedup ring buffer (S6). Son ~10k transaction ID saklanır; aynı tid →
+/// atla + [DEDUP] sayacı. Win/loss + R yalnız `user` kanalından gelir.
+static TID_DEDUP: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::with_capacity(10_000)));
+const TID_DEDUP_CAP: usize = 10_000;
+
+/// `tid_seen` — aynı transaction ID iki kez işlenirse `true` döner (atlanır).
+pub fn tid_seen(tid: &str) -> bool {
+    let mut v = TID_DEDUP.lock().unwrap();
+    if v.contains(&tid.to_string()) {
+        return true;
+    }
+    v.push(tid.to_string());
+    if v.len() > TID_DEDUP_CAP {
+        v.remove(0);
+    }
+    false
+}
+
+/// Trade exit kaydı (A2 JSONL şeması).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TradeExit {
+    pub ts: u64,
+    pub epoch: String,
+    pub git: String,
+    pub coin: String,
+    pub side: String,
+    pub strategies: Vec<String>,
+    pub mfe_r: f64,
+    pub mae_r: f64,
+    pub dur_sn: u64,
+    pub ratchet: u32,
+    pub cikis: String,
+    pub r_kapanis: f64,
+    pub atr_bps: f64,
+    pub k: f64,
+}
+
+/// Trade exit JSONL yaz (append-only, satır başına flush).
+pub fn write_trade_exit(path: &str, exit: &TradeExit) -> std::io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::{BufWriter, Write};
+    if let Some(par) = std::path::Path::new(path).parent() {
+        let _ = std::fs::create_dir_all(par);
+    }
+    let f = OpenOptions::new().create(true).append(true).open(path)?;
+    let mut w = BufWriter::new(f);
+    let line = serde_json::to_string(exit).unwrap_or_default();
+    w.write_all(line.as_bytes())?;
+    w.write_all(b"\n")?;
+    w.flush()?;
+    Ok(())
+}
 
 pub const TRACK_WINDOW: usize = 100;
 /// varsayılan win/loss payı (avansı: executor fill'lerinden güncellenecek)
@@ -79,7 +140,10 @@ pub const WEIGHT_CLAMP_HI: f64 = 2.0;
 /// Eski `TrainedInfo` backtestten gelen önseldi (`trades` = backtest işlem
 /// sayısı). Backtest kaldırıldığı için bu yapı yeniden tanımlandı: artık
 /// **yalnız canlı dolum** sayacı tutar ve nötr cold-start'tan başlar.
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+///
+/// Provenans: `origin` = "live" (backtest çıkışı değil), `schema_version` = 1.
+/// Sürüm uyuşmazsa load_state WARN + nötr sıfırla. Sessiz yükleme yok.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TrainedInfo {
     /// pencere içi canlı işlem sayısı (n)
     pub trades: u64,
@@ -87,6 +151,10 @@ pub struct TrainedInfo {
     pub sum_r: f64,
     /// son işlem zaman damgası (ms)
     pub last_ts: u64,
+    /// köken işareti — backtestten gelirse "live" DEĞİL, yükleme reddedilir
+    pub origin: String,
+    /// şema sürümü — gelecekteki migrate için
+    pub schema_version: u32,
 }
 
 impl TrainedInfo {
@@ -399,11 +467,13 @@ impl StrategyTracker {
     // düşer, sistem kendini tutmaya devam eder.
 
     /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
+    /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
+    /// yüklenemesin diye.
     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
         use std::fmt::Write as _;
         let mut names: Vec<&String> = self.stats.keys().collect();
         names.sort();
-        let mut s = String::from("{\n  \"version\": 1,\n  \"strategies\": {\n");
+        let mut s = String::from("{\n  \"origin\": \"live\",\n  \"schema_version\": 1,\n  \"strategies\": {\n");
         for (i, k) in names.iter().enumerate() {
             let st = &self.stats[*k];
             let wr = st.win_rate(0).unwrap_or(0.0);
@@ -412,7 +482,7 @@ impl StrategyTracker {
             let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
             let _ = write!(
                 s,
-                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{}}}",
+                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":1}}",
                 st.rs.len(),
                 wr,
                 pf,
@@ -435,8 +505,10 @@ impl StrategyTracker {
         Ok(())
     }
 
-    /// Diskten yükle (yoksa/bozuksa **sessizce nötr cold-start**a döner —
-    /// hata değil, ilk çalıştırma normal durumdur).
+    /// Diskten yükle. Provenans kontrolü:
+    /// - `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
+    /// - `schema_version != 1` → WARN + **reddet** (migrate yok, nötr sıfırla)
+    /// - yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
     pub fn load_state(&mut self, path: &str) -> bool {
         let Ok(txt) = std::fs::read_to_string(path) else {
             return false;
@@ -445,6 +517,17 @@ impl StrategyTracker {
             tracing::warn!("[LEARN] {path} bozuk JSON — nötr cold-start");
             return false;
         };
+        // Provenans kapısı
+        let origin = v.get("origin").and_then(|x| x.as_str()).unwrap_or("");
+        if origin != "live" {
+            tracing::warn!("[LEARN] {path} origin='{origin}' != 'live' — REDDEDİLDİ, nötr cold-start");
+            return false;
+        }
+        let schema = v.get("schema_version").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+        if schema != 1 {
+            tracing::warn!("[LEARN] {path} schema_version={schema} != 1 — REDDEDİLDİ, nötr cold-start");
+            return false;
+        }
         let Some(map) = v.get("strategies").and_then(|x| x.as_object()) else {
             tracing::warn!("[LEARN] {path} şema hatalı (strategies yok) — nötr cold-start");
             return false;
@@ -468,7 +551,7 @@ impl StrategyTracker {
         if loaded > 0 {
             tracing::info!(
                 "[LEARN] tracker durumu yüklendi: {loaded} strateji ← {path} \
-                 (n, win, PF, ΣR korundu — cold-start YOK)"
+                 (n, win, PF, ΣR korundu — cold-start YOK, origin=live)"
             );
         }
         loaded > 0
@@ -727,6 +810,101 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).expect("geçerli JSON");
         assert_eq!(v["origin"], "live");
         assert_eq!(v["weights"]["Wyckoff"], 0.83);
+    }
+
+    // ── PROVENANS KAPISI (P0-2) ────────────────────────────────────────────
+    #[test]
+    fn track_state_origin_degilse_reddedilir() {
+        let dir = std::env::temp_dir().join("hl_learn_test_prov");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+        // backtestten gelmiş gibi origin="backtest" yaz
+        let bad = r#"{"origin":"backtest","schema_version":1,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        std::fs::write(&path, bad).unwrap();
+        let mut t = StrategyTracker::default();
+        assert!(!t.load_state(path.to_str().unwrap()), "origin != live → reddedilmeli");
+        let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
+        assert_eq!(w["A"], COLD_START_WEIGHT, "cold-start'a düşmeli");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn track_state_schema_version_uyusmazsa_reddedilir() {
+        let dir = std::env::temp_dir().join("hl_learn_test_prov2");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+        // origin=live ama schema_version=0
+        let bad = r#"{"origin":"live","schema_version":0,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        std::fs::write(&path, bad).unwrap();
+        let mut t = StrategyTracker::default();
+        assert!(!t.load_state(path.to_str().unwrap()), "schema_version != 1 → reddedilmeli");
+        let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
+        assert_eq!(w["A"], COLD_START_WEIGHT);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn track_state_origin_ve_schema_dogruysa_yuklenir() {
+        let dir = std::env::temp_dir().join("hl_learn_test_prov3");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+        let good = r#"{"origin":"live","schema_version":1,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        std::fs::write(&path, good).unwrap();
+        let mut t = StrategyTracker::default();
+        assert!(t.load_state(path.to_str().unwrap()), "doğru provenance → yüklenmeli");
+        let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
+        assert_ne!(w["A"], COLD_START_WEIGHT, "öğrenilmiş ağırlık gelmeli");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tid_seen_aynı_tid_ikinci_kez_atlanır() {
+        // ring buffer çalışıyor
+        for i in 0..5 {
+            assert!(!tid_seen(&format!("tid_{i}")), "ilk kez {i} → false");
+        }
+        // aynı tid tekrar
+        assert!(tid_seen("tid_0"), "ikinci kez → true (atlandı)");
+        assert!(tid_seen("tid_4"), "ikinci kez → true");
+    }
+
+    #[test]
+    fn write_trade_exit_jsonl_append_only() {
+        let dir = std::env::temp_dir().join("hl_trade_exit_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("trade_exits.jsonl");
+        let _ = std::fs::remove_file(&path);
+
+        let e = TradeExit {
+            ts: 1_790_000_000_000,
+            epoch: "2026-10-03-a".into(),
+            git: "abc1234".into(),
+            coin: "BTC".into(),
+            side: "LONG".into(),
+            strategies: vec!["Wyckoff".into()],
+            mfe_r: 1.2,
+            mae_r: -0.3,
+            dur_sn: 3600,
+            ratchet: 2,
+            cikis: "tp".into(),
+            r_kapanis: 1.1,
+            atr_bps: 150.0,
+            k: 1.5,
+        };
+        write_trade_exit(path.to_str().unwrap(), &e).expect("yazma 1");
+        write_trade_exit(path.to_str().unwrap(), &e).expect("yazma 2");
+
+        let txt = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = txt.lines().collect();
+        assert_eq!(lines.len(), 2, "iki satır append-only");
+        let v: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(v["coin"], "BTC");
+        assert_eq!(v["epoch"], "2026-10-03-a");
+        assert_eq!(v["git"], "abc1234");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

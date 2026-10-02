@@ -214,6 +214,32 @@ impl Aggregator {
         self.cfg.history_span_min_iv = min_iv;
     }
 
+    /// P1-4: STALE-SKIP — coin verisi donmuş mu?
+    /// `max_age = 2 × interval_secs` (ör. 1h interval → 2h = 7200s).
+    /// Kapanan mum yoksa ve canlı mum da eskiyse → true (sinyal SKIP + [STALE]).
+    /// ExitsOnly ile aynı kipte raporlanır: sinyal öğrenmeye karışmaz, pozisyon yönetimi
+    /// (SL/TP/trailing) etkilenmez.
+    pub fn is_stale(&self, coin: &str, interval_secs: u64, max_age_secs: Option<u64>) -> bool {
+        let iv = interval_secs;
+        let age = max_age_secs.unwrap_or(iv * 2);
+        let now = hyperliquid_api::now_ms() as i64;
+        // Kapanmış mum varsa onun zamanı; yoksa canlı mum bucket'ı
+        let key = (coin.to_string(), iv);
+        if let Some(hist) = self.history.get(&key) {
+            if let Some(last) = hist.back() {
+                let last_ts = last.t;
+                return (now - last_ts) / 1000 > age as i64;
+            }
+        }
+        // kapanmış yok → canlı mum bucket zamanı
+        if let Some(live) = self.live.get(&key) {
+            let bucket_ts = live.bucket;
+            return (now - bucket_ts) / 1000 > age as i64;
+        }
+        // hiç veri yok → stale say (sinyal Skip)
+        true
+    }
+
     pub async fn backfill(
         &mut self,
         info: &hyperliquid_api::Info,

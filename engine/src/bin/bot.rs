@@ -205,6 +205,11 @@ async fn main() -> anyhow::Result<()> {
     let mut learn_table_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
     learn_table_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // P1-2: Restart exponential backoff
+    let mut restart_count_last_hour: Vec<u64> = Vec::new();
+    const RESTART_BASE_SECS: u64 = 30;
+    const RESTART_MAX_SECS: u64 = 300;
+
     'restart: loop {
         let mut rx = ingestor.start(cfg.clone());
         loop {
@@ -228,6 +233,25 @@ async fn main() -> anyhow::Result<()> {
                                     health.ws_recent()
                                 );
                             }
+                            // P1-2: Exponential backoff before restart
+                            let now = hyperliquid_api::now_ms();
+                            restart_count_last_hour.retain(|t| now.saturating_sub(*t) < 3_600_000);
+                            restart_count_last_hour.push(now);
+                            if restart_count_last_hour.len() >= 5 {
+                                tracing::error!(
+                                    "CRITICAL: {} restart / saat ≥ 5 → operatör müdahalesi gerekli",
+                                    restart_count_last_hour.len()
+                                );
+                                break 'restart;
+                            }
+                            let attempt = restart_count_last_hour.len();
+                            let delay = RESTART_BASE_SECS * 2_u64.saturating_pow(attempt as u32 - 1);
+                            let delay = delay.min(RESTART_MAX_SECS);
+                            tracing::error!(
+                                "RESTART #{}: {} sn bekleniyor (exponential backoff, max {} sn)",
+                                attempt, delay, RESTART_MAX_SECS
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                             continue 'restart;
                         }
                     }
@@ -297,6 +321,25 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 break 'restart;
                             }
+                            // P1-2: Exponential backoff for kill-switch restart too
+                            let now = hyperliquid_api::now_ms();
+                            restart_count_last_hour.retain(|t| now.saturating_sub(*t) < 3_600_000);
+                            restart_count_last_hour.push(now);
+                            if restart_count_last_hour.len() >= 5 {
+                                tracing::error!(
+                                    "CRITICAL: {} restart / saat ≥ 5 (kill-switch) → operatör müdahalesi gerekli",
+                                    restart_count_last_hour.len()
+                                );
+                                break 'restart;
+                            }
+                            let attempt = restart_count_last_hour.len();
+                            let delay = RESTART_BASE_SECS * 2_u64.saturating_pow(attempt as u32 - 1);
+                            let delay = delay.min(RESTART_MAX_SECS);
+                            tracing::error!(
+                                "RESTART (kill-switch) #{}: {} sn bekleniyor (exponential backoff, max {} sn)",
+                                attempt, delay, RESTART_MAX_SECS
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                             match engine::track::classify(&e.to_string()) {
                                 engine::track::ErrClass::Transient => {
                                     tracing::warn!("geçici hata (sayılmadı, {crit}/{thr}): {e}", thr = 5);

@@ -822,11 +822,60 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 | 69/69 ✓ |
+| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + health 8 | 69/69 ✓ |
 | engine | KIYAMET (bozuk coin + stale + resync + kötü boyut + korelasyon çöküşü) | 0 panik; graceful skip; risk kapısı aktif |
 
 Detaylı kıyamet senaryo denetimi: `docs/KIYAMET-AUDIT.md`.
 
 ---
 
-*Son güncelleme: 2026-10-02. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 6, hepsi yeşil.*
+### §8.5 VERİ TOPLAMA DÖNEMİ (A/B/C/D/E protokolü)
+
+Bu sürüm **veri toplama dönemi** (data collection period) başlatır. Kural: çalışan bot
+parametre değişikliği ile bozulmaz; kod değişiklikleri bir sonraki planlı restart'ta
+TEK PR ile girer.
+
+**A — Veri Toplama Kuralları (hemen, kod gerektirmez):**
+- **Epoch** (A1): Her deploy/parametre değişimi = yeni epoch (`YYYY-MM-DD-harf`). Tüm
+  işlem-kapanış kayıtları epoch + git SHA taşır. `k` analizi yalnız tek epoch verisiyle.
+- **trade_exits.jsonl** (A2): Append-only JSONL (`config/trade_exits.jsonl`, satır başına
+  flush). Şema: `ts, epoch, git, coin, side, strategies, mfe_r, mae_r, dur_sn, ratchet,
+  cikis, r_kapanis, atr_bps, k`. Log rotasyonu/restart veriyi YOK ETMEZ.
+- **[EV] özet** (A3): 60 sn'lik [LEARN] tablosuna tek satır: `skip=N geç=M | floor ort=…bps`.
+  7 gün boyunca skip oranı >%90 ve kapanan işlem sayısı yavaşsa → floor düşürme kararı
+  epoch notuyla (bilinçli, sessiz değil). Şu an floor=75 KALIR.
+- **Restart backoff** (A4): 30 sn → 1 dk → 2 dk → 5 dk cap; son 1 saatte ≥5 restart →
+  CRITICAL + operatör müdahalesi. Kalıcı parse-fail: restart→RECON→5 crit→flatten→dur.
+
+**B — Kalan Paket (bir sonraki planlı restart'ta TEK PR):**
+- **P0-1**: TP dolum-fiyatı türetimi — `entry_eff` (REST `entryPx`) + `tp_atr_mult × risk_mesafesi`.
+- **P0-2**: TID dedup ring buffer + `track_state.json` provenance (`origin + schema_version`).
+- **P1-2**: Restart exponential backoff (yukarıda A4).
+- **P1-3**: S5 periyodik recon 30 sn (cycle-sayacı yerine zaman).
+- **P1-4**: Stale-skip — `Aggregator::is_stale(coin, iv, 2×iv)` → oyları SKIP + [STALE].
+
+**C — k-Revizyon Protokolü (önceden yazılı kurallar):**
+- Tetik: aynı epoch içinde `n ≥ 100` kapanan pozisyon (veya 14 gün; n<30 → "yetersiz").
+- Araç: `cargo run --bin trail_report -- config/trade_exits.jsonl <epoch>`.
+- Rapor: MFE/MAE quartile · çıkış sebebi · ilk-stop oranı · ratchet dağılımı · geri-verme oranı.
+- Kurallar: 1) n<30 → karar yok. 2) İlk-stop >%70 → k korunur. 3) MFE≥1R'de geri-verme >%60 → k-0.25; <%25 ve TP düşük → k+0.25; arada → korunur. 4) Ratchet=0 >%90 → TRAIL_ON=0 deneyi. Her k değişimi yeni epoch, adım 0.25.
+
+**D — Doküman Hijyeni (RELEASE BLOCKER):**
+- §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
+- §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 69, strategy 6).
+- §8.3.12 SL fiyatı satırı: risk mesafesi (`entry_attr.risk_px`) güncellendi.
+- bot.rs ENV: `ensemble_weights.json` → `ensemble_weights_live.json`.
+- Yeni §8.5 bu protokol dokümanına eklendi.
+
+**E — Mainnet Geçiş Kapısı (Kademeli):**
+- **Tier 1** (küçük sermaye): P0-1✓ P0-2✓ restart backoff✓ borsa-SL zinciri✓.
+  `BUDGET_USD=30–50`, `max_position_usd=$10`, `TOP_N=1`, `EV_MIN_DIST_BPS=75`.
+  Taşınmaz: `track_state.json`, `tick_cache.json`, `ensemble_weights_live.json` (fresh origin:"live" nötr).
+  İlk 2 hafta günlük [LEARN] incelemesi.
+- **Tier 2** (ölçek artışı): S11 funding EMA · S12 oracle guard · S14 kriz/VaR · S13 margin_free.
+  Tier 2'ye geçmeden ASLA.
+
+---
+
+*Son güncelleme: 2026-10-03. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 6, hepsi yeşil.*
