@@ -1,8 +1,22 @@
 //! KESİT MOMENTUM — evren geneli göreli güç sıralaması.
 //!
 //! AMAÇ: tekil coin trendi değil, TÜM coinler arasındaki göreli sıra.
+//!
+//! # PENCERE: **1 GÜN** (P1-G ölçümü)
+//!
+//! `MarketInput::universe_returns` motor tarafında şöyle kurulur
+//! (`engine_loop.rs`):
+//! ```ignore
+//! ctx.all().filter(|c| c.prev_day_px > 0 && c.mark_px > 0)
+//!     .map(|c| (c.coin, c.mark_px / c.prev_day_px - 1.0))
+//! ```
+//! Yani **günlük getiri** (`activeAssetCtx.prevDayPx` → `markPx`). Kod tabanında
+//! 7 günlük getiri hesabı **YOKTUR** (doğrulandı: `prev_day_px` dışında başka
+//! bir alan kullanılmıyor). Dokümanın "7g sıralama" ifadesi **kodla
+//! çelişiyordu** ve düzeltildi.
+//!
 //! HESAPLAMA:
-//! 1. Evren getirileri (7g) azalan sıralanır
+//! 1. Evren 1g getirileri azalan sıralanır
 //! 2. Üst %20 = long dilim, alt %20 = short dilim
 //! 3. Coinin sırada bulunması Long/Short [0.6]; orta bar (0.4-0.6) nötr
 //! 4. Sıralama kayması: üst dilimden alt %40'a düşen coin Exit —
@@ -40,12 +54,17 @@ impl Strategy for KesitMomentum {
         if in_longs {
             return Signal::Long {
                 strength: 0.6,
-                note: format!("üst dilim (sıra {}/{}), 7g={:+.2}%", rank.unwrap() + 1, ranked.len(),
+                note: format!("üst dilim (sıra {}/{}), 1g={:+.2}%", rank.unwrap() + 1, ranked.len(),
                     longs.iter().find(|(c, _)| c == &input.coin).unwrap().1 * 100.0),
             };
         }
         if in_shorts {
-            return Signal::Short { strength: 0.6, note: "alt dilim — short adayı".into() };
+            let sr = shorts.iter().find(|(c, _)| c == &input.coin).unwrap().1;
+            let sr_rank = ranked.iter().position(|(c, _)| c == &input.coin).unwrap_or(0) + 1;
+            return Signal::Short {
+                strength: 0.6,
+                note: format!("alt dilim (sıra {sr_rank}/{}), 1g={:+.2}%", ranked.len(), sr * 100.0),
+            };
         }
         if let Some(p) = pct {
             if p > 0.4 && p < 0.6 {
