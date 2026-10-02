@@ -150,6 +150,10 @@ pub struct Engine {
     /// BU DÖNGÜDE sırası gelen keşifçi (P0-C: en fazla **bir**).
     /// `explore_names` = kuyruk (veri açlığı olanlar), bu = sıradaki.
     explore_pick: Option<String>,
+    /// **ExitsOnly** kipi (P1-F): `false` iken yeni giriş emri KONULMAZ;
+    /// çıkışlar + borsa stop'ları normal çalışır (mod yalnız "daha fazla
+    /// risk almayı" kapatır, mevcut riski yönetmeye devam eder).
+    pub entries_allowed: bool,
     /// HESAP kaldıracı (cross) — açılışta borsaya yazılır, risk kontrolüne girer
     pub leverage: f64,
     entry_attr: HashMap<String, EntryAttr>,
@@ -327,6 +331,7 @@ impl Engine {
             explore_names: std::collections::HashSet::new(),
             explore_cursor: 0,
             explore_pick: None,
+            entries_allowed: true,
             leverage: std::env::var("ENGINE_LEVERAGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -1388,6 +1393,14 @@ impl Engine {
             let e = &evals[idx];
             match act {
                 Action::Place(_o) => {
+                    // P1-F EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
+                    // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
+                    if !self.entries_allowed {
+                        if let Some(m) = self.machines.get_mut(&e.coin) {
+                            if m.oid_zero_pending() { m.state = PosState::Flat; }
+                        }
+                        continue;
+                    }
                     // GERÇEK değerler: 0.0 notional + 1.0 kaldıraç geçiliyordu →
                     // pozisyon/toplam maruziyet limitleri hiç uygulanmıyordu.
                     if !sel_names.contains(&e.coin) {
@@ -1596,8 +1609,13 @@ impl Engine {
                     // aynı emir İKİNCİ kez yollanır ve pozisyon ikiye
                     // katlanırdı. Deterministik anahtar aynı emri retry'de
                     // aynı kılar → borsa ikinciyi "duplicate" diye reddeder.
+                    // `salt = n_cycles<<16 | batch_index`: aynı döngüde aynı coin+px+sz
+                    // iki kez geçerse cloid çakışmasın.
                     let cloid = crate::executor::make_cloid(
-                        &e.coin, ord_px, sz, self.n_cycles as u64,
+                        &e.coin,
+                        ord_px,
+                        sz,
+                        ((self.n_cycles as u64) << 16) | (places.len() as u64 & 0xffff),
                     );
                     places.push(WireOrder {
                             asset,
@@ -1677,7 +1695,8 @@ impl Engine {
                             reduce_only: true,
                             cloid: Some(crate::executor::make_cloid(
                                 &e.coin, xpx, xsz,
-                                self.n_cycles as u64 + 7,
+                                ((self.n_cycles as u64) << 16) | 0x7000
+                                    | (places.len() as u64 & 0x0fff),
                             )),
                         });
                 }

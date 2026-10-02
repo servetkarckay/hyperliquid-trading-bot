@@ -748,3 +748,275 @@ mod tests {
         assert!(w.contains_key("Yeni"), "diskteki yeni strateji izlenmeli");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P1-F — KILL-SWITCH HATA TAKSONOMİSİ
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ESKİ KURAL: "5 hata üst üste → flatten + dur". Bu **çok geniş** bir
+// sayaçtı: WS reconnect, tekil REST timeout (retry'da başarılı), 429-after-
+// backoff, stop-yerleştirme hatası — hepsi sayılıyordu. Testnet WS'i
+// dakikada birkaç kez düşüyor (`502 Bad Gateway`, `Connection reset`), yani
+// **normal** olan durum sistemi öldürüyordu.
+//
+// YENİ KURAL: sayaç yalnız **karar-kritik / durum bilinmiyor** hataları
+// sayar. Bunlar: "bu emir borsada mı? bu pozisyon gerçekten kapandı mı?"
+// sorularının cevabını veremediğimiz durumlar. Yanlış cevap = yanlış karar.
+//
+// | hata türü | sayılır mı | gerekçe |
+// |---|---|---|
+// | `clearinghouseState` art arda parse-fail | ✅ | pozisyon durumu BİLİNMİYOR → risk hesabı yanlış |
+// | `batch_place` sonucu bilinmiyor | ✅ | emir borsada mı bilinmiyor → pozisyon ikiye katlanabilir |
+// | `flatten` başarısız | ✅ | kapatma yapılmamış olabilir → stop emniyeti tek katman |
+// | WS reconnect | ❌ | veri akışı kesintisi, karar etkilenmez (state REST'ten gelir) |
+// | retry'da başarıya ulaşan tekil REST timeout | ❌ | `signing::post` zaten geri çekip yeniden yolluyor |
+// | stop-yerleştirme hatası | ❌ | `ensure_sl` + `sync_exchange_sl` + `dedupe_sl` halleder |
+// | 429-after-backoff | ❌ | backoff sonrası başarı = normal |
+
+/// Hata sınıfı — kill-switch'in neyi sayacağı.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrClass {
+    /// karar-kritik / durum bilinmiyor → sayılır
+    Critical,
+    /// geçici, kendi kendini toparlar → sayılmaz
+    Transient,
+}
+
+/// `anyhow::Error` mesajından sınıflandır (kaynak kod değişmeden).
+///
+/// Neden mesajdan: hata türleri 5 ayrı modülde (`anyhow::bail!` ile) üretiliyor;
+// her birine enum eklemek yerine **kalıcı bir sözleşme** (mesaj önekleri)
+/// kuruyoruz. Yanlış sınıflama **güvenli** yöndedir: emin olunamayan →
+/// `Critical` (eski davranış).
+pub fn classify(err: &str) -> ErrClass {
+    let e = err.to_ascii_lowercase();
+    // ── SAYILMAYANLAR (önce bakılır — daha spesifik) ──
+    const TRANSIENT: &[&str] = &[
+        "reconnect",
+        "websocket",
+        "502",
+        "503",
+        "429",
+        "too many requests",
+        "rate limit",
+        "connection reset",
+        "bad gateway",
+        "stop kurulamadı",
+        "borsa stop kurulamadı",
+        "timeout",
+        "timed out",
+        "eof",
+    ];
+    if TRANSIENT.iter().any(|t| e.contains(t)) {
+        return ErrClass::Transient;
+    }
+    // ── SAYILANLAR (karar-kritik) ──
+    const CRITICAL: &[&str] = &[
+        "clearinghousestate",
+        "clearinghouse_state",
+        "parse",
+        "bilinmiyor",
+        "unknown position",
+        "flatten",
+        "düzleş",
+        "batch place",
+        "batch_place",
+    ];
+    if CRITICAL.iter().any(|t| e.contains(t)) {
+        return ErrClass::Critical;
+    }
+    // EMİN OLUNAMAZ → Critical (eski davranış: say)
+    ErrClass::Critical
+}
+
+/// Kill-switch / StateMaintenance durumu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// normal
+    #[default]
+    Normal,
+    /// yalnız çıkışlara izin ver (giriş emri yok) — WS/REST kararsız
+    ExitsOnly,
+    /// düzleştirildi, duraklatıldı
+    Halted,
+}
+
+/// Taksonomiyi uygulayan sayaç.
+#[derive(Debug, Clone, Default)]
+pub struct Health {
+    mode: Mode,
+    crit_streak: usize,
+    /// WS reconnect zaman damgaları (fırtına tespiti)
+    ws_reconnects: Vec<u64>,
+    pub critical_threshold: usize,
+}
+
+pub const WS_STORM_WINDOW_MS: u64 = 300_000;
+pub const WS_STORM_COUNT: usize = 10;
+
+impl Health {
+    pub fn new(critical_threshold: usize) -> Self {
+        Self { critical_threshold, ..Default::default() }
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+    pub fn crit_streak(&self) -> usize {
+        self.crit_streak
+    }
+
+    /// WS reconnect bildir. Fırtına (5 dk'da >10) → **kill DEĞİL**, `ExitsOnly`.
+    pub fn on_ws_reconnect(&mut self) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        self.ws_reconnects.push(now);
+        self.ws_reconnects.retain(|t| now.saturating_sub(*t) < WS_STORM_WINDOW_MS);
+        if self.ws_reconnects.len() > WS_STORM_COUNT && self.mode == Mode::Normal {
+            self.mode = Mode::ExitsOnly;
+            return true;
+        }
+        false
+    }
+
+    pub fn ws_recent(&self) -> usize {
+        self.ws_reconnects.len()
+    }
+
+    /// Döngü hatası. `true` dönerse → flatten + halt.
+    pub fn on_error(&mut self, err: &str) -> bool {
+        match classify(err) {
+            ErrClass::Transient => {
+                // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
+                // döngülerde sıfırlanır (aşağıda).
+                false
+            }
+            ErrClass::Critical => {
+                self.crit_streak += 1;
+                if self.crit_streak >= self.critical_threshold && self.mode != Mode::Halted {
+                    self.mode = Mode::Halted;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    pub fn on_cycle_ok(&mut self) {
+        self.crit_streak = 0;
+        // WS fırtınası geçtiyse normale dön (reconnect'ler durulunca)
+        if self.mode == Mode::ExitsOnly && self.ws_reconnects.len() <= WS_STORM_COUNT {
+            self.mode = Mode::Normal;
+        }
+    }
+
+    /// Giriş emri serbest mi?
+    pub fn entries_allowed(&self) -> bool {
+        self.mode == Mode::Normal
+    }
+
+    pub fn reset(&mut self) {
+        self.mode = Mode::Normal;
+        self.crit_streak = 0;
+    }
+}
+
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+
+    #[test]
+    fn ws_hata_firtinasi_botu_oldurmaz_exits_only_gecer() {
+        // KABUL KRİTERİ: WS fırtınası (5 dk'da >10 reconnect) → kill DEĞİL.
+        let mut h = Health::new(5);
+        for _ in 0..15 {
+            h.on_ws_reconnect();
+        }
+        assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına → ExitsOnly");
+        assert!(!h.entries_allowed(), "giriş kapalı");
+        // 15 reconnect KESİLME sayısına rağmen Halted DEĞİL
+        assert_ne!(h.mode(), Mode::Halted);
+        // hiç flatten tetiklenmedi: on_error çağrılmadı
+        assert_eq!(h.crit_streak(), 0);
+    }
+
+    #[test]
+    fn reconnect_sayisi_tek_basina_kill_yapmaz() {
+        let mut h = Health::new(5);
+        for _ in 0..9 {
+            assert!(!h.on_ws_reconnect());
+        }
+        assert_eq!(h.mode(), Mode::Normal, "eşik altı → normal");
+        assert!(h.entries_allowed());
+    }
+
+    #[test]
+    fn gecici_rest_hatalari_sayilmaz() {
+        let mut h = Health::new(5);
+        for _ in 0..20 {
+            assert!(!h.on_error("502 Bad Gateway"));
+            assert!(!h.on_error("connection reset by peer"));
+            assert!(!h.on_error("429 Too Many Requests"));
+            assert!(!h.on_error("borsa stop kurulamadı: timeout"));
+        }
+        assert_eq!(h.crit_streak(), 0, "geçici hatalar sayılmamalı");
+        assert_eq!(h.mode(), Mode::Normal, "bot ölmemeli");
+    }
+
+    #[test]
+    fn karar_kritik_hatalar_sayilir_ve_kill_switch_uretiyor() {
+        let mut h = Health::new(5);
+        for _ in 0..4 {
+            assert!(!h.on_error("clearinghouseState parse edilemedi (null)"));
+        }
+        assert_eq!(h.mode(), Mode::Normal, "4 hata < eşik 5");
+        assert!(h.on_error("clearinghouseState parse edilemedi (null)"), "5. hatada kill");
+        assert_eq!(h.mode(), Mode::Halted);
+    }
+
+    #[test]
+    fn basarili_dongu_sayaci_sifirlar() {
+        let mut h = Health::new(5);
+        for _ in 0..4 {
+            h.on_error("clearinghouseState parse edilemedi");
+        }
+        h.on_cycle_ok();
+        assert_eq!(h.crit_streak(), 0);
+        // 4 hata daha yetmez (eşiğe ulaşmadı)
+        for _ in 0..4 {
+            assert!(!h.on_error("clearinghouseState parse edilemedi"));
+        }
+        assert_eq!(h.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn emin_olunamayan_hata_kritik_sayilir() {
+        // "bilinmeyen durum" = karar-kritik. Güvenli yön varsayılanı.
+        assert_eq!(classify("harika bir hata"), ErrClass::Critical);
+        assert_eq!(classify("bilinmeyen bir sey oldu"), ErrClass::Critical);
+    }
+
+    #[test]
+    fn emin_olunamayan_hata_daha_spesifik_geceni_yener() {
+        // 502 hem "transient" listesinde hem "parse" değil → Transient kazanır
+        assert_eq!(classify("502 Bad Gateway"), ErrClass::Transient);
+        // timeout transient olmalı — "stop kurulamadı" da öyle
+        assert_eq!(classify("stop kurulamadı"), ErrClass::Transient);
+    }
+
+    #[test]
+    fn exits_only_kipinde_giris_yok_cikis_var() {
+        let mut h = Health::new(5);
+        for _ in 0..12 {
+            h.on_ws_reconnect();
+        }
+        assert!(!h.entries_allowed());
+        h.on_cycle_ok();
+        h.reset();
+        assert!(h.entries_allowed(), "reset → normal");
+    }
+}

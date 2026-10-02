@@ -1,8 +1,26 @@
 //! BOT — ana binary: NTP → ingestor WS → engine döngüsü.
 //! ENV:
-//!   ENGINE_COINS=BTC,ETH,SOL   (döngüde koşacak coinler)
-//!   ENGINE_INTERVAL=60         (sinyal mum aralığı, sn)
-//!   ENGINE_MIN_SCORE=0.3       (ensemble eşiği)
+//!   ENGINE_COINS=BTC,ETH,SOL   (döngüde koşacak coinler; boş/"all" = tam evren)
+//!   ENGINE_INTERVAL=3600       (MUM aralığı, sn — döngü periyodu DEĞİL)
+//!   ENGINE_CYCLE_SECS=5        (motor döngü periyodu, sn)
+//!   ENGINE_MIN_SCORE=0.30      (ensemble eşiği)
+//!   ENGINE_TOP_N=3             (pozisyon tavanı)
+//!   ENGINE_BUDGET_USD=300      (döngü bütçesi; tahsis ayrıca $50/coin ile sınırlı)
+//!   ENGINE_HIST_BARS=4400      (indikatör ısınma penceresi)
+//!   ENGINE_FLATTEN=1           (açılışta tüm pozisyonları kapat)
+//!   ENGINE_TICK_CACHE=…        (öğrenilen tick hassasiyeti dosyası)
+//!   ENGINE_EXPLORE=1           (veri-açlığı keşif kuyruğu açık)
+//!   ENGINE_CRIT_THRESHOLD=5    (kill-switch: **karar-kritik** hata eşiği)
+//!   TRAIL_ON=1 TRAIL_ATR_K=1.5 TRAIL_MIN_STEP=0.25   (trailing stop, §8.3.15)
+//!
+//! CANLI ÖĞRENME (§8.4 — backtest kaldırıldı):
+//!   LEARN_MIN_N=10             (bu n altında ağırlık DONMUŞ 1.0)
+//!   LEARN_FULL_N=30            (bu n üstü: tam kurallar + keşif kuyruğu dışı)
+//!   TRACK_STATE_PATH=…         (tracker persistence, atomik 5 dk dump)
+//!   ENSEMBLE_WEIGHTS_IN=…      (yalnız origin:"live" kabul edilir)
+//!   ENSEMBLE_LIVE_WEIGHTS_OUT=…
+//!   EV_TAKER_FEE_BPS=4.5 EV_SLIPPAGE_BPS=5.0 EV_MIN_DIST_BPS=75  (P0-D EV kapısı)
+//!
 //! Çalıştırma süresi yok — Ctrl+C ile kes.
 
 use engine::engine_loop::{Engine, LoopConfig};
@@ -12,13 +30,7 @@ use utils::{logger, time};
 async fn main() -> anyhow::Result<()> {
     logger::init();
     if let Some(off) = time::sync(time::DEFAULT_SERVERS, std::time::Duration::from_secs(3)) {
-        // Döngü periyodu. `ENGINE_INTERVAL` MUM interval'idır (1h stratejisi için
-    // 3600) ve döngü periyodunu KONTROL ETMEZ — daha önce 5 sn sabitti.
-    let cycle_secs: u64 = std::env::var("ENGINE_CYCLE_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5);
-    tracing::info!("NTP ofseti: {off} ms");
+        tracing::info!("NTP ofseti: {off} ms");
     }
 
     let cfg = hyperliquid_api::Config::from_env()?;
@@ -121,7 +133,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut cycle = tokio::time::interval(std::time::Duration::from_secs(cycle_secs));
-    let mut err_streak = 0usize;
+    // P1-F: kill-switch taksonomisi. Eşik `ENGINE_CRIT_THRESHOLD` (varsayılan 5)
+    // ama artık yalnız **karar-kritik** hataları sayar.
+    let crit_thr = std::env::var("ENGINE_CRIT_THRESHOLD")
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+    let mut health = engine::track::Health::new(crit_thr);
     let mut ntp_cycle = tokio::time::interval(std::time::Duration::from_secs(1800)); // 30 dk'da resync
     ntp_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Ağırlık dosyası: **yalnız `origin:"live"`** olan kabul edilir.
@@ -195,10 +211,23 @@ async fn main() -> anyhow::Result<()> {
             tokio::select! {
                 ev = rx.recv() => {
                     match ev {
-                        Some(ev) => { let _ = engine.ingest_step(ev).await; }
+                        Some(ev) => {
+                            let _ = engine.ingest_step(ev).await;
+                        }
                         None => {
-                            tracing::warn!("akış kapandı — 3 sn sonra yeniden kur");
-                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                            // Kanal kapandı = WS akışı kesildi. `websocket.rs`
+                            // içindeki otomatik reconnect başarısız olup task
+                            // düştüğünde bu olur; `ingestor.start` yeniden
+                            // kurulur. P1-F: **bu KILL DEĞİL** — sayaç yalnız
+                            // WS fırtınası (>10 / 5 dk) → ExitsOnly.
+                            tracing::warn!("akış kapandı — yeniden kuruluyor");
+                            if health.on_ws_reconnect() {
+                                tracing::error!(
+                                    "WS FIRTINASI: {} kopma / 5 dk → kill YOK, ExitsOnly \
+                                     (giriş kapalı; çıkışlar + borsa stop açık)",
+                                    health.ws_recent()
+                                );
+                            }
                             continue 'restart;
                         }
                     }
@@ -234,17 +263,47 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ = cycle.tick() => {
                     let out = match engine.run_cycle().await {
-                        Ok(o) => { err_streak = 0; o }
+                        Ok(o) => {
+                            health.on_cycle_ok();
+                            engine.entries_allowed = health.entries_allowed();
+                            o
+                        }
                         Err(e) => {
-                            err_streak += 1;
-                            tracing::error!("döngü hatası ({err_streak}): {e}");
-                            if err_streak >= 5 {
+                            // P1-F TAKSONOMİ: yalnız karar-kritik hatalar
+                            // sayılır. WS reconnect / geçici REST timeout /
+                            // 429 / stop-yerleştirme hatası **sayılmaz** —
+                            // eski kural bunları sayıyor ve testnet'in normal
+                            // WS düşüşleri sistemi öldürüyordu.
+                            let kill = health.on_error(&e.to_string());
+                            let crit = health.crit_streak();
+                            engine.entries_allowed = health.entries_allowed();
+                            if kill {
+                                tracing::error!(
+                                    "KILL-SWITCH: {crit} karar-kritik hata üst üste — \
+                                     ACİL DÜZLEŞTİRME, sonra duraklatılıyor. Son hata: {e}"
+                                );
                                 // EN ÖLÜMCÜL KOMBİNASYON: kill-switch + borsada
                                 // SL yok = sahipsiz pozisyon. Önce düzleştir,
                                 // sonra duraklat.
-                                tracing::error!("5 hata üst üste — ACİL DÜZLEŞTİRME, sonra duraklatılıyor");
                                 engine.flatten_positions().await;
+                                let left = engine.executor.positions()
+                                    .values().filter(|p| p.szi.abs() > 1e-12).count();
+                                if left > 0 {
+                                    tracing::error!(
+                                        "CRITICAL: düzleştirme sonrası {left} pozisyon AÇIK. \
+                                         Bot duruyor — bu pozisyonlar ARTIK BORSA STOP'UNA \
+                                         EMANET (bot içi kontrol yok). Elle müdahale gerek."
+                                    );
+                                }
                                 break 'restart;
+                            }
+                            match engine::track::classify(&e.to_string()) {
+                                engine::track::ErrClass::Transient => {
+                                    tracing::warn!("geçici hata (sayılmadı, {crit}/{thr}): {e}", thr = 5);
+                                }
+                                engine::track::ErrClass::Critical => {
+                                    tracing::error!("karar-kritik hata ({crit}/5): {e}");
+                                }
                             }
                             continue;
                         }
