@@ -192,7 +192,25 @@ impl Exchange {
         tif: Tif,
         reduce_only: bool,
     ) -> Result<OrderStatuses> {
-        let order = json!({
+        self.place_limit_cloid(asset, is_buy, sz, limit_px, tif, reduce_only, None)
+            .await
+    }
+
+    /// `place_limit` + **açık `cloid`** (idempotency anahtarı).
+    ///
+    /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x…"}` olarak gider (128 bit
+    /// hex, `0x` + 32 hane — 16 hane API 422 döndürür).
+    pub async fn place_limit_cloid(
+        &self,
+        asset: u32,
+        is_buy: bool,
+        sz: f64,
+        limit_px: f64,
+        tif: Tif,
+        reduce_only: bool,
+        cloid: Option<&str>,
+    ) -> Result<OrderStatuses> {
+        let mut order = json!({
             "a": asset,
             "b": is_buy,
             "p": float_to_wire(round_px_wire(limit_px)),
@@ -200,6 +218,9 @@ impl Exchange {
             "r": reduce_only,
             "t": { "limit": { "tif": tif.wire() } }
         });
+        if let Some(c) = cloid {
+            order["c"] = json!(c);
+        }
         let action = json!({ "type": "order", "orders": [order], "grouping": "na" });
         let raw = self.c.exchange_action(action).await?;
         Ok(OrderStatuses { raw })

@@ -54,6 +54,73 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // --cancel <ASSET_ID> <OID>: tek emri oid ile iptal et (S5 yetim temizliği).
+    if args.get(1).map(|s| s.as_str()) == Some("--cancel") {
+        let a2: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let oid: i64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let ex2 = Exchange::new(cfg)?;
+        let st = ex2.cancel(a2, oid).await?;
+        println!(
+            "--cancel asset={a2} oid={oid} status={:?} err={:?}",
+            st.status(0),
+            st.error(0)
+        );
+        return Ok(());
+    }
+
+    // --cloid: **cloid yeniden kullanım testi** (P2-H).
+    // place → cancel → AYNI cloid ile tekrar place. Red gelirse cloid
+    // emri-ömrü boyunca tek kullanımlıktır → `make_cloid`'a proses-içi
+    // monotonik sayaç eklenmeli (idempotency amacı bozulmadan).
+    if args.get(1).map(|s| s.as_str()) == Some("--cloid") {
+        let cn = args.get(2).cloned().unwrap_or_else(|| "ME".into());
+        let (a2, sd2, _) = meta
+            .universe
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.name == cn)
+            .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
+            .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {cn}"))?;
+        let mids2 = info.all_mids().await?;
+        let m2: f64 = mids2.get(&cn).and_then(|m| m.parse().ok()).unwrap_or(0.0);
+        // ME gibi ucuz coinlerde 6 hane reddediliyor -> 5 significant figure
+        let px2 = hyperliquid_api::round_5sig(m2 * 0.95); // alışta -> asili kalir
+        let sz2 = hyperliquid_api::round_sz_up(20.0 / m2, sd2);
+        let ex2 = Exchange::new(cfg)?;
+        let cl = engine::executor::make_cloid(&cn, px2, sz2, 0);
+        println!("{cn}: px={px2:.6} sz={sz2} cloid={cl}");
+
+        let attempt = |tag: String, cloid: String| {
+            let ex = &ex2;
+            let (px2, sz2, a2) = (px2, sz2, a2);
+            async move {
+                let st = ex
+                    .place_limit_cloid(a2, true, sz2, px2, Tif::Gtc, false, Some(&cloid))
+                    .await;
+                match st {
+                    Ok(s) => match (s.resting_oid(0), s.error(0)) {
+                        (Some(oid), _) => println!("{tag:22} -> KABUL (oid={oid})"),
+                        (None, Some(e)) => println!("{tag:22} -> RED: {e}"),
+                        (None, None) => println!("{tag:22} -> belirsiz"),
+                    },
+                    Err(e) => println!("{tag:22} -> HATA: {e}"),
+                }
+            }
+        };
+
+        attempt("1. place".into(), cl.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = ex2.cancel_by_cloid(a2, &cl).await;
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        attempt("2. AYNI cloid".into(), cl.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        let cl_new = engine::executor::make_cloid(&cn, px2, sz2, 1);
+        attempt("3. FARKLI cloid".into(), cl_new.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = ex2.cancel_by_cloid(a2, &cl_new).await;
+        return Ok(());
+    }
+
     let mid: f64 = match args.get(2).and_then(|s| s.parse::<f64>().ok()) {
         Some(x) if x > 0.0 => x,
         _ => {
