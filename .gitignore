@@ -9,4 +9,6 @@
 .vscode/
 
 # Tool artifacts
-graphify-out/
+
+# Runtime state (bot her koşuda üretir/üzerine yazar — repoya girmez)
+config/*.json
