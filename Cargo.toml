@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["api", "data", "engine", "math", "strategy", "utils"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+math = { path = "math" }
+data = { path = "data" }
+utils = { path = "utils" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rmp-serde = "1"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+futures-util = "0.3"
+k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+tiny-keccak = { version = "2", features = ["keccak"] }
+hex = "0.4"
+anyhow = "1"
+thiserror = "1"
+async-trait = "0.1"
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = true

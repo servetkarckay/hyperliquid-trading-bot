@@ -1,0 +1,23 @@
+[package]
+name = "hyperliquid-api"
+description = "Hyperliquid veri erisim katmani: REST, WebSocket, emir iletimi"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+utils = { path = "../utils" }
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rmp-serde.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+k256.workspace = true
+tiny-keccak.workspace = true
+hex.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+dotenvy.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

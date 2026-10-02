@@ -1,0 +1,9 @@
+# Secrets
+.env
+
+# Rust
+/target
+
+# IDE
+.idea/
+.vscode/

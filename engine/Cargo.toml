@@ -1,0 +1,19 @@
+[package]
+name = "engine"
+description = "Emir motoru: yerel orderbook, executor, risk yonetimi"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+hyperliquid-api = { path = "../api" }
+strategy = { path = "../strategy" }
+math = { path = "../math" }
+data = { path = "../data" }
+async-trait.workspace = true
+utils = { path = "../utils" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

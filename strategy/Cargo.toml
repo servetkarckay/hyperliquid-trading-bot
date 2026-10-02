@@ -1,0 +1,17 @@
+[package]
+name = "strategy"
+description = "26 strateji dokumaninin uygulanmasi: her strateji bir .rs dosyasi"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+math.workspace = true
+data.workspace = true
+hyperliquid-api = { path = "../api" }
+utils.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tracing.workspace = true

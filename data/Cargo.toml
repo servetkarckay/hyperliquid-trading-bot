@@ -1,0 +1,17 @@
+[package]
+name = "data"
+description = "Veri katmani: evren geneli akis yonetimi, tick->candle, depolama"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+hyperliquid-api = { path = "../api" }
+utils = { path = "../utils" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+redis.workspace = true

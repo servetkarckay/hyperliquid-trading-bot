@@ -1,0 +1,106 @@
+//! Fiyat geçerlilik probu (testnet).
+//!
+//! Borsa "Order has invalid price." diyince hangi yuvarlamanın kabul edildiğini
+//! ölçmek için: ALO (post-only) emir atar, cevabı yazar, KABUL EDİLENİ anında
+//! iptal eder → dolum olmaz, pozisyon olmaz.
+//!
+//! Kullanım: probe_px <COIN> [mid_fiyat]
+
+use anyhow::Result;
+use hyperliquid_api::{Config, Exchange, Info, Tif};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let coin = if args.get(1).map(|s| s.starts_with("--")).unwrap_or(false) {
+        "ME".to_string()
+    } else {
+        args.get(1).cloned().unwrap_or_else(|| "ME".into())
+    };
+    let cfg = Config::from_env()?;
+    let info = Info::new(cfg.clone())?;
+    let meta = info.meta().await?;
+    let (asset, szd, maxlev) = meta
+        .universe
+        .iter()
+        .enumerate()
+        .find(|(_, m)| m.name == coin)
+        .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
+        .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {coin}"))?;
+
+    // --rest: TEK bir GTC emir bırak (defterde asılı kalır). S5 "orphan emir"
+    // testi için: bot açılış yetim temizliğinin bunu iptal etmesi gerekir.
+    if args.get(1).map(|s| s.as_str()) == Some("--rest") {
+        let coin2 = args.get(2).cloned().unwrap_or_else(|| "BTC".into());
+        let (a2, sd2, _) = meta
+            .universe
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.name == coin2)
+            .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
+            .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {coin2}"))?;
+        let mids2 = info.all_mids().await?;
+        let m2: f64 = mids2.get(&coin2).and_then(|m| m.parse().ok()).unwrap_or(0.0);
+        // alışta, mid'in %5 ALTINDA → asılı kalır (post-only değil, GTC)
+        let px2 = hyperliquid_api::round_px_wire(m2 * 0.95);
+        let sz2 = hyperliquid_api::round_sz_up(20.0 / m2, sd2);
+        let ex2 = Exchange::new(cfg)?;
+        let st = ex2.place_limit(a2, true, sz2, px2, Tif::Gtc, false).await?;
+        println!(
+            "REST {coin2}: px={px2:.6} sz={sz2} oid={:?} err={:?}",
+            st.resting_oid(0),
+            st.error(0)
+        );
+        return Ok(());
+    }
+
+    let mid: f64 = match args.get(2).and_then(|s| s.parse::<f64>().ok()) {
+        Some(x) if x > 0.0 => x,
+        _ => {
+            let mids = info.all_mids().await?;
+            mids.get(&coin).and_then(|m| m.parse().ok()).unwrap_or(0.0)
+        }
+    };
+    println!("{coin}: asset={asset} szDecimals={szd} maxLeverage={maxlev} mid={mid}");
+
+    let ex = Exchange::new(cfg)?;
+    let sz = hyperliquid_api::round_sz_up(200.0 / mid, szd).max(1.0 / 10f64.powi(szd as i32));
+
+    // denenecek yuvarlamalar
+    let cands: Vec<(&str, f64)> = vec![
+        ("ham (%.10f)", mid * 0.98),
+        ("round_5sig", hyperliquid_api::round_5sig(mid * 0.98)),
+        ("round_px_wire(6 hane)", hyperliquid_api::round_px_wire(mid * 0.98)),
+        ("5 hane", (mid * 0.98 * 1e5).round() / 1e5),
+        ("4 hane", (mid * 0.98 * 1e4).round() / 1e4),
+        ("3 hane", (mid * 0.98 * 1e3).round() / 1e3),
+        ("2 hane", (mid * 0.98 * 1e2).round() / 1e2),
+        ("5 sig (tam)", round5sig_ref(mid * 0.98)),
+    ];
+    for (name, px) in cands {
+        if !(px > 0.0) {
+            println!("{name:22} px={px:.10} -> GEÇERSİZ (skip)");
+            continue;
+        }
+        let st = ex
+            .place_limit(asset, true, sz, px, Tif::Alo, false)
+            .await;
+        match st {
+            Ok(s) => match (s.resting_oid(0), s.error(0)) {
+                (Some(oid), _) => {
+                    println!("{name:22} px={px:.10} -> KABUL (oid={oid}), iptal ediliyor");
+                    let _ = ex.cancel(asset, oid).await;
+                }
+                (None, Some(e)) => println!("{name:22} px={px:.10} -> RED: {e}"),
+                (None, None) => println!("{name:22} px={px:.10} -> belirsiz: {}", s.status(0).unwrap_or(&serde_json::Value::Null)),
+            },
+            Err(e) => println!("{name:22} px={px:.10} -> HATA: {e}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    }
+    Ok(())
+}
+fn round5sig_ref(x: f64) -> f64 {
+    let f = 10f64.powf(x.log10().floor() - 4.0);
+    (x / f).round() * f
+}
