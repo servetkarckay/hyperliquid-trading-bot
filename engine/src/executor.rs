@@ -858,6 +858,32 @@ impl Executor {
                 if !cn.is_empty() && has_pos {
                     // AYNI COİN İÇİN BİRDEN FAZLA STOP = ARTIK. Çözüm
                     // `dedupe_sl`'de: en yeni oid tutulur, eskileri iptal edilir.
+                    //
+                    // P1-E — **TUTARLILIK ASSERT'İ**. `sl_orders[coin].px`'ye
+                    // (yani `sl_last_px`'e) bak: ters çevrilmiş stop fiyatı
+                    // %5 sapıyorsa bu emir **bizim stop'umuz değil**
+                    // (yabancı/körelmiş emir). Ölçüldü: `limitPx` = trigger ×
+                    // 1.05/0.95 olduğu için ham karşılaştırma **her zaman**
+                    // tutarsız döner — bu yüzden `open_orders`'a yazılan
+                    // ham `px` ile karşılaştırıp TERS çeviriyoruz
+                    // (bkz. `dedupe_sl`).
+                    let known = self.sl_last_px.get(&cn).copied().unwrap_or(0.0);
+                    if known > 0.0 {
+                        let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
+                        let trig = hyperliquid_api::round_px_for(
+                            if o["side"] == "B" { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 1.05 } else { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 0.95 },
+                            d,
+                        );
+                        let dev = if trig > 0.0 { (trig - known).abs() / known } else { 1.0 };
+                        if dev > 0.001 {
+                            // sessiz "stop var" SANMA — koruma illüzyonu olurdu
+                            tracing::warn!(
+                                "[SL-WARN] {cn} yabancı/tutarsız reduce-only emir:                                  oid={oid} seviye={:.8} beklenen={:.8} sapma={:.2}%                                  → sl_orders'a SAYILMADI (koruma bu emirden gelmiyor)",
+                                trig, known, dev * 100.0
+                            );
+                            continue;
+                        }
+                    }
                     candidates.push((cn, oid));
                 }
             }
