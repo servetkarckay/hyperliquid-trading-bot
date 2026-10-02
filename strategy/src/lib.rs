@@ -12,7 +12,7 @@
 //!
 //! VERİ AKIŞI: snapshot şunları taşır — 1h mumlar (kronolojik), canlı bağlam
 //! (funding/OI/mark: data::MarketCtx), OI değişimi, taker buy oranı, defter
-//! dengesi + en iyi bid/ask, evren geneli 7g getiri sıralaması, opsiyonel
+//! dengesi + en iyi bid/ask, evren geneli 1g getiri sıralaması, opsiyonel
 //! harici IV, equity, mevcut envanter ve parent emir boyutu.
 //!
 //! `registry()`: tüm stratejileri döner; 19 strateji + 1 meta (sistem
@@ -55,7 +55,8 @@ pub struct MarketInput {
     pub book_imbalance: Option<f64>,
     pub best_bid: Option<f64>,
     pub best_ask: Option<f64>,
-    /// evren geneli 7g getiriler (s03 sıralama)
+    /// evren geneli 1g getiriler: `mark_px / prev_day_px − 1` (`engine_loop.rs`,
+    /// `activeAssetCtx`) — s03 kesit sıralaması ve `crisis_mode`. **7g değil.**
     pub universe_returns: Vec<(String, f64)>,
     /// harici IV (Deribit) — s24 opsiyonel yol
     pub iv: Option<f64>,

@@ -87,7 +87,7 @@ Keşif kuyruğu:
 ## Doğrulama
 
 - `cargo build --release --workspace` → temiz
-- `cargo test --release --workspace` → **engine 69**, strategy 4, hepsi yeşil
+- `cargo test --release --workspace` → **engine 69**, strategy 6, hepsi yeşil
   (36 taban + 4 senaryo + 2 cloid + 2 stop-px + 4 sl-side + 8 trailing +
   14 cold-start/keşif/persistence + 6 EV + 8 health)
 

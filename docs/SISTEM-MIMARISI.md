@@ -829,4 +829,4 @@ Detaylı kıyamet senaryo denetimi: `docs/KIYAMET-AUDIT.md`.
 
 ---
 
-*Son güncelleme: 2026-10-02. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 4, hepsi yeşil.*
+*Son güncelleme: 2026-10-02. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 6, hepsi yeşil.*
