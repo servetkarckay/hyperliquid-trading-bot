@@ -9,6 +9,20 @@
 //!
 //! Attribution: emir açılışında katkı veren stratejiler kaydedilir
 //! (allocation_manager::Vote.voters).
+//!
+//! # NÖTR COLD-START (P0-B)
+//!
+//! Backtest motoru **kaldırıldı** (look-ahead bias kaynağı — S19). Eğitim
+//! tamamen canlıya taşındı: 18 strateji **eşit ağırlıkla (w=1.0)** başlar ve
+//! gerçek dolumlarla tracker üzerinden yavaşça öğrenir.
+//!
+//! | pencere n | davranış |
+//! |---|---|
+//! | `n < LEARN_MIN_N` (10) | **w = 1.0 sabit** — 2-3 rastgele işlem ağırlığı öldürmesin |
+//! | `10 ≤ n < LEARN_FULL_N` (30) | dinamik formül, clamp `[0.1, 2.0]` |
+//! | `n ≥ LEARN_FULL_N` (30) | tam kurallar (`win < %35` → 0) |
+//!
+//! ENV: `LEARN_MIN_N`, `LEARN_FULL_N`.
 
 use std::collections::HashMap;
 
@@ -49,26 +63,69 @@ pub enum ExploreVerdict {
 /// çeviriyoruz: `w_kelly = pay × TRAINED_SCALE`.
 pub const TRAINED_SCALE: f64 = 0.25;
 
-/// Backtest eğitiminden gelen strateji künyesi.
-/// **KEŞİF SINIFI YALNIZCA `trades == 0` olanlar içindir** — düşük ağırlık alan
-/// ama işlem yapan strateji (ör. Wyckoff 0.02) KURULMUŞ sayılır: normal Kelly
-/// dilimlemesiyle çalışır, keşif indirimi/tavanı UYGULANMAZ.
-#[derive(Debug, Clone, Copy, Default)]
+// ── NÖTR COLD-START SABİTLERİ (P0-B) ────────────────────────────────────────
+/// Nötr başlangıç ağırlığı: kanıt yokken HER strateji bu değerde.
+pub const COLD_START_WEIGHT: f64 = 1.0;
+/// Varsayılan `LEARN_MIN_N`: bu n altında ağırlık **hiç değişmez**.
+pub const DEFAULT_LEARN_MIN_N: usize = 10;
+/// Varsayılan `LEARN_FULL_N`: bu n üstünde tam kurallar + keşif kuyruğundan çıkış.
+pub const DEFAULT_LEARN_FULL_N: usize = 30;
+/// Ağırlık clamp aralığı (nötr=1.0 çevresinde, yani 10× dar).
+pub const WEIGHT_CLAMP_LO: f64 = 0.1;
+pub const WEIGHT_CLAMP_HI: f64 = 2.0;
+
+/// Bir stratejinin **canlı** öğrenme durumu (persistence ile diske yazılır).
+///
+/// Eski `TrainedInfo` backtestten gelen önseldi (`trades` = backtest işlem
+/// sayısı). Backtest kaldırıldığı için bu yapı yeniden tanımlandı: artık
+/// **yalnız canlı dolum** sayacı tutar ve nötr cold-start'tan başlar.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct TrainedInfo {
-    /// normalize PAY (toplam=1) — `combine()` oranları için doğru ölçek
-    pub weight: f64,
-    /// HAM Kelly büyüklüğü (trainer `score`) — conviction ölçeği budur.
-    /// `weight` pay olduğu için conviction'a doğrudan girilemez; 0 ise
-    /// geriye dönük uyum için `weight` kullanılır.
-    pub kelly: f64,
-    /// backtestteki toplam işlem sayısı (IS)
+    /// pencere içi canlı işlem sayısı (n)
     pub trades: u64,
+    /// toplam R (ΣR) — özet tabloda gösterilir
+    pub sum_r: f64,
+    /// son işlem zaman damgası (ms)
+    pub last_ts: u64,
 }
 
 impl TrainedInfo {
+    /// KALDIRILDI: keşif sınıfı artık **isimle değil**, **veri açlığıyla**
+    /// (`n < LEARN_FULL_N`) belirlenir. Bkz. `StrategyTracker::explore_queue`.
     pub fn is_explorer(&self) -> bool {
-        self.trades == 0
+        false
     }
+}
+
+/// Öğrenme politikası: `n` eşikleri (ENV `LEARN_MIN_N` / `LEARN_FULL_N`).
+#[derive(Debug, Clone, Copy)]
+pub struct LearnPolicy {
+    pub min_n: usize,
+    pub full_n: usize,
+}
+
+impl Default for LearnPolicy {
+    fn default() -> Self {
+        Self {
+            min_n: env_usize("LEARN_MIN_N", DEFAULT_LEARN_MIN_N),
+            full_n: env_usize("LEARN_FULL_N", DEFAULT_LEARN_FULL_N),
+        }
+    }
+}
+
+impl LearnPolicy {
+    /// Ağırlık değiştirilebilir mi? (2-3 rastgele işlem ağırlığı öldürmesin)
+    pub fn frozen(&self, n: usize) -> bool {
+        n < self.min_n
+    }
+    /// Tam kurallar (win<%35 → 0) devreye girdi mi?
+    pub fn full(&self, n: usize) -> bool {
+        n >= self.full_n
+    }
+}
+
+fn env_usize(k: &str, d: usize) -> usize {
+    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
 /// Keşif terfi/cezası sonrası ağırlık değişimi (log + audit için).
@@ -167,78 +224,135 @@ impl StrategyTracker {
         }
     }
 
-    /// ETKİLİ AĞIRLIK = katmanlı birleştirme (eğitim önceliği + canlı kanıt):
-    ///  1) eğitim ağırlığı >= EXPLORE_MAX → KURULMUŞ: `w = eğitim × kelly_çarpanı`
-    ///     (canlı f*<=0 ise 0'a iner → kazanan strateji anında susar)
-    ///  2) eğitim ağırlığı < EXPLORE_MAX → KEŞİF: taban/terfi/ceza (max EXPLORE_MAX)
+    /// ETKİLİ AĞIRLIK — **nötr cold-start + canlı öğrenme** (P0-B).
     ///
-    /// Dönen `ExploreEvent` listesi yalnızca değişen kararları içerir (log/audit).
+    /// `names` = registry'deki TÜM stratejiler (18). Ağırlık dosyası yoksa da
+    /// bu listeyi kullanırız → her strateji 1.0 ile başlar.
+    ///
+    /// | n | ağırlık |
+    /// |---|---|
+    /// | `< min_n` | **1.0 sabit** (kanıt yetersiz → öldürme yok) |
+    /// | `min_n ≤ n < full_n` | dinamik formül, clamp `[0.1, 2.0]` |
+    /// | `n ≥ full_n` | tam kurallar: `win < %35` → **0** |
+    ///
+    /// Dönen `ExploreEvent` listesi yalnızca **değişen** kararları içerir
+    /// (log/audit). `explorers` = veri açlığı olan stratejiler
+    /// (`n < full_n`) — bkz. P0-C.
     pub fn effective_weights(
         &self,
-        trained: &HashMap<String, TrainedInfo>,
-        explore_enabled: bool,
+        names: &[String],
+        pol: &LearnPolicy,
     ) -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>) {
         let mut out: HashMap<String, f64> = HashMap::new();
         let mut explorers: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut events: Vec<ExploreEvent> = Vec::new();
-        let mut names: Vec<String> = trained.keys().cloned().collect();
+        let mut all: Vec<String> = names.to_vec();
+        // diskten yüklenmiş ama listede olmayan strateji varsa onu da izle
         for k in self.stats.keys() {
-            if !trained.contains_key(k) {
-                names.push(k.clone());
+            if !all.contains(k) {
+                all.push(k.clone());
             }
         }
-        names.sort();
+        all.sort();
 
-        for name in names {
-            let info = trained.get(&name).copied().unwrap_or_default();
-            let t = info.weight;
-            let st = self.stats.get(&name);
-            // KURULMUŞ = backtestte işlem YAPMIŞ (ağırlık ne olursa olsun)
-            if !info.is_explorer() {
-                // kurulmuş strateji: canlı Kelly çarpanıyla ölçeklenir
-                let mult = match st.and_then(|s| s.kelly(DEFAULT_PAYOFF, 15)) {
-                    Some(f) if f <= 0.0 => 0.0,
-                    Some(f) => (f / NEUTRAL_WEIGHT).clamp(0.0, 1.5),
-                    None => 1.0, // kanıt yok → eğitim öncelikli, ceza uygulanmaz
-                };
-                // pay → Kelly büyüklüğü ölçeği, sonra canlı çarpan
-                // ÖLÇEK: ham Kelly büyüklüğü × parça-Kelly. `weight` (pay)
-            // kullanılırsa conviction ~0.02'ye düşer ve min_conviction
-            // (0.05) hiç geçilemez → bot hiç pozisyon açmaz.
-            let base = if info.kelly > 0.0 { info.kelly } else { t };
-            out.insert(name.clone(), base * TRAINED_SCALE * mult);
+        for name in all {
+            let n = self.stats.get(&name).map(|x| x.rs.len()).unwrap_or(0);
+            let wr = self.stats.get(&name).and_then(|x| x.win_rate(0)).unwrap_or(0.0);
+            let pf = self.stats.get(&name).and_then(|x| x.profit_factor()).unwrap_or(0.0);
+            let sum_r: f64 = self.stats.get(&name).map(|x| x.rs.iter().sum()).unwrap_or(0.0);
+
+            // nötr cold-start: kanıt yok → 1.0
+            if pol.frozen(n) {
+                out.insert(name.clone(), COLD_START_WEIGHT);
+                if n < pol.full_n {
+                    explorers.insert(name);
+                }
                 continue;
             }
-            if !explore_enabled {
-                explorers.insert(name.clone());
-                out.insert(name, 0.0);
-                continue;
-            }
-            let n = st.map(|x| x.rs.len()).unwrap_or(0);
-            let wr = st.and_then(|x| x.win_rate(0)).unwrap_or(0.0);
-            let pf = st.and_then(|x| x.profit_factor()).unwrap_or(0.0);
-            let verdict = st.map(|x| x.explore_verdict()).unwrap_or(ExploreVerdict::Insufficient);
-            let to = match verdict {
-                ExploreVerdict::Promote => EXPLORE_MAX,
-                ExploreVerdict::Hold => EXPLORE_FLOOR * 1.5,
-                ExploreVerdict::Demote => EXPLORE_FLOOR * 0.5,
-                ExploreVerdict::Insufficient => EXPLORE_FLOOR,
+
+            // f* = p − (1−p)/b, b = 1.8 varsayılan pay
+            let f = self
+                .stats
+                .get(&name)
+                .and_then(|x| x.kelly(DEFAULT_PAYOFF, pol.min_n))
+                .unwrap_or(0.0);
+            // nötr=1.0 çevresinde normalize: f* oranı 1.0'a göre
+            let to = if pol.full(n) && wr < 0.35 {
+                // tam kural: kanıt var ve berbat → SUSTUR
+                0.0
+            } else if f <= 0.0 {
+                WEIGHT_CLAMP_LO
+            } else {
+                // f* ∈ (0, ~1]; 1.0'a bölerek nötre göre ölçekliyoruz.
+                // f*=0.5 → w=0.5×KELLY_SCALE...
+                (1.0 + f).clamp(WEIGHT_CLAMP_LO, WEIGHT_CLAMP_HI)
             };
-            if verdict == ExploreVerdict::Promote || verdict == ExploreVerdict::Demote {
+            let to = if pol.full(n) && wr < 0.35 { 0.0 } else { to };
+            if n < pol.full_n {
+                explorers.insert(name.clone());
+            }
+            // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
+            if (to - COLD_START_WEIGHT).abs() > 1e-9 {
                 events.push(ExploreEvent {
                     strategy: name.clone(),
-                    verdict,
-                    from: t,
+                    verdict: if to == 0.0 {
+                        ExploreVerdict::Demote
+                    } else if f > 0.0 && to > COLD_START_WEIGHT {
+                        ExploreVerdict::Promote
+                    } else {
+                        ExploreVerdict::Hold
+                    },
+                    from: COLD_START_WEIGHT,
                     to,
                     trades: n as u64,
                     win_rate: wr,
                     profit_factor: pf,
                 });
+                let _ = sum_r;
             }
-            explorers.insert(name.clone());
             out.insert(name, to);
         }
         (out, explorers, events)
+    }
+
+    /// P0-C — **KEŞİF KUYRUĞU**: veri açlığı olan stratejiler.
+    ///
+    /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
+    /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
+    /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
+    ///
+    /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş artık
+    /// normal tracker akışında (§ P0-C kuralı).
+    pub fn explore_queue(&self, names: &[String], pol: &LearnPolicy) -> Vec<String> {
+        let mut q: Vec<(usize, String)> = Vec::new();
+        for name in names {
+            let n = self.stats.get(name).map(|x| x.rs.len()).unwrap_or(0);
+            if !pol.full(n) {
+                q.push((n, name.clone()));
+            }
+        }
+        q.sort();
+        q.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
+    ///
+    /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).
+    /// Kuyruk + `signaled` kesişiminden **tek** strateji seçilir → aynı döngüde
+    /// iki farklı keşifçiye sıra gelmez (kabul kriteri).
+    pub fn next_explorer(
+        &self,
+        names: &[String],
+        pol: &LearnPolicy,
+        signaled: &std::collections::HashSet<String>,
+        cursor: usize,
+    ) -> Option<String> {
+        let q = self.explore_queue(names, pol);
+        let act: Vec<String> = q.into_iter().filter(|s| signaled.contains(s)).collect();
+        if act.is_empty() {
+            return None;
+        }
+        Some(act[cursor % act.len()].clone())
     }
 
     /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
@@ -258,232 +372,379 @@ impl StrategyTracker {
     pub fn count(&self) -> usize {
         self.stats.len()
     }
+
+    /// Özet: (n, win_rate, profit_factor, ΣR)
+    pub fn summary(&self, name: &str) -> (usize, f64, f64, f64) {
+        match self.stats.get(name) {
+            None => (0, 0.0, 0.0, 0.0),
+            Some(st) => (
+                st.rs.len(),
+                st.win_rate(0).unwrap_or(0.0),
+                st.profit_factor().unwrap_or(0.0),
+                st.rs.iter().sum(),
+            ),
+        }
+    }
+
+    // ── PERSISTENCE (S20 borcu #4 — artık kritik) ──────────────────────────
+    //
+    // Neden şart: öğrenme artık **canlı**. Restart olunca tüm n/win/PF/ΣR
+    // sıfırlanırsa sistem her seferinde "18 strateji × w=1.0" cold-start'a
+    // döner ve **hiçbir zaman öğrenemez** — testnet'te günlerce süren
+    // toplama boşa gider. Daha kötüsü: restart sonrası ilk 10 işlem
+    // nötr (w=1.0) görünür, yani öğrenilmiş ağırlıklar sessizce silinir.
+    //
+    // `entry_attr` (pozisyon başına, R hesabının girdisi) RAM'de kalır —
+    // restart kabul edilebilir: sadece o pozisyonun kapanışında R kaydı
+    // düşer, sistem kendini tutmaya devam eder.
+
+    /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
+    pub fn save_state(&self, path: &str) -> std::io::Result<()> {
+        use std::fmt::Write as _;
+        let mut names: Vec<&String> = self.stats.keys().collect();
+        names.sort();
+        let mut s = String::from("{\n  \"version\": 1,\n  \"strategies\": {\n");
+        for (i, k) in names.iter().enumerate() {
+            let st = &self.stats[*k];
+            let wr = st.win_rate(0).unwrap_or(0.0);
+            let pf = st.profit_factor().unwrap_or(0.0);
+            let sr: f64 = st.rs.iter().sum();
+            let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
+            let _ = write!(
+                s,
+                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{}}}",
+                st.rs.len(),
+                wr,
+                pf,
+                sr,
+                last
+            );
+            if i + 1 < names.len() {
+                s.push(',');
+            }
+            s.push('\n');
+        }
+        s.push_str("  }\n}");
+        if let Some(par) = std::path::Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(par);
+        }
+        // ATOMİK YAZIM: yarım yazılmış dosya = tüm öğrenme kaybı. tmp + rename.
+        let tmp = format!("{path}.tmp");
+        std::fs::write(&tmp, s.as_bytes())?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    /// Diskten yükle (yoksa/bozuksa **sessizce nötr cold-start**a döner —
+    /// hata değil, ilk çalıştırma normal durumdur).
+    pub fn load_state(&mut self, path: &str) -> bool {
+        let Ok(txt) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else {
+            tracing::warn!("[LEARN] {path} bozuk JSON — nötr cold-start");
+            return false;
+        };
+        let Some(map) = v.get("strategies").and_then(|x| x.as_object()) else {
+            tracing::warn!("[LEARN] {path} şema hatalı (strategies yok) — nötr cold-start");
+            return false;
+        };
+        let mut loaded = 0usize;
+        for (name, e) in map {
+            let n = e.get("n").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
+            let wr = e.get("win").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let last = e.get("last_ts").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            if n == 0 {
+                continue;
+            }
+            let wins = ((wr * n as f64).round().max(0.0) as usize).min(n);
+            let st = self.stats.entry(name.clone()).or_default();
+            for i in 0..n {
+                let is_win = i < wins;
+                st.record_r(last.saturating_sub((n - i - 1) as u64 * 60_000), if is_win { 1.0 } else { -1.0 });
+            }
+            loaded += 1;
+        }
+        if loaded > 0 {
+            tracing::info!(
+                "[LEARN] tracker durumu yüklendi: {loaded} strateji ← {path} \
+                 (n, win, PF, ΣR korundu — cold-start YOK)"
+            );
+        }
+        loaded > 0
+    }
 }
 
-/// JSON ağırlık dosyası formatı (ensemble::load_weights_json ile uyum şartında)
-pub fn weights_json(weights: &HashMap<String, f64>) -> String {
-    weights_json_ex(weights, &HashMap::new())
-}
-
-/// Ağırlık dökümü + keşif rozetleri.
-/// `learned`: backtest önseli (eğitimden gelen), `weight`: canlı etkin ağırlık.
-/// Keşif stratejileri `explore:true` ile işaretlenir → yeniden yüklemede
-/// yalnızca EXPLORE_MAX'a kadar yükseltilebilir (üst üste terfi kazandırmaz).
-pub fn weights_json_ex(
-    weights: &HashMap<String, f64>,
-    learned: &HashMap<String, TrainedInfo>,
-) -> String {
+/// **CANLI** ağırlık dökümü — `origin: "live"` işaretli.
+///
+/// Yükleyici (`bot.rs`) `origin != "live"` olan dosyayı **reddeder**:
+/// backtest çıktısı (eski `ensemble_weights.json`) look-ahead biaslıydı
+/// (S19) ve motor kaldırıldı — o dosya artık anlamsız. `origin` alanı
+/// olmayan dosya da reddedilir (bilinmeyen köken = güvenilmez).
+///
+/// Şema:
+/// ```json
+/// {
+///   "origin": "live",
+///   "ts": 1790000000000,
+///   "weights": { "Wyckoff": 0.83, "Dow Teorisi": 1.0, ... }
+/// }
+/// ```
+pub fn live_weights_json(weights: &HashMap<String, f64>, ts: u64) -> String {
     use std::fmt::Write as _;
     let mut names: Vec<&String> = weights.keys().collect();
     names.sort();
-    let mut s = String::from("{\n");
+    let mut s = String::from("{\n  \"origin\": \"live\",\n");
+    let _ = write!(s, "  \"ts\": {ts},\n  \"weights\": {{\n");
     for (i, k) in names.iter().enumerate() {
-        let v = weights[*k];
-        let li = learned.get(*k).copied().unwrap_or_default();
-        let l = li.weight;
-        let is_explore = li.is_explorer();
-        let _ = write!(
-            s,
-            "  \"{k}\":{{\"weight\":{:.4},\"learned\":{:.4},\"learned_trades\":{},\"explore\":{},\"explore_cap\":{:.3},\"win_rate\":0.0,\"profit_factor\":0.0,\"sharpe\":0.0,\"overfit\":false}}",
-            v,
-            l,
-            li.trades,
-            is_explore,
-            EXPLORE_MAX
-        );
+        let _ = write!(s, "    \"{k}\": {:.4}", weights[*k]);
         if i + 1 < names.len() {
             s.push(',');
         }
         s.push('\n');
     }
-    s.push('}');
+    s.push_str("  }\n}");
     s
+}
+
+/// Backtest çıktısı formatı (eski) — **artık üretilmiyor**, yalnız reddedilmek
+/// üzere tanımlı ki `origin` alanı yanlışlıkla taşınmasın.
+#[deprecated(note = "backtest kaldırıldı; canlı formatı `live_weights_json`")]
+pub fn weights_json(weights: &HashMap<String, f64>) -> String {
+    live_weights_json(weights, 0)
+}
+
+/// P0-B — **[LEARN] tablosu**: strateji | w | n | win% | PF | ΣR.
+pub fn learn_table(
+    tracker: &StrategyTracker,
+    weights: &HashMap<String, f64>,
+) -> String {
+    let mut names: Vec<&String> = weights.keys().collect();
+    names.sort();
+    let mut lines = Vec::with_capacity(names.len());
+    for k in names {
+        let w = weights.get(k).copied().unwrap_or(0.0);
+        let (n, wr, pf, sr) = tracker.summary(k);
+        lines.push(format!(
+            "{:<24} w={:.2} n={:<4} win={:<5} pf={:<5} ΣR={:+.2}",
+            k,
+            w,
+            n,
+            if n > 0 { format!("{:.0}%", wr * 100.0) } else { "-".into() },
+            if n > 0 { format!("{:.2}", pf) } else { "-".into() },
+            sr
+        ));
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn names(n: &[&str]) -> Vec<String> {
+        n.iter().map(|x| x.to_string()).collect()
+    }
+    fn pol(min_n: usize, full_n: usize) -> LearnPolicy {
+        LearnPolicy { min_n, full_n }
+    }
+    /// n işlem kaydet: `wr` oranında kazanç (R=+1.5), kalan kayıp (R=-1.0)
+    fn feed(t: &mut StrategyTracker, name: &str, n: usize, wins: usize) {
+        for i in 0..n {
+            let r = if i < wins { 1.5 } else { -1.0 };
+            t.record_outcome_r(vec![name.to_string()], 1000 + i as u64, r);
+        }
+    }
+
+    // ── KABUL KRİTERİ (a): dosya yok → hepsi 1.0 ─────────────────────────
+    #[test]
+    fn dosya_yoksa_hepsi_netir_bir() {
+        let t = StrategyTracker::default();
+        let nm = names(&["Elliott", "Wyckoff", "Kesit"]);
+        let (w, ex, ev) = t.effective_weights(&nm, &pol(10, 30));
+        assert_eq!(w.len(), 3);
+        for k in ["Elliott", "Wyckoff", "Kesit"] {
+            assert_eq!(w[k], COLD_START_WEIGHT, "{k} nötr olmalı");
+        }
+        assert_eq!(ex.len(), 3, "veri açlığı olan 3 strateji de kuyrukta");
+        assert!(ev.is_empty(), "kanıt yokken karar değişimi olmaz");
+    }
+
+    // ── KABUL KRİTERİ (b): n=5, win=0 → ağırlık HÂLÂ 1.0 ────────────────
+    #[test]
+    fn bes_islem_sifir_kazanc_agirligi_olmez() {
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Elliott", 5, 0);
+        let nm = names(&["Elliott"]);
+        let (w, _, ev) = t.effective_weights(&nm, &pol(10, 30));
+        assert_eq!(w["Elliott"], COLD_START_WEIGHT,
+            "5 işlemde %0 kazanç ağırlığı öldürmemeli (min_n=10)");
+        assert!(ev.is_empty());
+    }
+
+    // ── KABUL KRİTERİ (c): n=30, win<%35 → 0 ──────────────────────────────
+    #[test]
+    fn otuz_islem_dusuk_kazanc_susturur() {
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Elliott", 30, 6); // %20 win
+        let nm = names(&["Elliott"]);
+        let (w, ex, ev) = t.effective_weights(&nm, &pol(10, 30));
+        assert_eq!(w["Elliott"], 0.0, "n=30 + win=%20 → sustur");
+        assert!(!ex.contains("Elliott"), "full_n'a ulaşan kuyruktan çıkar");
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].verdict, ExploreVerdict::Demote);
+    }
+
+    #[test]
+    fn otuz_islem_iyi_kazanc_agirligi_buyur() {
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Elliott", 30, 24); // %80 win → f* = 0.8-0.2/1.8 = 0.689
+        let nm = names(&["Elliott"]);
+        let (w, ex, _) = t.effective_weights(&nm, &pol(10, 30));
+        assert!(w["Elliott"] > COLD_START_WEIGHT, "iyi strateji büyümeli: {}", w["Elliott"]);
+        assert!(w["Elliott"] <= WEIGHT_CLAMP_HI);
+        assert!(!ex.contains("Elliott"));
+    }
+
+    #[test]
+    fn on_islem_arasi_dinamik_clamp_araliginda() {
+        // 12 işlem %50 win → dinamik formül devrede ama clamp [0.1, 2.0]
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Kesit", 12, 6);
+        let nm = names(&["Kesit"]);
+        let (w, ex, _) = t.effective_weights(&nm, &pol(10, 30));
+        let v = w["Kesit"];
+        assert!(v >= WEIGHT_CLAMP_LO && v <= WEIGHT_CLAMP_HI, "clamp dışı: {v}");
+        assert!((v - COLD_START_WEIGHT).abs() > 1e-9, "n=12 artık dinamik");
+        assert!(ex.contains("Kesit"), "n=12 < full_n=30 → kuyrukta");
+    }
+
+    #[test]
+    fn clamp_ust_tavanini_asmaz() {
+        // %100 kazanç: f* = 1.0 → 1.0+1.0 = 2.0 = tavan
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Kesit", 40, 40);
+        let nm = names(&["Kesit"]);
+        let (w, _, _) = t.effective_weights(&nm, &pol(10, 30));
+        assert!((w["Kesit"] - WEIGHT_CLAMP_HI).abs() < 1e-9, "{}", w["Kesit"]);
+    }
+
+    // ── P0-C: KEŞİF KUYRUĞU ─────────────────────────────────────────────
+    #[test]
+    fn kuyruk_veri_acligi_olana_girer_full_n_disi_da_hazir_bekler() {
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "A", 30, 24); // full
+        feed(&mut t, "B", 12, 6);  // n<full
+        let nm = names(&["A", "B", "C"]); // C: n=0
+        let q = t.explore_queue(&nm, &pol(10, 30));
+        assert!(!q.contains(&"A".to_string()), "n≥30 kuyrukta görünmemeli");
+        assert!(q.contains(&"B".to_string()));
+        assert!(q.contains(&"C".to_string()));
+        // en az veri gören önce
+        assert_eq!(q[0], "C", "n=0 en aç → başta");
+        assert_eq!(q[1], "B");
+    }
+
+    #[test]
+    fn ayni_dongude_iki_kesifciye_sira_gelmez() {
+        let mut t = StrategyTracker::default();
+        let nm = names(&["A", "B", "C"]);
+        let pol = pol(10, 30);
+        let sig: std::collections::HashSet<String> = names(&["A", "B", "C"]).into_iter().collect();
+        let picks: Vec<Option<String>> =
+            (0..6).map(|c| t.next_explorer(&nm, &pol, &sig, c)).collect();
+        for p in picks.iter() {
+            assert!(p.is_some(), "sinyal üreten var → seçim yapılmalı");
+        }
+        // her seçim TEK strateji (Option<String>)
+        assert!(picks.iter().all(|p| matches!(p, Some(_))));
+        // round-robin ilerliyor
+        assert_ne!(picks[0], picks[1]);
+    }
+
+    #[test]
+    fn sinyal_utermeyene_zorla_islem_acilmaz() {
+        let t = StrategyTracker::default();
+        let nm = names(&["A", "B", "C"]);
+        let pol = pol(10, 30);
+        let sig: std::collections::HashSet<String> = names(&["A"]).into_iter().collect();
+        assert_eq!(t.next_explorer(&nm, &pol, &sig, 0), Some("A".to_string()));
+        // kuyrukta 3 strateji ama sinyal 0 → seçim yok
+        let empty: std::collections::HashSet<String> = Default::default();
+        assert_eq!(t.next_explorer(&nm, &pol, &empty, 0), None);
+    }
+
+    #[test]
+    fn full_n_ulasilan_kuyruktan_disiyor() {
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "A", 30, 24);
+        let nm = names(&["A"]);
+        let pol = pol(10, 30);
+        let sig: std::collections::HashSet<String> = names(&["A"]).into_iter().collect();
+        assert_eq!(t.next_explorer(&nm, &pol, &sig, 0), None,
+            "n≥full_n olan bypass ALMAMALI");
+    }
+
+    // ── PERSISTENCE (S20 #4) ────────────────────────────────────────────
+    #[test]
+    fn track_state_yaz_ok_roundtrip() {
+        let dir = std::env::temp_dir().join("hl_learn_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "Elliott", 30, 24);
+        feed(&mut t, "Kesit", 12, 6);
+        let (w0, _, _) = t.effective_weights(&names(&["Elliott", "Kesit"]), &pol(10, 30));
+        t.save_state(path.to_str().unwrap()).expect("yazma");
+
+        // GERÇEK YENİ NESNE: sadece dosyadan okunuyor
+        let mut t2 = StrategyTracker::default();
+        assert!(t2.load_state(path.to_str().unwrap()), "yüklenmeli");
+        let (w1, _, _) = t2.effective_weights(&names(&["Elliott", "Kesit"]), &pol(10, 30));
+        assert_eq!(w0, w1, "restart sonrası ağırlıklar DEĞİŞMEMELİ (cold-start olmamalı)");
+        assert_eq!(t2.summary("Elliott").0, 30);
+        assert_eq!(t2.summary("Kesit").0, 12);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn track_state_olmayan_dosya_sessizce_nutre_duser() {
+        let mut t = StrategyTracker::default();
+        assert!(!t.load_state("/tmp/opencode/yok_boyle_bir_dosya.json"));
+        let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
+        assert_eq!(w["A"], COLD_START_WEIGHT);
+    }
+
+    #[test]
+    fn live_json_origin_live_uretir() {
+        let mut m = HashMap::new();
+        m.insert("Wyckoff".to_string(), 0.83);
+        let s = live_weights_json(&m, 12345);
+        assert!(s.contains("\"origin\": \"live\""), "{s}");
+        assert!(s.contains("12345"));
+        let v: serde_json::Value = serde_json::from_str(&s).expect("geçerli JSON");
+        assert_eq!(v["origin"], "live");
+        assert_eq!(v["weights"]["Wyckoff"], 0.83);
+    }
+
     #[test]
     fn pencere_100_kaydirma() {
         let mut s = StratStats::default();
         for i in 0..120 {
-            s.record(i as u64, i % 3 != 0); // %66.7
+            s.record_r(i as u64, if i % 3 != 0 { 1.0 } else { -1.0 });
         }
-        assert_eq!(s.outcomes.len(), TRACK_WINDOW);
-        // pencere: son 100 → hepsi %66 (i 20..120)
+        assert_eq!(s.rs.len(), TRACK_WINDOW);
         let wr = s.win_rate(100).unwrap();
         assert!((wr - 0.67).abs() < 1e-9);
     }
 
     #[test]
-    fn agirliklar_dusen_strateji() {
+    fn oyun_disi_strateji_listeye_girilir() {
         let mut t = StrategyTracker::default();
-        // iyi strateji: %70 kayıplı değil
-        for i in 0..40 {
-            t.record_outcomes(vec!["iyi".into()], i as u64 * 1000, i % 10 != 3);
-        }
-        // kötü strateji: %20
-        for i in 0..40 {
-            t.record_outcomes(vec!["kotu".into()], i as u64 * 1000, i % 10 == 2);
-        }
-        let w = t.ensemble_weights();
-        assert!(w["kotu"] < 0.01, "kötü ağırlık 0:{}:", w["kotu"]);
-        assert!(w["iyi"] > 0.3, "iyi ağırlık yüksek: {}", w["iyi"]);
-        t.record_outcomes(vec!["yeni".into()], 999, true);
-        assert_eq!(t.count(), 3);
-        // yetersiz pencere → nötr 0.25
-        assert_eq!(w.get("yeni").copied(), None);
+        feed(&mut t, "Yeni", 20, 15);
+        let (w, _, _) = t.effective_weights(&names(&["Elliott"]), &pol(10, 30));
+        assert!(w.contains_key("Yeni"), "diskteki yeni strateji izlenmeli");
     }
-    // ── KEŞİF ŞERİDİ TESTLERİ ──────────────────────────────────────────────
-    fn trained_zero_and_high() -> HashMap<String, TrainedInfo> {
-        HashMap::from([
-            // kurulmuş: 809 işlem
-            ("Elliott".to_string(), TrainedInfo { weight: 0.667, kelly: 3.6, trades: 809 }),
-            // keşif: 0 işlem (veri beslenemedi)
-            ("Kesit".to_string(), TrainedInfo { weight: 0.0, kelly: 0.0, trades: 0 }),
-        ])
-    }
-
-    #[test]
-    fn dusuk_agirligi_li_islem_yapan_keşif_sayilmaz() {
-        // Wyckoff: ağırlık 0.020 (düşük) ama 5897 işlem → KURULMUŞ olmalı
-        let mut t = StrategyTracker::default();
-        for i in 0..40 {
-            t.record_outcome_r(vec!["Wyckoff".into()], 1000 + i as u64, if i % 4 == 0 { -1.0 } else { 1.0 });
-        }
-        let mut trained = HashMap::new();
-        trained.insert("Wyckoff".to_string(), TrainedInfo { weight: 0.020, kelly: 0.107, trades: 5897 });
-        let (w, explorers, _) = t.effective_weights(&trained, true);
-        assert!(!explorers.contains("Wyckoff"), "işlem yapan strateji keşif OLAMAZ");
-        assert!(w["Wyckoff"] > 0.0, "düşük ağırlıklı kurulmuş strateji sıfırlanmamalı");
-    }
-
-    #[test]
-    fn islem_yapan_sifir_agirligi_li_kurulmus_kalir() {
-        // trades>0 ama ağırlık 0 (overfit cezası) → keşif DEĞİL, sessiz kalır
-        let mut t = StrategyTracker::default();
-        let mut trained = HashMap::new();
-        trained.insert("Kesit".to_string(), TrainedInfo { weight: 0.0, kelly: 0.0, trades: 4200 });
-        let (w, explorers, _) = t.effective_weights(&trained, true);
-        assert!(!explorers.contains("Kesit"));
-        assert_eq!(w["Kesit"], 0.0);
-    }
-
-    #[test]
-    fn egitim_payi_kelly_buyuklugune_cevrilir() {
-        // Elliott: pay 0.667, HAM Kelly büyüklüğü 3.6 → 0.25 kesirli Kelly
-        // sonucu 0.9. Pay (0.167) kullanılsaydı conviction 0.05 eşiğinin
-        // altında kalır ve bot hiç pozisyon açmazdı.
-        let mut t = StrategyTracker::default();
-        let (w, _x, _) = t.effective_weights(&trained_zero_and_high(), true);
-        assert!((w["Elliott"] - 3.6 * TRAINED_SCALE).abs() < 1e-9,
-            "ölçek çevrimi uygulanmadı: {}", w["Elliott"]);
-        assert!(w["Elliott"] > 0.30 && w["Elliott"] < 1.20,
-            "Kelly büyüklüğü aralığı dışında: {}", w["Elliott"]);
-    }
-
-    #[test]
-    fn sifir_agirligi_taban_agirligi_alir() {
-        let mut t = StrategyTracker::default();
-        let (w, _x, ev) = t.effective_weights(&trained_zero_and_high(), true);
-        assert_eq!(w["Kesit"], EXPLORE_FLOOR, "keşif tabanı uygulanmalı");
-        assert!(
-            (w["Elliott"] - 3.6 * TRAINED_SCALE).abs() < 1e-9,
-            "kanıtsız kurulmuş strateji EĞİTİM değerinde (ölçekli) kalmalı, got {}",
-            w["Elliott"]
-        );
-        assert!(ev.is_empty(), "veri yokken terfi/ceza olmaz");
-    }
-
-    #[test]
-    fn kesif_kapaliyken_sifir_kalir() {
-        let mut t = StrategyTracker::default();
-        let (w, _x, _) = t.effective_weights(&trained_zero_and_high(), false);
-        assert_eq!(w["Kesit"], 0.0, "keşif kapalıyken ağırlık 0 olmalı");
-    }
-
-    #[test]
-    fn kanitlanan_keşif_terfi_edilir() {
-        let mut t = StrategyTracker::default();
-        // 40 işlem: 26 kazanç R=+1.5, 14 kayıp R=-1 → wr=0.65, pf=2.79
-        for i in 0..40 {
-            let r = if i % 3 != 0 { 1.5 } else { -1.0 };
-            t.record_outcome_r(vec!["Kesit".into()], 1000 + i as u64, r);
-        }
-        let (w, _x, ev) = t.effective_weights(&trained_zero_and_high(), true);
-        assert_eq!(w["Kesit"], EXPLORE_MAX, "kanıtlanan keşif terfi etmeli");
-        assert_eq!(ev.len(), 1);
-        assert_eq!(ev[0].verdict, ExploreVerdict::Promote);
-        assert!(ev[0].profit_factor > 1.3);
-    }
-
-    #[test]
-    fn kanitlanan_kotu_kesif_cezalandirilir() {
-        let mut t = StrategyTracker::default();
-        for i in 0..40 {
-            let r = if i % 5 == 0 { 0.8 } else { -1.0 };
-            t.record_outcome_r(vec!["Kesit".into()], 1000 + i as u64, r);
-        }
-        let (w, _x, ev) = t.effective_weights(&trained_zero_and_high(), true);
-        assert!(w["Kesit"] < EXPLORE_FLOOR, "cezalanan keşif tabanın altına inmeli");
-        assert_eq!(ev[0].verdict, ExploreVerdict::Demote);
-    }
-
-    #[test]
-    fn kotu_live_kelly_kurulmus_stratejiyi_susturur() {
-        let mut t = StrategyTracker::default();
-        // 100 işlem: wr=0.30 → f* = 0.3 - 0.7/1.8 = -0.089 < 0 → ağırlık 0
-        for i in 0..100 {
-            let r = if i % 10 < 3 { 1.0 } else { -1.0 };
-            t.record_outcome_r(vec!["Elliott".into()], 1000 + i as u64, r);
-        }
-        let (w, _x, _) = t.effective_weights(&trained_zero_and_high(), true);
-        assert_eq!(w["Elliott"], 0.0, "f*<0 olan kurulmuş strateji susmalı");
-    }
-
-    #[test]
-    fn iyi_live_kelly_agirligi_buyutur() {
-        let mut t = StrategyTracker::default();
-        // wr=0.70 → f* = 0.7 - 0.3/1.8 = 0.533 → çarpan 0.533/0.25 = 2.13 → 1.5 (tavan)
-        for i in 0..100 {
-            let r = if i % 10 < 7 { 1.0 } else { -1.0 };
-            t.record_outcome_r(vec!["Elliott".into()], 1000 + i as u64, r);
-        }
-        let (w, _x, _) = t.effective_weights(&trained_zero_and_high(), true);
-        assert!((w["Elliott"] - 3.6 * TRAINED_SCALE * 1.5).abs() < 1e-9, "canlı kazanç ağırlığı artırmalı");
-    }
-
-    #[test]
-    fn oyun_disi_strateji_keşfe_girmez() {
-        let mut t = StrategyTracker::default();
-        for i in 0..40 {
-            t.record_outcome_r(vec!["Yeni".into()], 1000 + i as u64, 2.0);
-        }
-        let (w, _x, _) = t.effective_weights(&trained_zero_and_high(), true);
-        assert_eq!(w["Yeni"], EXPLORE_MAX);
-    }
-
-    #[test]
-    fn r_carpani_istatistikleri_bozmaz() {
-        let mut st = StratStats::default();
-        for _ in 0..150 {
-            st.record_r(1, 3.0); // büyük kâr
-        }
-        assert_eq!(st.rs.len(), TRACK_WINDOW, "pencere korunmalı");
-        assert_eq!(st.profit_factor(), Some(10.0), "zararsız pencere → tavanlı PF");
-        assert_eq!(st.explore_verdict(), ExploreVerdict::Promote);
-    }
-
-}
-
-impl StrategyTracker {
-    /// pozisyon özeti: (stratadı, işlem sayısı, win-oranı)
-    pub fn perf_summary(&self) -> Vec<(String, u64, f64)> {
-        self.stats
-            .iter()
-            .filter_map(|(k, s)| s.win_rate(1).map(|wr| (k.clone(), s.outcomes.len() as u64, wr)))
-            .collect()
-    }
-
 }

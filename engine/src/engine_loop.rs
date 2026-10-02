@@ -133,12 +133,23 @@ pub struct Engine {
     machines: Machines,
     books: HashMap<String, (f64, f64, f64)>,
     tracker: StrategyTracker,
-    /// backtest eğitiminden gelen önsel künyeler (ağırlık + işlem sayısı)
+    /// canlı öğrenme durumu (n, ΣR, son ts) — diske yazılır
     trained_weights: HashMap<String, crate::track::TrainedInfo>,
+    /// öğrenme politikası: n eşikleri (ENV `LEARN_MIN_N` / `LEARN_FULL_N`)
+    pub learn_pol: crate::track::LearnPolicy,
+    /// registry'deki strateji adları (nötr cold-start listesi)
+    strategy_names: Vec<String>,
+    /// tracker durumu dosyası (ENV `TRACK_STATE_PATH`)
+    pub track_state_path: String,
     /// keşif şeridi açık mı (ENGINE_EXPLORE)
     pub explore_on: bool,
-    /// eğitimsiz (keşif) strateji adları — açık küme, eşik değil
+    /// keşif hakkı olan stratejiler (`n < full_n`) — veri açlığı kuyruğu
     explore_names: std::collections::HashSet<String>,
+    /// keşif round-robin imleci (her döngüde bir tur ilerler)
+    explore_cursor: usize,
+    /// BU DÖNGÜDE sırası gelen keşifçi (P0-C: en fazla **bir**).
+    /// `explore_names` = kuyruk (veri açlığı olanlar), bu = sıradaki.
+    explore_pick: Option<String>,
     /// HESAP kaldıracı (cross) — açılışta borsaya yazılır, risk kontrolüne girer
     pub leverage: f64,
     entry_attr: HashMap<String, EntryAttr>,
@@ -285,6 +296,17 @@ impl Engine {
             tracing::info!("state recovery: {recovered} pozisyon yüklendi");
         }
 
+        let strategies = strategy::registry();
+        // Nötr cold-start listesi: registry'deki stratejilerin ADLARI.
+        // `Strategy::name` trait'i üzerinden; ağırlık dosyası yoksa bile
+        // 18 strateji w=1.0 ile başlar (P0-B).
+        let strategy_names: Vec<String> = strategies.iter().map(|s| s.name().to_string()).collect();
+        let mut tracker = StrategyTracker::default();
+        // PERSISTENCE: canlı öğrenme durumunu diskten yükle (S20).
+        // Yoksa normaldir (ilk çalıştırma) → nötr cold-start devam eder.
+        tracker.load_state(&std::env::var("TRACK_STATE_PATH")
+            .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into()));
+
         Ok(Self {
             loop_cfg,
             executor,
@@ -292,13 +314,19 @@ impl Engine {
             agg,
             ctx: data::market_ctx::MarketCtx::new(500),
             ensemble: Ensemble::new(EnsembleConfig { min_score: 0.30, ..Default::default() }),
-            strategies: strategy::registry(),
+            strategies,
             machines,
             books: HashMap::new(),
-            tracker: StrategyTracker::default(),
+            tracker,
             trained_weights: HashMap::new(),
+            learn_pol: crate::track::LearnPolicy::default(),
+            strategy_names,
+            track_state_path: std::env::var("TRACK_STATE_PATH")
+                .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into()),
             explore_on: true,
             explore_names: std::collections::HashSet::new(),
+            explore_cursor: 0,
+            explore_pick: None,
             leverage: std::env::var("ENGINE_LEVERAGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -434,64 +462,132 @@ impl Engine {
         }
     }
 
-    /// Backtest eğitim çıktısını önsel olarak yükle (tek seferlik).
-    pub fn load_trained_weights(&mut self, raw: &serde_json::Value) {
+    /// **CANLI** ağırlıkları yükle (`origin:"live"` doğrulanmış — kapı `bot.rs`te).
+    ///
+    /// Beklenen şema:
+    /// ```json
+    /// { "origin":"live", "ts":…, "weights": { "Wyckoff": 0.83, ... } }
+    /// ```
+    /// ÖNEMLİ: bu **önsel** değil, *kaydedilmiş canlı kanıt*. Yine de
+    /// eksik stratejiler 1.0'a düşer (kısmi dosya = kısmi kanıt).
+    pub fn load_live_weights(&mut self, raw: &serde_json::Value) {
         let mut m: HashMap<String, crate::track::TrainedInfo> = HashMap::new();
-        if let Some(obj) = raw.as_object() {
+        if let Some(obj) = raw.get("weights").and_then(|x| x.as_object()) {
             for (name, e) in obj {
-                let w = e
-                    .get("weight")
-                    .and_then(serde_json::Value::as_f64)
-                    .or_else(|| e.get("learned").and_then(serde_json::Value::as_f64))
-                    .or_else(|| e.get("sharpe").and_then(serde_json::Value::as_f64))
-                    .unwrap_or(0.0)
-                    .max(0.0);
-                // keşif sınıfı = backtestte HİÇ işlem yapmamış strateji
-                let trades = e
-                    .get("learned_trades")
-                    .or_else(|| e.get("trades"))
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                let kelly = e
-                    .get("score")
-                    .or_else(|| e.get("kelly"))
-                    .and_then(serde_json::Value::as_f64)
-                    .unwrap_or(0.0)
-                    .max(0.0);
                 m.insert(
                     name.clone(),
-                    crate::track::TrainedInfo { weight: w, kelly, trades },
+                    crate::track::TrainedInfo {
+                        trades: e
+                            .get("n")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                        sum_r: e
+                            .get("sum_r")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0),
+                        last_ts: e
+                            .get("last_ts")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                    },
                 );
             }
         }
         self.trained_weights = m;
     }
 
+    /// **P0-C keşif seti** — bu döngüde sırası gelen TEK strateji.
+    ///
+    /// `None` → boş küme (kuyruk kuyruğu boş veya kimse sinyal üretmedi).
+    /// `explore_max_usd` / %5 havuz matematiği **aynen korunur**; yalnız
+    /// "hangi strateji keşifçi" tanımı değişti: isim-temelli → veri-açlığı.
+    pub fn explore_set(&self) -> std::collections::HashSet<String> {
+        match &self.explore_pick {
+            Some(n) => std::collections::HashSet::from([n.clone()]),
+            None => std::collections::HashSet::new(),
+        }
+    }
+
+    /// Round-robin imlecini ilerlet ve sıradaki keşifçiyi seç.
+    ///
+    /// Kabul kriteri: **aynı döngüde iki farklı keşifçiye sıra gelmez** —
+    /// dönüş tipi `Option<String>`, tek isim. `n ≥ full_n` olan stratejiler
+    /// kuyrukta görünmez (`explore_queue` filtreler) → testnet kuyruğu boş
+    /// ise keşif şeridi sessizce kapalıdır (normal).
+    pub fn advance_explore_cursor(&mut self, signaled: &std::collections::HashSet<String>) {
+        if !self.explore_on {
+            self.explore_pick = None;
+            return;
+        }
+        let q = self.tracker.explore_queue(&self.strategy_names, &self.learn_pol);
+        let act: Vec<String> = q.iter().filter(|s| signaled.contains(*s)).cloned().collect();
+        self.explore_pick = if act.is_empty() {
+            None
+        } else {
+            let pick = act[self.explore_cursor % act.len()].clone();
+            self.explore_cursor = self.explore_cursor.wrapping_add(1);
+            tracing::info!(
+                "[KEŞİF] sıra: {} (n={} < full_n={}) | kuyruk={} | sinyal veren={} | sıradakiler={:?}",
+                pick,
+                self.tracker.summary(&pick).0,
+                self.learn_pol.full_n,
+                q.len(),
+                signaled.len(),
+                act
+            );
+            Some(pick)
+        };
+        // keşif kuyruğu logu (kuyruk/aktif) — hangi stratejiler n-data bekliyor
+        if self.n_cycles % 6 == 0 {
+            tracing::info!(
+                "[KEŞİF] kuyruk (n<{}): {:?}",
+                self.learn_pol.full_n,
+                q.iter().take(6).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Nötr cold-start bildirimi (açılışta tek satır, P0-B).
+    pub fn log_cold_start(&self) {
+        tracing::info!(
+            "[LEARN] nötr başlangıç: {} strateji × w=1.0; persistence=ON (min_n={} full_n={})",
+            self.strategy_names.len(),
+            self.learn_pol.min_n,
+            self.learn_pol.full_n
+        );
+    }
+
+    /// [LEARN] tablosu (her 60 sn'de bir — 5 sn döngüde her tur BASILMAZ).
+    pub fn log_learn_table(&self) {
+        let tbl = crate::track::learn_table(&self.tracker, &self.ensemble.cfg.weights);
+        tracing::info!(
+            "[LEARN] {} strateji | kuyruk={} | cursor={}\n{}",
+            self.ensemble.cfg.weights.len(),
+            self.explore_names.len(),
+            self.explore_cursor,
+            tbl
+        );
+    }
+
     /// Ağırlıkları üç katmandan birleştirip ensemble'e bas: EĞİTİM × canlı Kelly,
     /// sıfırlananlar keşif tabanına. Artık `dyn_weights` eğitimi EZMEZ.
     pub fn apply_effective_weights(&mut self) {
-        let (eff, explorers, events) = self
-            .tracker
-            .effective_weights(&self.trained_weights, self.explore_on);
+        let (eff, explorers, events) =
+            self.tracker
+                .effective_weights(&self.strategy_names, &self.learn_pol);
         self.explore_names = explorers.clone();
         for e in &events {
             let v = match e.verdict {
                 crate::track::ExploreVerdict::Promote => "TERFİ",
-                crate::track::ExploreVerdict::Demote => "CEZA",
+                crate::track::ExploreVerdict::Demote => "SUSTUR",
                 _ => "—",
             };
             tracing::warn!(
-                "keşif {v}: {} {:.4}→{:.4} (n={} wr={:.2} pf={:.2})",
+                "[LEARN] {v}: {} {:.2}→{:.2} (n={} wr={:.2} pf={:.2})",
                 e.strategy, e.from, e.to, e.trades, e.win_rate, e.profit_factor
             );
         }
         self.ensemble.cfg.weights = eff;
-        self.explore_names = explorers;
-    }
-
-    /// açılışta kaldıracı borsaya yazdırmak için
-    pub fn executor_mut(&mut self) -> &mut Executor {
-        &mut self.executor
     }
 
     /// geriye uyumlu çağrı (eski testler/yol)
@@ -1111,6 +1207,9 @@ impl Engine {
         let mut votes: Vec<Vote> = Vec::new();
         let (mut n_skip_neutral, mut n_skip_novoter, mut n_skip_nobook) = (0usize, 0usize, 0usize);
         let mut closes_map: HashMap<String, Vec<f64>> = HashMap::new();
+        // P0-C — bu döngüde sinyal üreten stratejiler (keşif kuyruğuyla kesişim
+        // için). Sinyal üretmeyene zorla işlem AÇILMAZ.
+        let mut signaled: std::collections::HashSet<String> = std::collections::HashSet::new();
         for e in &evals {
             // Defter (L2) gelmemişse oy TAMAMEN atlanıyordu: 178 coin'in 173'ü
             // elendi, oy≈0 kalıyordu. Son mum kapanışı geçerli fiyattır.
@@ -1143,6 +1242,7 @@ impl Engine {
                 n_skip_novoter += 1;
                 continue;
             }
+            signaled.extend(voters.iter().cloned());
             closes_map.insert(e.coin.clone(), e.closes.clone());
             // Emir defteri boşsa (dry-run'da L2 kapalıyken) mid = 0.0 olurdu
             // ve `mid > 0` filtresi TÜM oyları düşürürdü → hiç pozisyon yok.
@@ -1155,11 +1255,16 @@ impl Engine {
                 score: e.cs.score,
                 voters,
                 weights: self.ensemble.cfg.weights.clone(),
-                explore: self.explore_names.clone(),
+                explore: self.explore_set(),
                 atr_pct: e.atr_pct,
                 mid,
             });
         }
+
+        // P0-C — KEŞİF KUYRUĞU (round-robin, döngüde en fazla BİR keşifçi):
+        // sıradaki keşifçi sinyaller içinde `signaled` ise min_conviction
+        // bypass + $10 taban kazanır. Kuyruk = veri açlığı (`n < full_n`).
+        self.advance_explore_cursor(&signaled);
 
         let pair_corr = |c1: &str, c2: &str| -> f64 {
             match (closes_map.get(c1), closes_map.get(c2)) {
@@ -1301,6 +1406,52 @@ impl Engine {
                     // yapıyordu (ölçüldü: ZK açıkken aynı coine ikinci kez
                     // ters yönde giriş yapıldı, pozisyon ikiye katlandı).
                     // Doğru kaynak: borsadan gelen `executor.positions()`.
+                    // ── P0-D: FEE-FARKINDALIKLI EV KAPISI ──────────────────
+                    // Tahsisten SONRA ama yürütmeden ÖNCE: `1.5×ATR < maliyet
+                    // tabanı` → SKIP. Clamp DEĞİL — clamp stop'u daraltıp
+                    // EV'yi daha da bozardı.
+                    //
+                    // Sayılarla: round-trip ≈ 19 bps. 1.5×ATR = %0.25 (alt
+                    // sınır) → R ≈ 1.3, 2:1 TP'de başabaş WR ≈ %59 → **yapısal
+                    // negatif EV**. Taban = max(75 bps, 3×round_trip) = %0.75.
+                    {
+                        let spread_bps = {
+                            // ask−bid / mid, ondalık → bps
+                            let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+                                (e.ask + e.bid) / 2.0
+                            } else {
+                                0.0
+                            };
+                            if mid2 > 0.0 {
+                                (e.ask - e.bid).abs() / mid2 * 10_000.0
+                            } else {
+                                0.0
+                            }
+                        };
+                        let (ok, risk_bps, floor_bps) =
+                            crate::allocation_manager::ev_ok(
+                                e.atr_pct,
+                                self.am.cfg.sl_atr_mult,
+                                spread_bps,
+                            );
+                        if !ok {
+                            tracing::info!(
+                                "[EV] {} ATR {:.0}bps → risk {:.0}bps < maliyet flooru {:.0}bps → SKIP \
+                                 (round-trip {:.0}bps; işlem sayısının düşmesi BEKLENEN davranış)",
+                                e.coin,
+                                e.atr_pct * 10_000.0,
+                                risk_bps,
+                                floor_bps,
+                                crate::allocation_manager::round_trip_cost_bps()
+                            );
+                            if let Some(m) = self.machines.get_mut(&e.coin) {
+                                if m.oid_zero_pending() {
+                                    m.state = PosState::Flat;
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     let already_held = self
                         .executor
                         .positions()
@@ -1568,9 +1719,23 @@ impl Engine {
 }
 
 impl Engine {
-    /// canlı etkin ağırlık + eğitim önseli (keşif rozetleriyle)
+    /// canlı etkin ağırlık (`origin:"live"` formatında — `bot.rs` geri yükler)
     pub fn tracker_weights_json(&self) -> String {
-        crate::track::weights_json_ex(&self.ensemble.cfg.weights, &self.trained_weights)
+        crate::track::live_weights_json(
+            &self.ensemble.cfg.weights,
+            hyperliquid_api::now_ms(),
+        )
+    }
+
+    /// Tracker durumunu diske yaz (P0-B persistence). Hata loglanır, yutulmaz —
+    /// yutulan bir yazma hatası = tüm öğrenmenin sessizce kaybı.
+    pub fn save_tracker_state(&self) {
+        if let Err(e) = self.tracker.save_state(&self.track_state_path) {
+            tracing::warn!(
+                "[LEARN] tracker durumu yazılamadı ({}): {e} — restart'ta öğrenme KAYBOLUR",
+                self.track_state_path
+            );
+        }
     }
 }
 

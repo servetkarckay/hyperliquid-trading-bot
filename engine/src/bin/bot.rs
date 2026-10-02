@@ -124,10 +124,13 @@ async fn main() -> anyhow::Result<()> {
     let mut err_streak = 0usize;
     let mut ntp_cycle = tokio::time::interval(std::time::Duration::from_secs(1800)); // 30 dk'da resync
     ntp_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // EĞİTİM önseli (salt-okunur): backtest_train çıktısı
+    // Ağırlık dosyası: **yalnız `origin:"live"`** olan kabul edilir.
+    // Varsayılan yol `ensemble_weights_live.json` (eski `ensemble_weights.json`
+    // backtest çıktısıydı ve look-ahead biaslıydı — S19 kapandı).
     let weights_in = std::env::var("ENSEMBLE_WEIGHTS_IN")
-        .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights.json".into());
-    // CANLI tahteribaf: eğitim dosyasının ÜSTÜNE yazmaz (ayrı dosya)
+        .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
+    // CANLI tahteribaf: aynı dosya (in=out). `origin:"live"` şeması yazılır,
+    // restart'ta aynı dosya okunur → ağırlıklar kalıcı.
     let weights_out = std::env::var("ENSEMBLE_LIVE_WEIGHTS_OUT")
         .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
     if let Some(par) = std::path::Path::new(&weights_out).parent() {
@@ -141,22 +144,50 @@ async fn main() -> anyhow::Result<()> {
     let explore_on = std::env::var("ENGINE_EXPLORE")
         .map(|v| v != "0" && !v.eq_ignore_ascii_case("off"))
         .unwrap_or(true);
+    // ORIGİN KAPISI: backtest çıktısı (`origin != "live"`) **reddedilir**.
+    // Neden: o ağırlıklar look-ahead biased motordan geliyordu (S19). Motor
+    // kaldırıldı; yine de bayat dosya sessizce yüklenirse sistem "eğitilmiş"
+    // görünür ama veri biaslı olur — en kötü durum (görünmez yanlış).
     match std::fs::read_to_string(&weights_in) {
         Ok(txt) => match serde_json::from_str::<serde_json::Value>(&txt) {
             Ok(v) => {
-                let n = v.as_object().map(|o| o.len()).unwrap_or(0);
-                engine.load_trained_weights(&v);
-                tracing::info!("eğitim ağırlıkları yüklendi: {n} strateji ← {weights_in}");
+                let origin = v
+                    .get("origin")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("(yok)");
+                if origin == "live" {
+                    let n = v
+                        .get("weights")
+                        .and_then(|w| w.as_object())
+                        .map(|o| o.len())
+                        .unwrap_or(0);
+                    engine.load_live_weights(&v);
+                    tracing::info!(
+                        "[LEARN] canlı ağırlıklar yüklendi: {n} strateji ← {weights_in} (origin=live)"
+                    );
+                } else {
+                    tracing::warn!(
+                        "[LEARN] {weights_in} REDDEDİLDİ: origin={origin:?} ≠ \"live\" \
+                         (backtest çıktısı kaldırıldı) — nötr cold-start (w=1.0)"
+                    );
+                }
             }
-            Err(e) => tracing::warn!("{weights_in} parse edilemedi: {e}"),
+            Err(e) => tracing::warn!("[LEARN] {weights_in} parse edilemedi: {e} — nötr cold-start"),
         },
-        Err(e) => tracing::warn!("eğitim ağırlıkları okunamadı ({e}) — keşif tabanı kullanılacak"),
+        Err(e) => tracing::warn!(
+            "[LEARN] ağırlık dosyası yok ({e}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
+            strategy::STRATEGY_COUNT
+        ),
     }
     engine.explore_on = explore_on;
     engine.apply_effective_weights();
 
+    engine.log_cold_start();
     let mut dump_cycle = tokio::time::interval(std::time::Duration::from_secs(300));
     dump_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // [LEARN] tablosu 60 sn'de bir (döngü 5 sn → 12 döngüde bir). Log spam olmaz.
+    let mut learn_table_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
+    learn_table_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     'restart: loop {
         let mut rx = ingestor.start(cfg.clone());
@@ -183,6 +214,13 @@ async fn main() -> anyhow::Result<()> {
                         let _ = std::fs::write(&weights_out, w);
                     }
                     let _ = engine.executor.save_px_dec(&tick_cache_out);
+                    // P0-B: tracker durumu diske. YAZILMAZSA restart'ta
+                    // tüm canlı öğrenme kaybolur ve bot tekrar cold-start'a
+                    // düşer — yani hiç öğrenemez. Atomik yazım (save_state).
+                    engine.save_tracker_state();
+                }
+                _ = learn_table_cycle.tick() => {
+                    engine.log_learn_table();
                 }
                 oe_ev = async {
                     match oe_rx.as_mut() {

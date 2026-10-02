@@ -7,8 +7,6 @@
 //! Bağımlılıklar: hyperliquid-api (veri erişimi), utils (saat/log).
 pub mod engine_loop;
 pub mod executor;
-pub mod backtest;
-pub mod backtest_multi;
 pub mod allocation_manager;
 pub mod state_machine;
 pub mod orderbook;

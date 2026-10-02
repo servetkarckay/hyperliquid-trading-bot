@@ -577,3 +577,133 @@ mod tests {
         assert!(out[0].capped);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P0-D — FEE-FARKINDALIKLI EV KAPISI (SKIP, clamp değil)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// NEDEN VAR (sayılarla):
+//   round-trip maliyet ≈ 2×(taker 4.5 + slippage 5.0) = **19 bps** (%0.19)
+//   stop mesafesi = 1.5×ATR. Düşük volatilitede 1.5×ATR = %0.25 (ALT SINIR)
+//   → R = 0.25 / 0.19 ≈ **1.3**  (risk 19 bps, hedef 25 bps)
+//   → TP = 2×SL = %0.50 → R:R = 2:1 → başabaş WR = 1/(1+2) = %33 + fee ≈ **%59**
+//   Yani %59'a kadar kazanma oranı **yapısal olarak negatif EV** üretir.
+//   Ölçülen: tüm kayıp örnekleri R ≈ $0.125 ile stop'landı (min_dist tabanı).
+//
+// KURAL: `min_risk_dist_bps = max(75, 3 × round_trip_cost_bps)`
+//   3×19 = 57 bps → 75 bps (%0.75) kazanır. Yani stop mesafesi en az
+//   **maliyetin 3 katı** olmalı; değilse işlem **SKIP** edilir (clamp değil —
+//   clamp stop'u daraltıp EV'yi daha da bozardı).
+//
+// Zarar kontrolü: SKIP bir eksiklik değil, **doğru davranış**. Düşük
+// volatilite = yüksek likidite + düşük spread = aslında en iyi coinler; ama
+// 1.5×ATR orada %0.25'e düşüyor. Doğru yanıt pozisyon almamak.
+
+/// Round-trip maliyet (bps): 2 × (taker fee + slippage).
+/// Varsayılanlar **ölçülen** değerler: Hyperliquid taker 4.5 bps, ince
+/// testnet defterinde gözlenen slippage ~5.0 bps.
+pub const DEFAULT_TAKER_FEE_BPS: f64 = 4.5;
+pub const DEFAULT_SLIPPAGE_BPS: f64 = 5.0;
+
+pub fn round_trip_cost_bps() -> f64 {
+    let fee = env_f64("EV_TAKER_FEE_BPS", DEFAULT_TAKER_FEE_BPS);
+    let slip = env_f64("EV_SLIPPAGE_BPS", DEFAULT_SLIPPAGE_BPS);
+    2.0 * (fee + slip)
+}
+
+/// Asgari risk mesafesi (bps): `max(EV_MIN_DIST_BPS, 3 × round_trip)`
+pub fn min_risk_dist_bps() -> f64 {
+    let floor = env_f64("EV_MIN_DIST_BPS", 75.0);
+    floor.max(3.0 * round_trip_cost_bps())
+}
+
+/// EV kapısı: `1.5 × ATR_bps < min_risk_dist_bps` → SKIP
+///
+/// `atr_pct` = ATR/mid (ondalık). `sl_mult` = stop mesafesi çarpanı (1.5).
+#[allow(clippy::too_many_arguments)]
+pub fn ev_ok(atr_pct: f64, sl_mult: f64, spread_bps: f64) -> (bool, f64, f64) {
+    let atr_bps = atr_pct * 10_000.0;
+    let risk_bps = sl_mult * atr_bps;
+    // Opsiyonel: spread tabanı (defter inceyse spread yüksek, gerçek maliyet
+    // daha fazla). `max(floor, 3×round_trip, spread×3)`.
+    let floor = min_risk_dist_bps().max(spread_bps * 3.0);
+    (risk_bps >= floor, risk_bps, floor)
+}
+
+fn env_f64(k: &str, d: f64) -> f64 {
+    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+}
+
+#[cfg(test)]
+mod ev_tests {
+    use super::*;
+
+    #[test]
+    fn dusuk_volatilite_skip_uretiyor() {
+        // ÖLÇÜLEN: tüm kayıp örnekleri 1.5×ATR ≈ %0.25'te stop'landı.
+        // Round-trip 19 bps → 25 bps stop = R 1.3 → 2:1'de başabaş WR %59.
+        let atr_pct = 0.0025 / 1.5; // ATR = %0.1667 → 1.5×ATR = %0.25
+        let (ok, risk_bps, floor) = ev_ok(atr_pct, 1.5, 0.0);
+        assert!(!ok, "maliyet tabanı altında → SKIP");
+        assert!((risk_bps - 25.0).abs() < 1e-6, "risk {} bps", risk_bps);
+        assert!((floor - 75.0).abs() < 1e-6, "taban max(75, 3×19=57) = 75 bps");
+    }
+
+    #[test]
+    fn yuksek_volatilite_gecer() {
+        // ATR %1.5 → 1.5×ATR = %2.25 = 225 bps > 75 → işlem alınır
+        let (ok, risk_bps, _) = ev_ok(0.015, 1.5, 0.0);
+        assert!(ok, "225 bps > 75 bps → geçmeli");
+        assert!((risk_bps - 225.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn taban_maliyetin_ucun_kati() {
+        // 3× round-trip = 57 < 75 → taban 75. Maliyet 30 bps olsaydı
+        // (3×30=90 > 75) taban 90 olurdu. Yani **maliyet arttıkça taban artar**.
+        assert!((round_trip_cost_bps() - 19.0).abs() < 1e-9, "2×(4.5+5.0)");
+        assert!((min_risk_dist_bps() - 75.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn spread_yarisi_ek_floor_ekleyebilir() {
+        // ince defter: spread 30 bps → 3×30 = 90 > 75 → taban 90
+        let (ok, risk_bps, floor) = ev_ok(0.0025 / 1.5, 1.5, 30.0);
+        assert!((floor - 90.0).abs() < 1e-6, "floor {floor}");
+        assert!(!ok);
+        // spread 100 bps → taban 300 bps; 1.5×ATR %2.25 (225) < 300 → SKIP
+        let (ok2, r2, f2) = ev_ok(0.015, 1.5, 100.0);
+        assert!((f2 - 300.0).abs() < 1e-6);
+        assert!((r2 - 225.0).abs() < 1e-6);
+        assert!(!ok2, "yayılma maliyeti yüzünden 225 bps yetmez");
+    }
+
+    #[test]
+    fn basabaş_wr_matematiği_kapinin_gerekcesi() {
+        // SL = 25 bps, TP = 50 bps (2:1), maliyet 19 bps round-trip.
+        // Kazanma getirisi net = 50 − 19 = 31 bps; kayıp = 25 + 19 = 44 bps.
+        // Başabaş WR = 44 / (44+31) = %58.7 → altındaki her şey negatif EV.
+        let sl = 25.0_f64;
+        let tp = 50.0_f64;
+        let cost = 19.0_f64;
+        let win_net = tp - cost;
+        let loss_net = sl + cost;
+        let be = loss_net / (loss_net + win_net);
+        assert!((be - 0.5868).abs() < 1e-3, "başabaş WR {be:.4}");
+        // kapı 75 bps ile: SL=75, TP=150 → win_net=131, loss_net=94 → be=%41.8
+        let sl2 = 75.0_f64;
+        let tp2 = 150.0_f64;
+        let be2 = (sl2 + cost) / (sl2 + cost + (tp2 - cost));
+        assert!(be2 < be, "kapı başabaş eşiğini düşürüyor: {be2:.4} < {be:.4}");
+    }
+
+    #[test]
+    fn ev_kapisi_clamp_degil_skip() {
+        // Kanıt: kapı stop'u DARALTMAZ, işlemi hiç açmaz.
+        // (clamp olsaydı 25 bps stop daha da yakınlaştırılır ve EV kötüleşirdi)
+        let (ok, risk_bps, floor) = ev_ok(0.001, 1.5, 0.0); // risk 15 bps
+        assert!(!ok);
+        assert!((risk_bps - 15.0).abs() < 1e-6, "ölçülen risk DEĞİŞMEDİ");
+        assert!(risk_bps < floor, "sadece karşılaştırma yapıldı");
+    }
+}

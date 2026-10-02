@@ -148,3 +148,6 @@ pub(crate) fn volumes(candles: &[Candle]) -> Vec<f64> {
 pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
     v.last().and_then(|x| *x)
 }
+
+/// Registry'deki strateji sayısı (nötr cold-start logu + testler).
+pub const STRATEGY_COUNT: usize = 18;
