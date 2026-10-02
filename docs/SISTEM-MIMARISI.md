@@ -71,7 +71,7 @@ adresi sorgularda boş döner — resmi kural).
 | Dosya | İçerik / mantık |
 |---|---|
 | `ingestor.rs` | `load_universe`: metaAndAssetCtxs TEK çağrı→delist/hacim eşiği filtreleme, hacme göre sıralı. `Ingestor::start`: coinler N shard WS'e bölünür (trades+activeAssetCtx+ilk-N l2Book; shard0 allMids). `translate`: WsEvent→StreamEvent; **trades dizisi tek tek** (tick kaybı 0). StreamEvent: Trade/Book/Mids/Ctx. |
-| `aggregator.rs` | tick→candle bucket (ts div iv); kapanışta mum + history'ye (cap 500/coin+iv). `taker_balance(5dk buy/sell dengesi)` + `vwap(oturum)` + `backfill`(REST geçmiş). Sunucu zamanı kullanır. |
+| `aggregator.rs` | tick→candle bucket (ts div iv); kapanışta mum + history'ye (`history_len_max` × `history_span_secs/history_span_min_iv` — **sabit 500 değil**, indikatör ısınma penceresi kadar; varsayılan ~4400×1h). `taker_balance(5dk buy/sell dengesi)` + `vwap(oturum)` + `backfill`(REST geçmiş). Sunucu zamanı kullanır. |
 | `market_ctx.rs` | `CtxState` (coin, funding, oi, mark, oracle, premium, dayVlm, **prevDayPx**, ts). WS Ctx + REST tam tarama birleşik. Türetilen: `delta_oi`(likidasyon kadransı), oi/funding serileri, `basis`(spot-perp). |
 | `backfill_job.rs` | **Tarih pompala**: paginasyon (5000 bar/istek, 250 ms uyku) + RESUME (CH'son t'den devam). CandleSink trait → ClickHouseStorage impl. `pump_funding`. |
 | `storage.rs` | Storage trait + üç impl: **Memory**(yedek/test), **ClickHouse**(hl_trades/hl_candles/hl_funding/hl_ctx/hl_strategy_performance; JSONEachRow toplu; TSV count; ReplacingMergeTree dedup; last_candle_ms resume), **Redis** (mids/ctx TTL'li sıcak cache). |
@@ -89,8 +89,7 @@ adresi sorgularda boş döner — resmi kural).
 | `executor.rs` | api Exchange ince katman: tick-lot doğrulama, cache'li asset çözümü (ağ çağrısız), open_orders defteri, pozisyon cache (assetPositions), WS orderUpdates/user işleme, refresh_orders/refresh_positions (recon). `batch_execute`: çoklu place+cancel→max 2 POST. |
 | `orderbook.rs` | Yerel L2 defter: REST sync_from_rest + WS snapshot; mid/spread_bps/imbalance(5)/vwap_fill/depth_within_bps/is_stale/is_sane (crossed-book reddi). |
 | `risk_manager.rs` | KAPISI: drawdown halt (`peak_equity`'den %20), equity tabanı (**$50**, `min_account_equity_usd`), coin başına $50 notional, toplam maruziyet, kaldıraç 5×, coin_emir sayısı. **`pre_trade()` YALNIZCA GİRİŞTE** çağrılır (Place kolu) — **çıkışlar hiçbir zaman bloke edilmez**, yani drawdown halt açıkken stop/exit hâlâ çalışır. `resume()` operatör kararı. |
-| `track.rs` | CANLI İSTATİSTİK (dinamik kelly): ştrateji attribution; her kapanan pozisyon → win/loss; ROLLING 100 pencere; f* = p−(1−p)/1.8; win-rate <%35→ağırlık 0; yetersiz pencere → nötr 0.25; JSON ağırlık dosyası (bot restartt'a yeniden yükleme). 2 test ✓ |
-| `backtest.rs` | (OPSIYONEL — kullanıcı "şu an gerek yok" dedi; kod şart) Replay tarihsel; fee+slip maliyet; IS/OOS; overfit tespiti (IS iyi/OOS kötü); sharpe ağırlık üretici. 3 test ✓ |
+| `track.rs` | **CANLI ÖĞRENME** (bkz. §8.4). Backtest kaldırıldı → 18 strateji **nötr w=1.0** ile başlar; attribution ile R kaydı; ROLLING 100 pencere; `n < LEARN_MIN_N`(10) → ağırlık **donmuş 1.0**; `10≤n<30` dinamik f\*=p−(1−p)/1.8 clamp [0.1,2.0]; `n ≥ LEARN_FULL_N`(30) → `win<%35` → **0**. **Persistence**: `TRACK_STATE_PATH` (atomik yazım, 5 dk). Kill-switch taksonomisi (`Health`) + `ExitsOnly` kipi burada. 20 test ✓ |
 
 ---
 
@@ -114,7 +113,7 @@ Trait: `Strategy{name(); evaluate(MarketInput)->Signal}`; `registry()` kayıt de
 | Dosya | Mantık özeti |
 |---|---|
 | `wyckoff.rs` | EMA20/50 trend + efor(hacim oranı)/sonuç(20bar konum) divergence; dry-up→kapatma; burst→yükseliş |
-| `kesit_momentum.rs` | Evren 7g sıralama: üst %20 long / alt %20 short; sıralama kayması→Exit |
+| `kesit_momentum.rs` | Evren **1g** getiri sıralaması (`mark_px/prev_day_px−1` — kodda 7g hesabı **YOK**, P1-G ölçüldü): üst %20 long / alt %20 short; sıralama kayması→Exit |
 | `lob_emir_akisi.rs` | Defter dengesi(5 seviye) >+0.15 İLE taker>%55 ÇİFT onay; momentum kesişimi |
 | `market_making.rs` | Avellaneda-Stoikov: r=mid−q·γ·σ²·T; quote planı ALO |
 | `optimal_execution.rs` | U-şekilli parçalama planı; vol→Ioc/Alo seçimi |
@@ -207,30 +206,39 @@ gidiyordu. Artık `allocate` her adayı tavana kırpır ve kırpmayı loglar
 
 ---
 
-## 8.1 KEŞİF ŞERİDİ (exploration lane)
+## 8.1 KEŞİF KUYRUĞU — veri açlığı (P0-C)
 
-Ağırlığı ~0 olan stratejiler (eğitimde 18 stratejiden 13'ü **0 işlem** üretti) canlıda
-%0.01 taban ağırlıkla küçük lotlarla keşfine çıkar:
+**Eski tanım yanlıştı.** Keşif = "ağırlığı ~0 olan strateji" idi; bu tanım
+nötr cold-start'ta (§8.4) **anlamsızdır** — 18 stratejinin hepsi 1.0 ile
+başlıyor, "ağırlığı 0 olan" diye bir şey yok.
 
-- Sınıflandırma **isimle** (`Vote.explore: HashSet<String>`), ağırlık eşiğiyle DEĞİL —
-  yoksa Wyckoff (0.02) gibi düşük ağırlıklı ama işlem yapan stratejiler yanlışlıkla "keşifçi" olurdu.
-- Sermaye tavanı: saf keşifçi `explore_max_usd = $150` **ÖLÜ KONFİGÜR** — havuz
-  (bütçenin ≤%5'i) daima küçük olduğu için asla erişilemez. Gerçek tavan havuzun
-  kendisi. Bütçe $300 → havuz $15 → tek kişi. Silinmesi ya da bütçeyle birlikte
-  büyütülmesi gerekir; şimdilik dokümante edilmiş kalıyor.
-  taban **keşifçi sayısı × $10** (yoksa havuz 2 kişiye bölününce $7.5'e düşüp $10
-  eşiğinde eleniyordu).
-- **Havuz matematiği:** `finanse_edilebilir = min(N, ⌊havuz/$10⌋)`. Eski
-  `havuz = max(bütçe×%5, N×$10)` iki kısıtla **çelişiyordu**: 13 keşifçi → taban
-  $130 > hesabın tamamı; küçük hesapta %5 = $5.85 < $10 tabanı. Artık havuz = sert
-  %5 tavanı, taban = `finanse_edilebilir × $10`, yani taban havuzu **aşamaz**
-  (`$10/kişi` bir ALT SINIRdır, üst sınır değil). Tavan dolunca elenen keşifçi
-  loglanır: `[AL] keşif tavanı dolu (1 kişi × $10 = $15.00) — JUP elendi`.
-- Keşifçiler `min_conviction`'u **bypass** eder (0.01 taban ağırlık eşiğe asla erişemez);
-  kapı sermaye tavanıdır.
-- Terfi (`track.rs`): n≥30 **ve** kazanç≥0.55 **ve** PF≥1.30 (PnL/risk'ten gerçek R-çarpanı).
-  R-çarpımı **canlı dolum yolunda** kaydedilir (`entry_attr` + `record_outcome_r`).
-  Düşüşte terfi geri alınır: kazanç≤0.38 veya PF<0.90.
+**Yeni tanım: keşif hakkı = VERİ AÇLIĞI.**
+
+| | Kural |
+|---|---|
+| Kuyruğa girme | `n < LEARN_FULL_N` (varsayılan 30) — yani **kanıtı yetersiz** her strateji |
+| Sıralama | `n` artan (en az veri gören önce), sonra isim (deterministik) |
+| Sıra dağıtımı | **round-robin**, döngüde en fazla **BİR** keşifçi (`explore_cursor`) |
+| Zorunluluk | Sıradaki keşifçi **sinyal üretirse** `min_conviction` bypass + $10 taban; **üretmezse zorla işlem AÇILMAZ** |
+| Çıkış | `n ≥ LEARN_FULL_N` → kuyruk bir daha görünmez (terfi/düşüş artık normal tracker akışında) |
+
+Havuz matematiği **aynen korunur** (P0-C kapsamı dışında, zaten doğrulanmıştı):
+`finanse_edilebilir = min(N, ⌊havuz/$10⌋)`, havuz = bütçenin ≤%5'i, taban = kişi başı
+$10 (taban havuzu **aşamaz**). `explore_max_usd = $150` **ölü konfigürdür** —
+havuz küçük hesapta $15 bile olamıyor; gerçek tavan havuzun kendisi.
+Dokümante edilmiş kalıyor (silinmesi bütçe kararına bağlı).
+
+Loglar:
+```
+[KEŞİF] sıra: Kesit Momentum (n=0 < full_n=30) | kuyruk=18 | sinyal veren=4 | sıradakiler=["Kesit Momentum","Wyckoff",…]
+[AL] keşif tavanı dolu (1 kişi × $10 = $15.00) — ZK elendi
+```
+İlk satır **döngüde kim bypass aldığını**, ikincisi **havuzun ne kadar büyük
+olduğunu** gösterir. Log örneğindeki `1 kişi × $10` = tavan payı; elenenler
+kelimenin sonunda.
+
+Terfi/düşüş artık keşif şeridinde değil, `track.rs` normal akışında:
+`n ≥ 30` → f\* formülü; `win < %35` → ağırlık **0**.
 
 ---
 
@@ -447,6 +455,15 @@ Karar ve gerekçe:
 > **Doküman düzeltmesi:** bu bölüm ve KIYAMET-AUDIT "3:1" diyordu.
 > `sl_atr_mult = 1.5` / `tp_atr_mult = 3.0` → gerçek oran **2:1**. Test
 > `tp_sabit_kalir_trailing_yok` gerçek sabitlerle yazıldı.
+>
+> **TP NEREDE? TP yalnız bot-tarafıdır; borsada resting TP asla konmaz.**
+> Borsada yalnız **stop** vardır (`place_trigger`, reduceOnly, triggerPx).
+> TP tetiklendiğinde bot `ExitNow` (reduce_only IOC) gönderir. Nedeni:
+> yerleştirilen her şey bir kırılma noktasıdır — iki borsa emri aynı pozisyonu
+> iki kez kapatmaya çalışırsa biri "position does not exist" ile reddedilir,
+> diğeri bekler; daha kötüsü, TP borsada dururken bot'un trailing SL'si
+> hareket edemez (koruma katmanı iki yönlü çelişir). Tek doğruluk kaynağı
+> **bot içi mantık**; borsa katmanı yalnız felaket-stop'u.
 
 #### Uygulama
 
@@ -635,9 +652,13 @@ gerçekten sık tetikleniyor — bu durumda ek bir `openOrders` çağrısı oluy
 `ctx.all()`'dan kuruluyor, yani **158 coin'in tamamı** (`l2book_top_n` yalnız L2
 defter derinliğini sınırlıyor, sıralamayı değil). `kesit_momentum` kendi içinde
 `universe_returns.len() < 20` ise atlar, üst %20 / alt %20 long/short yapar.
+**Pencere 1 GÜNDÜR** (P1-G ölçüldü): `ctx.mark_px / ctx.prev_day_px − 1`
+(`activeAssetCtx`). Kod tabanında 7 günlük getiri hesabı **yoktur**; eski
+doküman "7g sıralama" diyordu ve **kodla çelişiyordu**.
 
-**Karar: değiştirme.** Eğitim ve canlı aynı evreni kullanıyor, dolayısıyla
-eğitim/live çelişkisi yok. Tek giderimi: defteri olmayan coin'lerin oyu
+**Karar: değiştirme.** Backtest kaldırıldığı için "eğitim evreni" diye bir şey
+kalmadı — **tek evren = canlı evren**, dolayısıyla eğitim/live çelişkisi yapısal
+olarak imkânsız. Tek giderimi: defteri olmayan coin'lerin oyu
 toplamdan düşüyor (`n_skip_nobook` loglanır) — bu **zaten ölçülen** bir gerçek,
 sinyalin ağırlığını değil sıralamasını etkiler.
 
@@ -655,6 +676,141 @@ restart'a dayanıklı olduğu için asıl koruma zaten orada.
 
 ---
 
+## 8.4 CANLI EĞİTİM — nötr cold-start (P0-B/P0-C/P0-D)
+
+**Backtest motoru kaldırıldı** (`backtest.rs`, `backtest_multi.rs`,
+`bin/backtest_train.rs` — 819 satır). Neden: o ağırlıklar **look-ahead biased**
+bir motordan geliyordu (S19) ve kaynağı düzeltmek yerine **kaldırmak** daha
+sağlam. Testnet bedava ve gerçek dolum akışı veriyor.
+
+### 8.4.1 Önyükleme
+
+| Durum | Sonuç |
+|---|---|
+| `ensemble_weights_live.json` yok | `[LEARN] nötr başlangıç: 18 strateji × w=1.0; persistence=ON (min_n=10 full_n=30)` |
+| `origin != "live"` (örn. eski backtest çıktısı) | **REDDEDİLİR** + WARN → nötr cold-start |
+| `origin == "live"` | ağırlıklar yüklenir, eksik stratejiler 1.0'a düşer |
+
+Varsayılan yol **`ensemble_weights_live.json`** (eski `ensemble_weights.json`
+artık **anlamsız**: backtest çıktısı ve biaslıydı).
+
+### 8.4.2 Ağırlık politikası (tek tablo)
+
+| Pencere `n` | Ağırlık |
+|---|---|
+| `n < LEARN_MIN_N` (**10**) | **1.0 sabit — DONUZ.** 2-3 rastgele işlem ağırlığı öldürmesin |
+| `10 ≤ n < LEARN_FULL_N` (30) | dinamik `f* = p − (1−p)/1.8`, clamp **[0.1, 2.0]** |
+| `n ≥ LEARN_FULL_N` (30) | tam kurallar: `win < %35` → **0** |
+
+ENV: `LEARN_MIN_N`, `LEARN_FULL_N`.
+
+### 8.4.3 Persistence (S20 #4 kapandı)
+
+Tracker her **5 dakikada** `TRACK_STATE_PATH` (varsayılan
+`config/track_state.json`) dosyasına **atomik** (tmp + rename) yazılır:
+her strateji için `n`, `win`, `pf`, `ΣR`, `last_ts`. Açılışta yüklenir.
+
+Yazılmazsa restart'ta tüm canlı öğrenme kaybolur ve bot **her seferinde**
+18×1.0'a düşer → hiç öğrenemez. `entry_attr` (pozisyon başına R girdisi)
+RAM'de kalır; restart kabul edilebilir (yalnız o pozisyonun kapanışında R
+kaydı düşer).
+
+### 8.4.4 Gözlemlenebilirlik
+
+Açılışta **tek satır** cold-start, sonra **60 saniyede bir** tablo
+(5 sn döngüde her tur basmak log spam olurdu):
+
+```
+[LEARN] 18 strateji | kuyruk=18 | cursor=7
+Kesit Momentum          w=1.00 n=0    win=-    pf=-    ΣR=+0.00
+Dow Teorisi             w=0.42 n=12   win=42%  pf=1.10  ΣR=-0.80
+Elliott Dalga           w=0.00 n=34   win=29%  pf=0.71  ΣR=-4.20
+```
+
+Ağırlık **değiştiğinde** ayrıca `[LEARN] TERFİ/SUSTUR: … 1.00→0.42 (n=12 …)`
+satırı düşer.
+
+### 8.4.5 Fee-farkındalıklı EV kapısı (P0-D) — SKIP, clamp değil
+
+Sayılarla (hepsi ölçüldü):
+
+```
+round-trip maliyet ≈ 2 × (taker 4.5 + slippage 5.0) = 19 bps   (%0.19)
+stop mesafesi = 1.5 × ATR  →  düşük volatilitede taban %0.25 (25 bps)
+R = 0.25 / 0.19 ≈ 1.3     →  TP = 2×SL = %0.50  →  başabaş WR ≈ %59
+```
+
+`WR = %59`'a kadar **yapısal olarak negatif EV**. Testnet kayıpları
+(R ≈ $0.125) birebir bunun sonucu.
+
+**Kural:** `min_risk_dist_bps = max(75, 3 × round_trip_cost_bps)`.
+Tahsisten sonra, yürütmeden önce: `1.5×ATR_bps < min_risk_dist_bps` →
+`Signal::Skip`. Defter inceyse floor'a `spread_bps × 3` de eklenir.
+
+```
+[EV] BIGTIME ATR 167bps → risk 250bps < maliyet flooru 750bps → SKIP
+     (round-trip 190bps; işlem sayısının düşmesi BEKLENEN davranış)
+```
+
+> **İşlem sayısının düşmesi hata değil, DOĞRU davranıştır.** Düşük volatilite
+> = yüksek likidite + dar spread = aslında en iyi coinler; ama `1.5×ATR` orada
+> %0.25'e düşüyor. Doğru yanıt pozisyon almamak.
+> ENV: `EV_TAKER_FEE_BPS`, `EV_SLIPPAGE_BPS`, `EV_MIN_DIST_BPS`.
+
+### 8.4.6 Kill-switch taksonomisi + `ExitsOnly` (P1-F)
+
+Eski kural "**5** hata üst üste → flatten + dur" idi; bu **çok geniş** bir
+sayaçtı. Testnet WS'i dakikada birkaç kez düşüyor (`502 Bad Gateway`,
+`Connection reset`) — yani **normal** olan durum sistemi öldürüyordu.
+
+| Hata türü | Sayılır mı | Gerekçe |
+|---|---|---|
+| `clearinghouseState` art arda parse-fail | ✅ | pozisyon durumu **bilinmiyor** → risk hesabı yanlış |
+| `batch_place` sonucu bilinmiyor | ✅ | emir borsada mı bilinmiyor → pozisyon ikiye katlanabilir |
+| `flatten` başarısız | ✅ | kapatma yapılmamış olabilir → stop emniyeti tek katman |
+| WS reconnect | ❌ | veri akışı kesintisi; karar etkilenmez (state REST'ten gelir) |
+| retry'da **başarıya ulaşan** tekil REST timeout | ❌ | `signing::post` zaten geri çekip yeniden yolluyor |
+| stop-yerleştirme hatası | ❌ | `ensure_sl` + `sync_exchange_sl` + `dedupe_sl` halleder |
+| 429-after-backoff başarı | ❌ | backoff sonrası başarı = normal |
+
+Emin olunamayan hata → **Critical** (güvenli yön varsayılanı).
+
+**`ExitsOnly`** (S8'in kalan maddesi): akış kanalı kapandığında `5 dk'da >10`
+kopma → kill **değil**, `ExitsOnly`. `engine.entries_allowed = false` →
+`Action::Place` (yeni giriş) elenir; **`ExitNow` (çıkış) ve borsa stop'ları
+etkilenmez** — mod yalnız "daha fazla risk almayı" kapatır.
+
+**Flatten başarısız olsa bile bot durur** ve `CRITICAL` loglar:
+> `düzleştirme sonrası N pozisyon AÇIK. Bot duruyor — bu pozisyonlar ARTIK
+> BORSA STOP'UNA EMANET (bot içi kontrol yok). Elle müdahale gerek.`
+
+ENV: `ENGINE_CRIT_THRESHOLD` (varsayılan 5).
+
+### 8.4.7 Cloid ölçümü (P2-H)
+
+Testnet'te **ölçüldü**: `place → cancel → AYNI cloid ile tekrar place`
+→ **KABUL** (yeni oid). Yani cloid borsada **tek kullanımlık değil**,
+`tid` gibi bir dedup anahtarı değil.
+
+Sonuç: proses-içi monotonik sayaç **EKLENMEDİ** — eklemek idempotency
+amacını bozardı (retry farklı cloid gönderirse aynı emri iki kez yollayabilir
+hale gelirdi). Doğrulandı: `signing::post` **aynı gövdeyi** tekrar yollar
+(`exchange_action` nonce'ı imzalamadan ÖNCE üretir, `post` aynı `body`'yi
+retry eder) → retry asla farklı cloid üretmez.
+
+Batch içi çakışma savunması: `salt = n_cycles<<16 | batch_index`.
+
+### 8.4.8 Dürüst kısıt
+
+**Testnet dolum kalitesi gerçek likiditeyi temsil etmez** — istatistikler
+**yön göstergesidir**, kâr kanıtı değildir. Canlı eğitim tamamlanana kadar
+**kâr iddiası yoktur**.
+
+Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı kararı**
+(uygulama bu maddede yok).
+
+---
+
 ## 9. CANLI DOĞRULAMA TARİHİ (mainnet — gerçek veri)
 
 | Evre | Test | Sonuç |
@@ -666,11 +822,11 @@ restart'a dayanıklı olduğu için asıl koruma zaten orada.
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 2 + backtest 3 + ensemble 4 | 19/19 ✓ |
+| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 | 69/69 ✓ |
 | engine | KIYAMET (bozuk coin + stale + resync + kötü boyut + korelasyon çöküşü) | 0 panik; graceful skip; risk kapısı aktif |
 
 Detaylı kıyamet senaryo denetimi: `docs/KIYAMET-AUDIT.md`.
 
 ---
 
-*Son güncelleme: 2026-10-02. Derleme: `cargo build --release --workspace` temiz, `cargo test -p engine` 36/36.*
+*Son güncelleme: 2026-10-02. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 4, hepsi yeşil.*

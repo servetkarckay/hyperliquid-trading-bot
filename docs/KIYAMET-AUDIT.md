@@ -238,45 +238,38 @@ REST'ten. Makine kararı WS fiyatını kullanır.
 
 ---
 
-## 6. BACKTEST PARADOKSU
+## 6. BACKTEST PARADOKSU → ÇÖZÜLDÜ (motor kaldırıldı)
 
-### S19. Look-ahead Bias — 🟥 **AÇIK VE ETKİSİ BÜYÜK**
-**KOD GERÇEĞİ:** Backtest bar `i` kapanışında sinyal üretiyor ve **aynı barın
-kapanışında fill** yapıyor → kapanışı bilmek = geleceği görmek → kâr şişer.
-**ESKİ METİNİN HATASI:** "backtest gerek yok, bekler" deniyordu. Bu **mantık
-hatası**: ensemble ağırlıkları (`config/ensemble_weights.json`) **zaten bu
-biased motorla eğitildi**. Yani prod ağırlıkları biased motorun çocuğu.
-Düzeltme 1-2 satır değil, **ağırlıkların düzeltilmiş motorla yeniden
-üretilmesini** gerektirir.
-**ETKİ BOYUTU:** ~53 oy → yalnız 2 strateji eğitimi geçti; biased motor
-kazananları şişirdiği için canlıda hepsi ölü olabilir.
-**ÇÖZÜM (sıralı):** (1) fill `candles[i+1].open` fiyatına + slippage; (2) aynı
-motorla ağırlıkları **yeniden eğit**; (3) yalnız ondan sonra canlıya güven.
-⏳ Bekliyor.
+### S19. Look-ahead Bias — 🟩 KAPALI (motor kaldırıldı)
 
-**KARAR PAKETİ (bu turun analisti "tek karara bağlanmalı" dedi — ölçüldü):**
+**ÇÖZÜM UYGULANDI — biaslı ağırlıkların KAYNAĞI yok edilerek.**
 
-| Soru | Ölçüm | Sonuç |
-|---|---|---|
-| Fee modeli maker mı taker mi? | `backtest.rs`: `taker_fee_bps = 4.5`, `slippage_bps = 5.0` | ✅ **zaten taker**. Analistin "maker ücretiyle yazılmış olabilir" varsayımı **yanlış**; şişme kaynağı fee değil S19 |
-| Motorda kaç strateji geçebilir? | 2/18 (biased motorda bile) | Gerçekçi beklenti: düzeltilmiş motorda **0–2**. 0 ise keşif şeridi tek yol |
-| Keşif hızı | bütçe $300 → havuz %5 = **$15** → `min(N, ⌊$15/$10⌋)` = **1 kişi** | 13 keşifçi × n≥30 ≈ **aylar–yıllar**. Keşif bütçesi büyütülmezse bu şerit pratikte ölü |
+| | |
+|---|---|
+| Ne yapıldı | `backtest.rs`, `backtest_multi.rs`, `bin/backtest_train.rs` **silindi** (819 satır, 3 test) |
+| Neden düzeltmek yerine kaldırmak | Bias motorda; düzeltilebilir ama **doğrulaması testnet verisiyle aylar sürerdi**. Kaynak yok edildi → doğrulama sorusu **kapanır** |
+| Yerine ne kondu | **Nötr cold-start**: 18 strateji × w=1.0, `LEARN_MIN_N`=10 / `LEARN_FULL_N`=30; eğitim tamamen canlı tracker'da (S20 #4 ile birlikte) |
+| Yanlışlıkla bayat dosya yüklenmesi | `origin != "live"` → **REDDEDİLİR** + WARN. Varsayılan yol `ensemble_weights_live.json` |
+| **Dokunulmayanlar** (bilinçli) | `Aggregator::backfill` (canlı indikatör ısınması için şart), `backfill_job.rs` + ClickHouse arşivi + `collect.rs` (offline analiz altyapısı), `math::portfolio` (başka yerde kullanılıyor), `storage.rs`'teki `hl_strategy_performance` tablosu (ileride canlı upsert hedefi) |
+| **Sonuç** | **Look-ahead artık UYGULANAMAZ** — çalıştırılacak bir motor yok. Eğitim canlı tracker'da, bias kavramı yok |
 
-Yani pakette **üçü ayrı değil**: S19 düzeltmesi → yeniden eğitim → geçen
-strateji sayısı → keşif havuzu büyüklüğü. Önce S19 düzeltilmeli, sonra
-eğitim çalıştırılmalı, sonra bütçe kararı verilmeli. Bu turda motor
-**doğruluğu** kanıtlandı; kârlılık kanıtlanmadı ve S19 kapanmadan
-kârlılık iddiası mümkün değil.
+### S20. Kelly Dinamizmi — 🟢 KISMİ → kalan tek madde canlı upsert
 
-### S20. Kelly Dinamizmi — 🟡 KISMİ
 **KOD GERÇEĞİ:** Tracker rolling-100 gerçek dolumlardan besleniyor ✅;
-`dyn_weights()` her döngü başında ✅; ağırlık JSON dump 5 dk'da ✅. Keşif
-terfi ölçütleri: n≥30, kazanç≥0.55, PF≥1.30; düşüşte geri alma var ✅.
-**AÇIK:** (1) `hl_strategy_performance`'a canlı upsert yok; (2) **restart'ta
-`entry_attr` + rolling tracker RAM'de** → terfi/düşüş kararları boş pencereyle
-yeniden başlıyor (ağırlıklar JSON'da yaşıyor, istatistikler yaşamıyor);
-(3) R-çarpımı kaydı canlı dolum yolunda besleniyor ama restart'ta kayboluyor.
-**ÇÖZÜM:** ⬜ `track` durumunu diske yaz (5 dk dump zaten var → aynı dosyaya).
+ağırlıklar her döngüde yeniden hesaplanıyor ✅; ağırlık JSON dump 5 dk'da ✅.
+Cold-start kuralları: `n<10` → **donmuş 1.0**, `10≤n<30` → clamp [0.1,2.0],
+`n≥30` → `win<%35` → 0.
+
+**✅ KAPANDI (4):** tracker durumu artık **diske yazılıyor** —
+`TRACK_STATE_PATH` (default `config/track_state.json`), **atomik** (tmp+rename),
+5 dk döngü, açılışta yükleniyor. Restart artık öğrenmeyi **sıfırlamıyor**.
+Test: `track_state_yaz_ok_roundtrip` (yaz→oku→**aynı ağırlıklar**).
+
+**🟡 KALAN:** (1) `hl_strategy_performance`'a canlı upsert yok (ClickHouse
+arşivi diske yazmıyor); (2) `entry_attr` (pozisyon başına R girdisi) RAM'de —
+restart'ta o pozisyon kapanırken R kaydı düşer. İkisi de **restart sonucu
+bozan** değil, sadece **eksik kayıt**.
+
 
 ---
 
@@ -368,15 +361,23 @@ Bu, "kill-switch + SL yok = yetim pozisyon" açığının çözümüdür.
 
 ## DÜRÜST BORÇ LİSTESİ (karar vermeden önce bilinmeli)
 
-1. **S19 look-ahead düzeltilmedi** → canlı ağırlıklar biased backtest'ten geliyor.
-   Bu, "neden 2 strateji kazandı" sorusunun temelidir. **Öncelik 1.**
+1. ~~S19 look-ahead düzeltilmedi.~~ ✅ **KAPANDI**: backtest motoru **kaldırıldı**
+   (819 satır); ağırlıklar nötr cold-start (18 × w=1.0) + canlı tracker'dan
+   öğreniyor; `origin != "live"` dosyalar reddediliyor.
+   **Yerine konan gerçek borç:** *canlı eğitim tamamlanana kadar kâr iddiası
+   yok.* Doğruluk kanıtlandı, kârlılık **kanıtlanmadı ve şimdilik
+   kanıtlanamaz** (veri yok). Testnet dolum kalitesi gerçek likiditeyi temsil
+   etmez — istatistikler **yön göstergesidir**.
 2. **Kâr yok** — hiçbir çıkış henüz R-çarpanı kaydetmedi. 0 kazanç, sistem
    doğruluğunu değil kârlılığını kanıtlamaz.
 3. **Korelasyon kriz modu, VaR, funding EMA, makine-bazlı stale koruması yok.**
-4. **Restart istatistik kaybı** (S20) — terfi kararları her restart'ta sıfırlanıyor.
-5. **Keşif şeridi %5 bütçe tavanıyla** pratikte döngü başına 1 keşifçi
-   finanse edebiliyor (bütçe $300 → havuz $15 → ⌊15/10⌋ = 1). Terfi (n≥30)
-   için bu **çok yavaş**; `ENGINE_BUDGET_USD` veya tavan artırılmalı.
+4. ~~**Restart istatistik kaybı** (S20).~~ ✅ **KAPANDI**: tracker durumu
+   `TRACK_STATE_PATH`'e atomik yazılıyor ve açılışta yükleniyor.
+5. **Keşif kuyruğu %5 bütçe tavanıyla** pratikte döngü başına 1 keşifçi
+   finanse edebiliyor (bütçe $300 → havuz $15 → ⌊15/10⌋ = 1). `n ≥ 30` için bu
+   **çok yavaş**; `ENGINE_BUDGET_USD` veya tavan artırılmalı. Keşif artık
+   isim-temelli değil **veri-açlığı** kuyruğudur (P0-C): `n < 30` olanlar
+   round-robin sırayla bypass alır, sinyal üretmeyene zorla işlem açılmaz.
 6. **Piramitleme tamamen kapalı** — açık pozisyon varken aynı coine giriş yok.
    Bilinçli karar (risk), ama trend stratejileri için maliyetli olabilir.
 7. **Sinyal çıktısı hâlâ çok düşük.** ~55-79 oy → 0-2 aday (0.12 conviction
@@ -395,9 +396,17 @@ Bu, "kill-switch + SL yok = yetim pozisyon" açığının çözümüdür.
    stop fiyatını tutuyor (`dedupe_sl` `openOrders`'tan, `ensure_sl`/`replace_sl`
    yerleştirmeden yazıyor) ve `tralstate` kurulurken ondan okunuyor.
 10. **Trailing'in faydası henüz kanıtlanmadı.** `[MFE]` logu eklendi
-   (MFE/MAE R cinsinden) ama mevcut 4 kayıp örneğin hepsi 1-4 dk içinde
-   stop'landı (MFE ≈ 0) → mevcut veri trailing'in işe yaramayacağını söylüyor.
-   Karar (tut/kapat/k değiştir) birkaç yüz işlem sonra verilmeli.
+   (MFE/MAE R cinsinden). ⚠️ **O 4 kayıp örnek artık GEÇERSİZ veridir** —
+   hepsi §8.3.16 **stop-tarafı hatasının** kurbanıydı (stop karar anındaki
+   defter fiyatından hesaplanıyordu; IOC kayması %0.9-1.3 ölçülünce kısa
+   stop dolumun altına düşüp **1.1 sn'de** tetikleniyordu). MFE ≈ 0 ölçümü bu
+   yüzden trailing'i değil **bogyayı** gösteriyordu. Gerçek trailing-etkinliği
+   verisi **sıfırdan** toplanmalı; `k = 1.5` kararı o veriden sonra
+   (tut / değiştir / kapat) verilmeli.
+11. **Yeni EV kapısı işlem sayısını düşürdü (P0-D).** `1.5×ATR < 75 bps`
+   → SKIP. Testnet'te bu **beklenen** davranış: %59 başabaş WR'a kadar
+   yapısal negatif EV varken pozisyon almamak doğru. Yanlış alarm üretirse
+   (`ATR` ölçümü hatalı çıkarsa) devre dışı bırakılabilir — `EV_MIN_DIST_BPS=0`.
 
 *Detaylı çözüm için: SISTEM-MIMARISI.md §8 (ENV), §8.0.2 (cap birimleri),
 §8.1 (keşif şeridi), §8.2 (borsa emir kuralları), §8.3.x (bugfix'ler).*
@@ -432,5 +441,44 @@ invariant assertion içeriyor:
 | bozuk risk (negatif/NaN/MAX) | `bozuk_risk_degerinde_de…` | ters yönlü emir = kâr garantisi |
 | yön karıştırılırsa | `yon_karistirilirsa…` | %10.5 → stop ters yöne kayar |
 
-Toplam: engine **56 test** (36 taban + 4 senaryo + 2 cloid + 2 stop-px +
-4 sl-side + 8 trailing), strategy 4, workspace temiz.
+| cold-start: dosya yok → hepsi 1.0 | `dosya_yoksa_hepsi_netir_bir` | — |
+| `n=5, win=0` → ağırlık **hâlâ 1.0** | `bes_islem_sifir_kazanc_agirligi_olmez` | 2-3 işlem ağırlığı öldürüyordu |
+| `n=30, win=%20` → ağırlık **0** | `otuz_islem_dusuk_kazanc_susturur` | — |
+| clamp asla `[0.1,2.0]` dışına çıkmaz | `on_islem_arasi…`, `clamp_ust_tavanini_asmaz` | — |
+| keşif = **veri açlığı** (`n<full_n`) | `kuyruk_veri_acligi_olana_girer…` | "ağırlığı ~0" tanımı nötr başlangıçta anlamsız |
+| döngüde **tek** keşifçi (round-robin) | `ayni_dongude_iki_kesifciye_sira_gelmez` | tüm keşifçiler aynı anda bypass alıyordu |
+| sinyal üretmeyene işlem **AÇILMAZ** | `sinyal_utermeyene_zorla_islem_acilmaz` | — |
+| `n ≥ full_n` kuyrukta **görünmez** | `full_n_ulasilan_kuyruktan_disiyor` | — |
+| tracker **yaz→oku→aynı ağırlık** | `track_state_yaz_ok_roundtrip` | restart her seferinde cold-start'a düşüyordu |
+| `origin:"live"` şeması üretilir | `live_json_origin_live_uretir` | — |
+| EV: düşük volatilite → **SKIP** | `dusuk_volatilite_skip_uretiyor` | negatif-EV işlem açılıyordu |
+| EV: yüksek volatilite → geçer | `yuksek_volatilite_gecer` | — |
+| EV tabanı = `max(75, 3×maliyet)` | `taban_maliyetin_ucun_kati` | — |
+| EV: ince defterde spread floor'u | `spread_yarisi_ek_floor_ekleyebilir` | yayılma maliyeti hesaba girmiyordu |
+| EV **SKIP'tir**, clamp değil | `ev_kapisi_clamp_degil_skip` | clamp stop'u daha da yaklaştırırdı |
+| WS fırtınası botu **öldürmez** | `ws_hata_firtinasi_botu_oldurmaz_exits_only_gecer` | eski kural her WS düşüşünü sayıyordu |
+| reconnect tek başına kill **yapmaz** | `reconnect_sayisi_tek_basina_kill_yapmaz` | testnet WS'i normalde dakikada birkaç kez düşüyor |
+| geçici REST hataları **sayılmaz** | `gecici_rest_hatalari_sayilmaz` | 502/429/timeout kill'e yol açıyordu |
+| karar-kritik hatalar **sayılır** | `karar_kritik_hatalar_sayilir_ve_kill_switch_uretiyor` | — |
+| emin olunamayan → **Critical** | `emin_olunamayan_hata_kritik_sayilir` | — |
+
+**P2-H ölçüm (canlı):** testnet'te `place → cancel → AYNI cloid ile tekrar
+place` → **KABUL** (yeni oid). Cloid borsada `tid` gibi bir dedup anahtarı
+**değildir** → proses-içi monotonik sayaç **eklenmedi** (eklemek idempotency
+amacını bozardı). `signing::post` **aynı gövdeyi** retry eder → retry asla
+farklı cloid üretmez. Batch içi çakışma savunması:
+`salt = n_cycles<<16 | batch_index`.
+
+**P1-E ölçüm:** `openOrders` rest'te `triggerPx` vermediği için stop seviyesi
+`limitPx / 1.05` (buy stop) ve `/ 0.95` (sell stop) ile geri çevrilip
+tick'e yuvarlanır; `sl_last_px` ile karşılaştırılır, **>%0.1 sapma** → emir
+yabancı sayılır, `sl_orders`'a **sayılmaz** + `[SL-WARN]` (koruma illüzyonu
+yerine gerçek bilgi).
+
+**P1-G ölçüm:** kesit momentum **7g değil 1g** kullanıyor —
+`ctx.mark_px / ctx.prev_day_px − 1` (`activeAssetCtx`). Kod tabanında 7 günlük
+getiri hesabı **yoktur**; doküman "7g sıralama" diyordu ve düzeltildi.
+
+Toplam: engine **69 test** (36 taban + 4 senaryo + 2 cloid + 2 stop-px +
+4 sl-side + 8 trailing + 14 cold-start/keşif/persistence + 6 EV + 8 health),
+strategy 4, workspace temiz.

@@ -7,3 +7,6 @@
 # IDE
 .idea/
 .vscode/
+
+# Tool artifacts
+graphify-out/
