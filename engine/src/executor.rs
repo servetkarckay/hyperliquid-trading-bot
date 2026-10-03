@@ -1089,7 +1089,6 @@ impl Executor {
     }
 
     fn apply_fill(&mut self, f: &Value) {
-        self.fill_count += 1;
         let coin = f["coin"].as_str().unwrap_or("").to_string();
         let px: f64 = f["px"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let sz: f64 = f["sz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
@@ -1101,6 +1100,7 @@ impl Executor {
             tracing::warn!("[DEDUP] duplicate fill tid={tid} coin={coin} — atlandı");
             return;
         }
+        self.fill_count += 1;
         self.realized_pnl += closed;
         if !coin.is_empty() && closed != 0.0 {
             *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;

@@ -1003,7 +1003,8 @@ impl Engine {
                         );
                     }
                     // ÇIKIŞ SEBEBİ: trail state'ten belirle (ratchets > 0 = TrailingStop)
-                    let exit_reason = if let Some((_, _, t)) = &excursion {
+                    // first-write-wins: zaten atanmışsa (SignalExit/EmergencyFlatten) DOKUNMA
+                    let inferred = if let Some((_, _, t)) = &excursion {
                         if t.ratchets > 0 { ExitReason::TrailingStop } else { ExitReason::StopLoss }
                     } else {
                         ExitReason::StopLoss
@@ -1011,7 +1012,7 @@ impl Engine {
                     let Some(mut attr) = self.entry_attr.remove(&c) else {
                         continue;
                     };
-                    attr.exit_reason = Some(exit_reason);
+                    attr.exit_reason = attr.exit_reason.or(Some(inferred));
                     // R = net PnL / giriş riski. Pozisyon adedini bildiğimiz
                     // için risk_usd = risk_px × |szi|; `closed_pnl_by_coin`
                     // `user` dolumundaki `closedPnl` toplamıdır.
@@ -1306,12 +1307,21 @@ impl Engine {
                     .filter_map(|(k, v)| v.parse::<f64>().ok().map(|x| (k, x)))
                     .collect();
                 let left = self.executor.flatten_all(&mids).await;
-                if !left.is_empty() {
-                    tracing::error!("[BLACK SWAN] {} pozisyon kapanamadı — borsa SL'ye emanet", left.len());
-                }
-                // Internal state'i de temizle
-                for m in self.machines.values_mut() {
-                    m.state = PosState::Flat;
+                if left.is_empty() {
+                    // Flatten başarılı → internal state Flat
+                    for m in self.machines.values_mut() {
+                        m.state = PosState::Flat;
+                    }
+                } else {
+                    // Flatten BAŞARISIZ → makineler DOKUNULMAZ
+                    // entries_allowed = false → yeni giriş engelle
+                    // recovery: sync_positions_from ile borsa-temelli
+                    self.entries_allowed = false;
+                    tracing::error!(
+                        "[BLACK SWAN] {} pozisyon kapanamadı — entries_allowed=false, recovery bekleniyor: {}",
+                        left.len(),
+                        left.iter().map(|(c, sz)| format!("{c}={sz}")).collect::<Vec<_>>().join(", ")
+                    );
                 }
             }
         }

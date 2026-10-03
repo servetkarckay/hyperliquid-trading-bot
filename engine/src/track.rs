@@ -477,14 +477,15 @@ impl StrategyTracker {
     /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
     /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
     /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
-    /// restart'ta birebir yüklenir — sentetik ±1R YOK.
+    /// restart'ta birebir yüklenir — sentetik ±1R YOK. schema_version = 2.
+    /// sparse JSON bug fix: önce entry'leri topla, sonra join(",") — indeks tabanlı virgül YOK.
     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
         use std::fmt::Write as _;
         let mut names: Vec<&String> = self.stats.keys().collect();
         names.sort();
-        let mut s = String::from("{\n  \"origin\": \"live\",\n  \"schema_version\": 1,\n  \"strategies\": {\n");
-        for (i, k) in names.iter().enumerate() {
-            let st = &self.stats[*k];
+        let mut entries: Vec<String> = Vec::new();
+        for k in names {
+            let st = &self.stats[k];
             if st.rs.is_empty() {
                 continue;
             }
@@ -492,7 +493,7 @@ impl StrategyTracker {
             let pf = st.profit_factor().unwrap_or(0.0);
             let sr: f64 = st.rs.iter().sum();
             let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
-            // R history'yi array olarak sakla: [[ts, r], ...]
+            // R history array: [[ts, r], ...]
             let mut r_hist = String::new();
             for (idx, (ts, _win)) in st.outcomes.iter().enumerate() {
                 let r = st.rs[idx];
@@ -501,21 +502,20 @@ impl StrategyTracker {
             if !r_hist.is_empty() {
                 r_hist.pop(); // trailing comma
             }
+            let mut entry = String::new();
             let _ = write!(
-                s,
-                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":1,\"r_hist\":[{r_hist}]}}",
+                entry,
+                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":2,\"r_hist\":[{r_hist}]}}",
                 st.rs.len(),
                 wr,
                 pf,
                 sr,
                 last
             );
-            if i + 1 < names.len() {
-                s.push(',');
-            }
-            s.push('\n');
+            entries.push(entry);
         }
-        s.push_str("  }\n}");
+        let strategies = entries.join(",\n");
+        let s = format!("{{\n  \"origin\": \"live\",\n  \"schema_version\": 2,\n  \"strategies\": {{\n{strategies}\n  }}\n}}");
         if let Some(par) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(par);
         }
@@ -526,11 +526,11 @@ impl StrategyTracker {
         Ok(())
     }
 
-    /// Diskten yükle. Provenans kontrolü:
+    /// Diskten yükle. Provenans kontrolü (schema v2):
     /// - `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
-    /// - `schema_version != 1` → WARN + **reddet** (migrate yok, nötr sıfırla)
+    /// - `schema_version != 2` → WARN + **reddet** (v1 sentetik R içerir, v2 gerekli)
     /// - yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
-    /// **Gerçek R history** (`r_hist`) yüklenir — sentetik ±1R YOK.
+    /// **Gerçek R history** (`r_hist`) ZORUNLU — sentetik ±1R fallback YOK.
     pub fn load_state(&mut self, path: &str) -> bool {
         let Ok(txt) = std::fs::read_to_string(path) else {
             return false;
@@ -546,8 +546,8 @@ impl StrategyTracker {
             return false;
         }
         let schema = v.get("schema_version").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
-        if schema != 1 {
-            tracing::warn!("[LEARN] {path} schema_version={schema} != 1 — REDDEDİLDİ, nötr cold-start");
+        if schema != 2 {
+            tracing::warn!("[LEARN] {path} schema_version={schema} != 2 (v1 sentetik R içerir) — REDDEDİLDİ, nötr cold-start");
             return false;
         }
         let Some(map) = v.get("strategies").and_then(|x| x.as_object()) else {
@@ -556,11 +556,7 @@ impl StrategyTracker {
         };
         let mut loaded = 0usize;
         for (name, e) in map {
-            let n = e.get("n").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
-            if n == 0 {
-                continue;
-            }
-            // Gerçek R history'yi yükle (r_hist array)
+            // r_hist ZORUNLU — yoksa bu strateji atlanır (sentetik R YAZMA)
             let r_hist = e.get("r_hist").and_then(|x| x.as_array());
             let st = self.stats.entry(name.clone()).or_default();
             if let Some(hist) = r_hist {
@@ -576,21 +572,13 @@ impl StrategyTracker {
                 loaded += 1;
                 continue;
             }
-            // Fallback: eski format (win/last_ts) - sentetik recon, ama logla
-            let wr = e.get("win").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-            let last = e.get("last_ts").and_then(serde_json::Value::as_u64).unwrap_or(0);
-            let wins = ((wr * n as f64).round().max(0.0) as usize).min(n);
-            tracing::warn!("[LEARN] {name}: eski format (r_hist yok) — sentetik ±1R recon");
-            for i in 0..n {
-                let is_win = i < wins;
-                st.record_r(last.saturating_sub((n - i - 1) as u64 * 60_000), if is_win { 1.0 } else { -1.0 });
-            }
-            loaded += 1;
+            // r_hist YOK → bu strateji YÜKLENMEZ (sentetik R yazmak, R hiç yazmamaktan kötüdür)
+            tracing::warn!("[LEARN] {name}: r_hist eksik — strateji ATLANIYOR (sentetik R YOK)");
         }
         if loaded > 0 {
             tracing::info!(
                 "[LEARN] tracker durumu yüklendi: {loaded} strateji ← {path} \
-                 (gerçek R history korundu — cold-start YOK, origin=live)"
+                 (gerçek R history korundu — cold-start YOK, origin=live, schema=v2)"
             );
         }
         loaded > 0
@@ -859,7 +847,7 @@ mod tests {
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
         // backtestten gelmiş gibi origin="backtest" yaz
-        let bad = r#"{"origin":"backtest","schema_version":1,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        let bad = r#"{"origin":"backtest","schema_version":2,"strategies":{"A":{"r_hist":[[1,0.5]]}}}"#;
         std::fs::write(&path, bad).unwrap();
         let mut t = StrategyTracker::default();
         assert!(!t.load_state(path.to_str().unwrap()), "origin != live → reddedilmeli");
@@ -874,11 +862,11 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
-        // origin=live ama schema_version=0
-        let bad = r#"{"origin":"live","schema_version":0,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        // origin=live ama schema_version=1 (v1 sentetik R)
+        let bad = r#"{"origin":"live","schema_version":1,"strategies":{"A":{"r_hist":[[1,0.5]]}}}"#;
         std::fs::write(&path, bad).unwrap();
         let mut t = StrategyTracker::default();
-        assert!(!t.load_state(path.to_str().unwrap()), "schema_version != 1 → reddedilmeli");
+        assert!(!t.load_state(path.to_str().unwrap()), "schema_version != 2 → reddedilmeli");
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
         assert_eq!(w["A"], COLD_START_WEIGHT);
         let _ = std::fs::remove_file(&path);
@@ -890,12 +878,59 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
-        let good = r#"{"origin":"live","schema_version":1,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0,"sum_r":5.0,"last_ts":1}}}"#;
+        // schema v2 + r_hist with n=15 (>= min_n=10, not frozen)
+        let good = r#"{"origin":"live","schema_version":2,"strategies":{"A":{"r_hist":[[1,0.5],[2,-1.0],[3,1.2],[4,0.8],[5,-0.5],[6,1.1],[7,0.9],[8,-1.2],[9,0.7],[10,1.3],[11,0.6],[12,-0.8],[13,1.0],[14,0.4],[15,-0.3]]}}}"#;
         std::fs::write(&path, good).unwrap();
         let mut t = StrategyTracker::default();
         assert!(t.load_state(path.to_str().unwrap()), "doğru provenance → yüklenmeli");
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
-        assert_ne!(w["A"], COLD_START_WEIGHT, "öğrenilmiş ağırlık gelmeli");
+        assert_ne!(w["A"], COLD_START_WEIGHT, "öğrenilmiş ağırlık gelmeli (n>=10, frozen değil)");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn track_state_r_hist_eksikse_strateji_atlanir_sentetik_r_yok() {
+        let dir = std::env::temp_dir().join("hl_learn_test_prov4");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+        // r_hist yok → strateji atlanmalı
+        let bad = r#"{"origin":"live","schema_version":2,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0}}}"#;
+        std::fs::write(&path, bad).unwrap();
+        let mut t = StrategyTracker::default();
+        assert!(!t.load_state(path.to_str().unwrap()), "r_hist eksik → false");
+        let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
+        assert_eq!(w["A"], COLD_START_WEIGHT, "cold-start'a düşmeli");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn track_state_sparse_json_roundtrip() {
+        // A boş (n=0 → rs boş), B dolu (n=30) → sparse JSON yazıp okuma
+        let dir = std::env::temp_dir().join("hl_learn_test_sparse");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track_state.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut t = StrategyTracker::default();
+        feed(&mut t, "A", 0, 0);   // n=0 → rs boş (save'da atlanır)
+        feed(&mut t, "B", 30, 24); // n=30 → rs dolu
+        let (w0, _, _) = t.effective_weights(&names(&["A", "B"]), &pol(10, 30));
+        t.save_state(path.to_str().unwrap()).expect("yazma");
+
+        // JSON doğruluk kontrolü: trailing comma YOK, sparse entry'ler doğru
+        let txt = std::fs::read_to_string(&path).unwrap();
+        assert!(!txt.contains(",}"), "trailing comma YOK");
+        assert!(!txt.contains(", ,"), "boş entry virgül YOK");
+        assert!(txt.contains("\"B\""), "B yazılmış");
+        assert!(!txt.contains("\"A\""), "A (boş) YAZILMAMIŞ");
+
+        // Gerçek yeni nesne: sadece dosyadan okunuyor
+        let mut t2 = StrategyTracker::default();
+        assert!(t2.load_state(path.to_str().unwrap()), "yüklenmeli");
+        let (w1, _, _) = t2.effective_weights(&names(&["A", "B"]), &pol(10, 30));
+        assert_eq!(w0, w1, "restart sonrası ağırlıklar DEĞİŞMEMELİ");
+        assert_eq!(t2.summary("B").0, 30);
         let _ = std::fs::remove_file(&path);
     }
 
