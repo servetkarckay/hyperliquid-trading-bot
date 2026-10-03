@@ -82,8 +82,10 @@ pub struct Aggregator {
     cfg: AggregatorConfig,
     /// (coin, interval) -> canlı mum
     live: HashMap<(String, u64), CandleState>,
-    /// (coin, interval) -> kapanmış mum geçmişi (en yeni sonda)
+    /// (coin, interval) -> kapanmış mum geçmişi (en yeni sonda) — VecDeque untuk push/pop
     history: HashMap<(String, u64), VecDeque<Candle>>,
+    /// (coin, interval) -> contiguous snapshot for history() — only updated on candle close
+    history_snapshot: HashMap<(String, u64), Vec<Candle>>,
     /// taker akışı: coin -> (ts, sz, is_buy) kayıtları
     taker: HashMap<String, VecDeque<(i64, f64, bool)>>,
     /// oturum VWAP: coin -> (toplam px*sz, toplam sz)
@@ -92,7 +94,7 @@ pub struct Aggregator {
 
 impl Aggregator {
     pub fn new(cfg: AggregatorConfig) -> Self {
-        Self { cfg, live: HashMap::new(), history: HashMap::new(), taker: HashMap::new(), vwap: HashMap::new() }
+        Self { cfg, live: HashMap::new(), history: HashMap::new(), history_snapshot: HashMap::new(), taker: HashMap::new(), vwap: HashMap::new() }
     }
 
     /// Bir tick'i işler; kapanan mumları döndürür (coin, interval, candle).
@@ -146,6 +148,8 @@ impl Aggregator {
                     while h.len() > hl {
                         h.pop_front();
                     }
+                    // P1-B: contiguous snapshot güncelle — sadece mum kapanışında (O(1) amortized)
+                    self.history_snapshot.insert(key.clone(), h.iter().cloned().collect());
                     closed.push((coin.to_string(), iv, done));
                     *st = CandleState { bucket, o: px, h: px, l: px, c: px, v: sz, n: 1 };
                 }
@@ -185,9 +189,9 @@ impl Aggregator {
     }
 
     pub fn history(&self, coin: &str, interval: u64) -> &[Candle] {
-        self.history
+        self.history_snapshot
             .get(&(coin.to_string(), interval))
-            .map(|d| d.as_slices().0)
+            .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
 
@@ -284,6 +288,8 @@ impl Aggregator {
             while h.len() > hl {
                 h.pop_front();
             }
+            // P1-B: contiguous snapshot güncelle
+            self.history_snapshot.insert((coin.to_string(), interval_secs), h.iter().cloned().collect());
             return Ok(h.len());
         }
         Ok(n)

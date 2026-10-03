@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
+use hyperliquid_api::exchange_endpoint::{OrderStatuses, WireOrder};
 
 /// Stop konulduktan sonra aynı coin için tekrar denenmeme süresi (ms).
 /// WS `orderUpdates` "open" bildirimi borsada stop'un ardından geliyor ve
@@ -47,9 +48,7 @@ pub fn make_cloid(coin: &str, px: f64, sz: f64, salt: u64) -> String {
     format!("0x{hi:016x}{lo:016x}")
 }
 
-use hyperliquid_api::{
-    exchange_endpoint::OrderStatuses, Config, Exchange, Info, Tif, now_ms,
-};
+use hyperliquid_api::{Config, Exchange, Info, Tif, now_ms};
 
 /// `user` kanalından gelen gerçek dolum (borsa ort. fiyatı burada verir)
 #[derive(Debug, Clone)]
@@ -135,8 +134,8 @@ pub struct Executor {
     info: Info,
     /// master (gerçek hesap) adresi — kullanıcı sorguları için
     user: String,
-    /// coin -> (asset id, szDecimals)
-    assets: HashMap<String, (u32, u32, u32)>,
+    /// coin -> (asset id, szDecimals, max_leverage)
+    pub assets: HashMap<String, (u32, u32, u32)>,
     open_orders: HashMap<i64, OrderInfo>,
     positions: HashMap<String, Position>,
     realized_pnl: f64,
@@ -1330,11 +1329,19 @@ impl Executor {
                     }
                 })
                 .collect();
-            let status = self.ex.batch_place(&wires).await?;
+            let status = match self.ex.batch_place(&wires).await? {
+                OrderStatuses { raw } => raw,
+            };
             for i in 0..places.len() {
-                let mut oid = status.resting_oid(i);
-                let mut avg = status.filled(i).map(|(_, px, _)| px);
-                let mut err = status.error(i).map(|s| s.to_string());
+                let mut oid = status.pointer(&format!("/response/data/statuses/{}/resting/oid", i))
+                    .and_then(|v| v.as_i64());
+                let mut avg = status.pointer(&format!("/response/data/statuses/{}/filled", i))
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.get(1))
+                    .and_then(|v| v.as_f64());
+                let mut err = status.pointer(&format!("/response/data/statuses/{}/error", i))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 // TICK KEŞFİ: "invalid price" -> coin'in tick'i daha kaba.
                 // (testnet: ME 6 haneyi reddediyor, AXS/BERA/MEME kabul ediyor;
                 //  meta'da tick bilgisi YOK -> öğrenip cache'liyoruz)

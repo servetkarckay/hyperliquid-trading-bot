@@ -1,23 +1,10 @@
-//! Emir iletimi — resmi api/exchange-endpoint.md (+tick-and-lot-size.md).
-//!
-//! Fonksiyonlar: place_limit (Gtc/Ioc/Alo), place_ioc, place_trigger (TP/SL),
-//! cancel (oid), cancel_by_cloid, modify (batchModify), update_leverage,
-//! update_isolated_margin, schedule_cancel.
-//!
-//! WIRE FORMAT (SDK 0.24): action = {"type":"order","orders":[wire],
-//! "grouping":"na"}; wire = {"a":asset,"b":is_buy,"p":px,"s":sz,"r":reduceOnly,
-//! "t":{"limit":{"tif":"Gtc"}},"c":cloid?}; nonce=unix ms; tüm action imzalanır.
-//!
-//! TICK/LOT KURALLARI: fiyat en fazla 5 significant figure ve
-//! 6-szDecimals hane; boyut szDecimals'a yuvarlanır; trailing zero yok.
-//! round_5sig / round_sz_up bu kuralları uygular; min notional $10.
 use serde_json::{json, Value};
 
-use crate::signing::{float_to_wire, HyperliquidClient};
+use crate::signing::{float_to_wire, HyperliquidClient, ExchangeOutcome};
 use crate::config::Config;
-use crate::error_responses::Result;
+use crate::error_responses::{ApiError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Tif {
     /// post-only: anında eşleşirse iptal
     Alo,
@@ -111,12 +98,6 @@ pub fn round_sz_up(x: f64, sz_decimals: u32) -> f64 {
     (x * d).ceil() / d
 }
 
-impl Exchange {
-    pub fn new(cfg: Config) -> Result<Self> {
-        Ok(Self { c: HyperliquidClient::new(cfg)? })
-    }
-}
-
 /// Yürütülecek emir (batch formu — tek API çağrısında çoğaltılabilir)
 #[derive(Debug, Clone)]
 pub struct WireOrder {
@@ -142,6 +123,12 @@ pub struct WireOrder {
 }
 
 impl Exchange {
+    pub fn new(cfg: Config) -> Result<Self> {
+        Ok(Self { c: HyperliquidClient::new(cfg)? })
+    }
+}
+
+impl Exchange {
     /// ÇOKLU EMİR TEK ÇAĞRI (batching — rate limit dostu)
     pub async fn batch_place(&self, orders: &[WireOrder]) -> Result<OrderStatuses> {
         if orders.is_empty() {
@@ -155,9 +142,6 @@ impl Exchange {
                     "p": float_to_wire(round_px_wire(o.px)), "s": float_to_wire(o.sz),
                     "r": o.reduce_only, "t": { "limit": { "tif": o.tif.wire() } }
                 });
-                // ÖNEMLİ: cloid emir nesnesinin İÇİNDE, `{"c": "<16 hex>"}`
-                // olarak gider (eylem seviyesinde değil). Testnet 422 verdi:
-                // "Failed to deserialize the JSON body" — şema yanlıştı.
                 if let Some(c) = &o.cloid {
                     w["c"] = json!(c);
                 }
@@ -165,8 +149,11 @@ impl Exchange {
             })
             .collect();
         let action = json!({ "type": "order", "orders": wires, "grouping": "na" });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// ÇOKLU İPTAL TEK ÇAĞRI
@@ -178,8 +165,11 @@ impl Exchange {
             "type": "cancel",
             "cancels": cancels.iter().map(|(a, o)| json!({ "a": a, "o": o })).collect::<Vec<_>>()
         });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
 /// Limit emir (SDK bulk_orders formati)
@@ -198,7 +188,7 @@ impl Exchange {
 
     /// `place_limit` + **açık `cloid`** (idempotency anahtarı).
     ///
-    /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x…"}` olarak gider (128 bit
+    /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x..."}` olarak gider (128 bit
     /// hex, `0x` + 32 hane — 16 hane API 422 döndürür).
     pub async fn place_limit_cloid(
         &self,
@@ -222,8 +212,11 @@ impl Exchange {
             order["c"] = json!(c);
         }
         let action = json!({ "type": "order", "orders": [order], "grouping": "na" });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// IOC piyasa benzeri emir: fiyata agresif limit + IOC
@@ -261,23 +254,32 @@ impl Exchange {
             order["c"] = json!(c);
         }
         let action = json!({ "type": "order", "orders": [order], "grouping": "na" });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// oid ile emir iptali (SDK bulk_cancel formati)
     pub async fn cancel(&self, asset: u32, oid: i64) -> Result<OrderStatuses> {
         let action = json!({ "type": "cancel", "cancels": [{ "a": asset, "o": oid }] });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// cloid ile iptal
     pub async fn cancel_by_cloid(&self, asset: u32, cloid: &str) -> Result<OrderStatuses> {
         let action =
             json!({ "type": "cancelByCloid", "cancels": [{ "asset": asset, "cloid": cloid }] });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// Emir duzenleme (batchModify)
@@ -299,8 +301,11 @@ impl Exchange {
             "t": { "limit": { "tif": tif.wire() } }
         });
         let action = json!({ "type": "batchModify", "modifies": [{ "oid": oid, "order": order }] });
-        let raw = self.c.exchange_action(action).await?;
-        Ok(OrderStatuses { raw })
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// Kaldirac ayari (cross/isolated + leverage)
@@ -316,7 +321,11 @@ impl Exchange {
             "isCross": is_cross,
             "leverage": leverage
         });
-        self.c.exchange_action(action).await
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(v) => Ok(v),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// Isolated margin ekleme/çekme (ntli = USD * 1e6)
@@ -328,7 +337,11 @@ impl Exchange {
             "isBuy": true,
             "ntli": ntli
         });
-        self.c.exchange_action(action).await
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(v) => Ok(v),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// Tum emirleri belirli zamanda iptal et (None: mevcut plani temizle)
@@ -337,7 +350,11 @@ impl Exchange {
         if let Some(t) = time_ms {
             action["time"] = json!(t);
         }
-        self.c.exchange_action(action).await
+        match self.c.exchange_action(action).await {
+            ExchangeOutcome::Success(v) => Ok(v),
+            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            ExchangeOutcome::Error(e) => Err(e),
+        }
     }
 
     /// Guvenli test emri boyutu: min $10 notional guvence altina alinir
@@ -345,4 +362,3 @@ impl Exchange {
         round_sz_up(12.0 / px, sz_decimals)
     }
 }
-

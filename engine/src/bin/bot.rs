@@ -34,20 +34,29 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = hyperliquid_api::Config::from_env()?;
-    // ENGINE_COINS verilmez/boş/"all" → TÜM AKTİF EVREN (bırakılırsa eskiden sadece BTC)
+    // ENGINE_COINS verilmez/boş/"all" → TÜM AKTİF EVREN
+    let mut ing_cfg = data::IngestorConfig {
+        shard_count: 2,
+        min_day_volume_usd: 0.0,
+        l2book_top_n: 5,
+        max_coins: None,
+        ..Default::default()
+    };
     let coins: Vec<String> = match std::env::var("ENGINE_COINS") {
-        Ok(v) if !v.trim().is_empty() && !v.trim().eq_ignore_ascii_case("all") => v
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect(),
+        Ok(v) if !v.trim().is_empty() && !v.trim().eq_ignore_ascii_case("all") => {
+            let c: Vec<String> = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            ing_cfg.max_coins = Some(c.len());
+            c
+        }
         _ => {
-            // Emir defteri aboneliği KAPALIYSA bid/ask = 0 gelir; tahsis
-            // fiyatı mum kapanışına düşer. Gerçekçi gözlem için L2 açık.
-            let icfg = data::IngestorConfig { l2book_top_n: 20, ..Default::default() };
-            let ing = data::Ingestor::new(cfg.clone(), icfg).await?;
+            // Önce ingestor'dan universe al, sonra engine coins'a ata
+            let ing = data::Ingestor::new(cfg.clone(), ing_cfg.clone()).await?;
             let names = ing.universe.names();
-            tracing::info!("ENGINE_COINS boş → tam evren: {} coin", names.len());
+            tracing::info!("ENGINE_COINS boş → tam evren: {} coin (ingestor da aynı sete abone)", names.len());
             names
         }
     };
@@ -105,14 +114,7 @@ async fn main() -> anyhow::Result<()> {
     let mut engine = Engine::new(cfg.clone(), lc).await?;
 
     // akış + döngü
-    let ingestor_cfg = data::IngestorConfig {
-        shard_count: 2,
-        min_day_volume_usd: 0.0,
-        l2book_top_n: 5,
-        max_coins: Some(30),
-        ..Default::default()
-    };
-    let ingestor = data::Ingestor::new(cfg.clone(), ingestor_cfg).await?;
+    let ingestor = data::Ingestor::new(cfg.clone(), ing_cfg).await?;
     let _rx = ingestor.start(cfg.clone());
 
     // KULLANICI EVENT AKIŞI (orderUpdates + userEvents) — gerçek fill geri beslemesi
@@ -289,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
                     let out = match engine.run_cycle().await {
                         Ok(o) => {
                             health.on_cycle_ok();
-                            engine.entries_allowed = health.entries_allowed();
+                            engine.set_health_ok(health.entries_allowed());
                             o
                         }
                         Err(e) => {
@@ -300,7 +302,7 @@ async fn main() -> anyhow::Result<()> {
                             // WS düşüşleri sistemi öldürüyordu.
                             let kill = health.on_error(&e.to_string());
                             let crit = health.crit_streak();
-                            engine.entries_allowed = health.entries_allowed();
+                            engine.set_health_ok(health.entries_allowed());
                             if kill {
                                 tracing::error!(
                                     "KILL-SWITCH: {crit} karar-kritik hata üst üste — \

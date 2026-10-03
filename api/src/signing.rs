@@ -1,22 +1,3 @@
-//! İmzalama ve HTTP taşıma — resmi api/signing.md + nonces-and-api-wallets.md.
-//!
-//! Hyperliquid imza zinciri (SDK 0.24 ile bayt-bayt doğrulanmış):
-//! 1. Action (JSON, alan sırası korunur) -> msgpack serileştirme
-//! 2. + nonce (8B big-endian, unix ms) + vault prefixi (0x00/0x01+20B)
-//! 3. + expiresAfter (varsa 0x00 + 8B BE)
-//! 4. keccak256 -> action hash (connectionId)
-//! 5. Phantom Agent EIP-712: domain name="Exchange", version="1",
-//!    chainId=1337, verifyingContract=0x0; primary "Agent(string source,
-//!    bytes32 connectionId)"; source="a" (mainnet) / "b" (testnet)
-//! 6. secp256k1 RFC6979 deterministik imza, low-s normalize, v=27+recoveryId
-//!
-//! NONCE: unix ms; (T-2gün, T+1gün) penceresinde olmalı, imzalayan başına
-//! (API wallet = agent adresi) takip edilir. `now_ms()` üretir.
-//!
-//! Ayrıca bu dosya HTTP taşımayı içerir: POST /info (sorgular) ve
-//! POST /exchange (imzalı aksiyonlar; zarf: action+nonce+signature+
-//! vaultAddress+expiresAfter). float_to_wire: fiyat/boyut string formatı
-//! (8 hane, sondaki sıfırlar atılır — "29792.0" -> "29792").
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
@@ -49,14 +30,6 @@ fn next_nonce() -> u64 {
     }
 }
 
-pub fn keccak256(bytes: &[u8]) -> [u8; 32] {
-    let mut k = Keccak::v256();
-    let mut out = [0u8; 32];
-    k.update(bytes);
-    k.finalize(&mut out);
-    out
-}
-
 pub fn signing_key_from_hex(pk: &str) -> Result<SigningKey> {
     let bytes = hex::decode(pk.trim().trim_start_matches("0x").to_ascii_lowercase())?;
     if bytes.len() != 32 {
@@ -71,6 +44,15 @@ pub fn address_of(sk: &SigningKey) -> String {
     let raw = point.as_bytes(); // 0x04 || X || Y
     let h = keccak256(&raw[1..]);
     hex::encode(&h[12..])
+}
+
+/// Keccak256 hash fonksiyonu.
+pub fn keccak256(bytes: &[u8]) -> [u8; 32] {
+    let mut k = Keccak::v256();
+    let mut out = [0u8; 32];
+    k.update(bytes);
+    k.finalize(&mut out);
+    out
 }
 
 /// SDK `float_to_wire` ile birebir: 8 hane, sondaki sifirlar atilir ("29792.0" -> "29792")
@@ -102,9 +84,9 @@ pub fn action_hash(action: &Value, vault_address: Option<&str>, nonce: u64, expi
         }
     }
     match expires_after {
-        None => {} // SDK: expires_after yoksa hicbir sey eklenmez
+        None => {}
         Some(e) => {
-            data.push(0x00); // SDK 0.24: flag 0x00
+            data.push(0x00);
             data.extend_from_slice(&e.to_be_bytes());
         }
     }
@@ -210,15 +192,12 @@ impl HyperliquidClient {
         address_of(&self.sk)
     }
 
-    /// 429/5xx için üstel geri çekilmeli tekrar. Rate limit (ağırlık/dakika)
-    /// 178 coin'lik evrende backfill sırasında rutin olarak tetikleniyor ve
-    /// ham hata **tüm botu öldürüyordu**. 429 borsanın reddi demektir, işlem
-    /// yapılmadığından imzalı aksiyonlarda da tekrar güvenlidir.
-    async fn post(&self, path: &str, body: &Value) -> Result<Value> {
+    /// POST /info için: 429/5xx retry ile (idempotent okumalar)
+    async fn post_info(&self, body: &Value) -> Result<Value> {
         const MAX_TRY: u32 = 5;
         let mut attempt = 0u32;
         loop {
-            match self.post_once(path, body).await {
+            match self.post_once("/info", body).await {
                 Ok(v) => return Ok(v),
                 Err(ApiError::Http { status, body }) if (status == 429 || status >= 500) && attempt < MAX_TRY => {
                     let wait = 500u64 * 2u64.pow(attempt);
@@ -235,6 +214,58 @@ impl HyperliquidClient {
         }
     }
 
+    /// POST /exchange için: 429 -> retry; 5xx/timeout -> UNKNOWN (retry YOK).
+    /// Cagiran taraf UNKNOWN alip reconciliation yapar (refresh_orders + cloid eslesme).
+    async fn post_exchange(&self, action: &Value) -> ExchangeOutcome {
+        const MAX_TRY_429: u32 = 5;
+        let mut attempt_429 = 0u32;
+        loop {
+            let nonce = next_nonce();
+            let sig = match sign_l1_action(&self.sk, action, nonce, self.is_mainnet(), None, None) {
+                Ok(s) => s,
+                Err(e) => return ExchangeOutcome::Error(e),
+            };
+            let body = json!({
+                "action": action,
+                "nonce": nonce,
+                "signature": { "r": sig.r, "s": sig.s, "v": sig.v },
+                "vaultAddress": null,
+                "expiresAfter": null,
+            });
+            match self.post_once("/exchange", &body).await {
+                Ok(v) => return ExchangeOutcome::Success(v),
+                Err(ApiError::Http { status, body }) if status == 429 && attempt_429 < MAX_TRY_429 => {
+                    let wait = 500u64 * 2u64.pow(attempt_429);
+                    tracing::warn!(
+                        "HTTP 429 ({}), {wait} ms bekleyip tekrar ({}/{})",
+                        body.chars().take(80).collect::<String>(),
+                        attempt_429 + 1, MAX_TRY_429
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                    attempt_429 += 1;
+                }
+                Err(ApiError::Http { status, .. }) if status >= 500 => {
+                    // 5xx/timeout -> retry YOK, UNKNOWN dondur
+                    tracing::error!("[EXCHANGE] HTTP {status} -- UNKNOWN (retry YOK, reconciliation bekleniyor)");
+                    return ExchangeOutcome::Unknown;
+                }
+                Err(e) => return ExchangeOutcome::Error(e),
+            }
+        }
+    }
+
+    /// REST info sorgusu: POST /info (429/5xx retry ile)
+    pub async fn info(&self, body: Value) -> Result<Value> {
+        self.post_info(&body).await
+    }
+
+    /// Imzali aksiyon: POST /exchange -- UNKNOWN/Success/Error dondurur.
+    /// 429 -> retry; 5xx/timeout -> UNKNOWN (retry YOK).
+    pub async fn exchange_action(&self, action: Value) -> ExchangeOutcome {
+        self.post_exchange(&action).await
+    }
+
+    /// Tek seferlik HTTP POST (retry mantığı yok).
     async fn post_once(&self, path: &str, body: &Value) -> Result<Value> {
         let url = format!("{}{}", self.cfg.api_url, path);
         let resp = self.http.post(&url).json(body).send().await?;
@@ -253,24 +284,12 @@ impl HyperliquidClient {
         }
         Ok(v)
     }
+}
 
-    /// REST info sorgusu: POST /info
-    pub async fn info(&self, body: Value) -> Result<Value> {
-        self.post("/info", &body).await
-    }
-
-    /// Imzali aksiyon: POST /exchange — SDK 0.24 formati
-    /// (action tamami "type" dahil imzalanir, nonce = unix ms, vault/expiresAfter null)
-    pub async fn exchange_action(&self, action: Value) -> Result<Value> {
-        let nonce = next_nonce();
-        let sig = sign_l1_action(&self.sk, &action, nonce, self.is_mainnet(), None, None)?;
-        let body = json!({
-            "action": action,
-            "nonce": nonce,
-            "signature": { "r": sig.r, "s": sig.s, "v": sig.v },
-            "vaultAddress": null,
-            "expiresAfter": null,
-        });
-        self.post("/exchange", &body).await
-    }
+// P1-C: Exchange sonucu -- Success / Unknown (5xx/timeout) / Error
+#[derive(Debug)]
+pub enum ExchangeOutcome {
+    Success(Value),
+    Unknown,
+    Error(ApiError),
 }

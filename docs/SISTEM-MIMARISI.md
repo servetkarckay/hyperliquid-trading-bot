@@ -464,6 +464,8 @@ Karar ve gerekçe:
 > diğeri bekler; daha kötüsü, TP borsada dururken bot'un trailing SL'si
 > hareket edemez (koruma katmanı iki yönlü çelişir). Tek doğruluk kaynağı
 > **bot içi mantık**; borsa katmanı yalnız felaket-stop'u.
+>
+> **DOKÜMAN NOTU:** `ExitReason::TakeProfit` enum değeri bugün **gerçek bir kapanış kaynağı değil** (analytical target). TP execution yolu henüz bağlanmamış; TP tahsis anında `mid ± tp_atr_mult × ATR` mutlak seviye olarak saklanır ve sadece min distance kontrolünde kullanılır. TP-execution yolu bağlanınca `attr.exit_reason = Some(ExitReason::TakeProfit)` atanacaktır; k-protokolü "tp" kovasının boş olmasını bilerek bekler.
 
 #### Uygulama
 

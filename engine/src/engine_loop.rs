@@ -192,6 +192,13 @@ pub struct Engine {
     trade_exits_path: String,
     /// P1-3: Son recon zamanı (mutex yerine engine field)
     last_recon_ms: u64,
+    /// P0-A: Risk lock — black-swan/flatten-fail sonrası kalıcı kilit.
+    /// Sadece black-swan/flatten-fail yolu true yapar.
+    /// health_ok && !risk_locked = entries_allowed.
+    /// Açılma: sync_positions_from 2 ardışık döngü flat doğrularsa otomatik.
+    risk_locked: bool,
+    /// İç risk-lock sayacı: ardışık flat doğrulama sayacı.
+    risk_lock_flat_count: u32,
 }
 
 impl Engine {
@@ -394,6 +401,8 @@ impl Engine {
             trade_exits_path: std::env::var("TRADE_EXITS_PATH")
                 .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into()),
             last_recon_ms: 0,
+            risk_locked: false,
+            risk_lock_flat_count: 0,
         })
     }
 
@@ -1083,6 +1092,22 @@ impl Engine {
         self.trail
             .retain(|c, _| open_now_coins.contains(c));
 
+        // P0-A: Risk lock auto-unlock — 2 ardışık flat doğrulaması
+        if self.risk_locked {
+            let any_position = self.executor.positions().values().any(|p| p.szi.abs() > 1e-12);
+            if any_position {
+                self.risk_lock_flat_count = 0; // hala pozisyon var → sayaç sıfırla
+            } else {
+                self.risk_lock_flat_count += 1;
+                if self.risk_lock_flat_count >= 2 {
+                    self.risk_locked = false;
+                    self.risk_lock_flat_count = 0;
+                    self.entries_allowed = true;
+                    tracing::warn!("[RISK-LOCK] AÇILDI — 2 ardışık döngü flat doğrulandı");
+                }
+            }
+        }
+
         // Zaman filtresi artık YALNIZ pozisyonsuz artıkları toparlar: 24 saati
         // aşan ama hâlâ tutulan pozisyonun kaydı KORUNUR (aksi halde SL
         // %2'ye düşer ve R-çarpanı kaybolur).
@@ -1313,13 +1338,14 @@ impl Engine {
                         m.state = PosState::Flat;
                     }
                 } else {
-                    // Flatten BAŞARISIZ → makineler DOKUNULMAZ
-                    // entries_allowed = false → yeni giriş engelle
-                    // recovery: sync_positions_from ile borsa-temelli
+                    // Flatten BAŞARISIZ → RISK LOCK AKTİF
+                    // entries_allowed = false + risk_locked = true
+                    // makineler DOKUNULMAZ, recovery: sync_positions_from ile borsa-temelli
+                    self.risk_locked = true;
+                    self.risk_lock_flat_count = 0;
                     self.entries_allowed = false;
                     tracing::error!(
-                        "[BLACK SWAN] {} pozisyon kapanamadı — entries_allowed=false, recovery bekleniyor: {}",
-                        left.len(),
+                        "[RISK-LOCK] AKTİF — flatten başarısız, kalan pozisyon: {}",
                         left.iter().map(|(c, sz)| format!("{c}={sz}")).collect::<Vec<_>>().join(", ")
                     );
                 }
@@ -1832,18 +1858,36 @@ impl Engine {
         // ===== FAZ 4 — TEK ÇAĞRI YÜRÜT =====
         if !places.is_empty() || !cancels.is_empty() {
             let res = self.executor.batch_execute(&places, &cancels).await?;
-            for (i, r) in res.iter().enumerate() {
-                tracing::info!("batch[{i}]: {r:?}");
-                if let Some(oid) = r.oid {
-                    // hangi coin pending oid=0 bekliyorsa — bağla
-                    let target: Option<String> = self
-                        .machines
-                        .iter()
-                        .find(|(_, m)| matches!(m.state, PosState::Pending { oid: 0, .. }))
-                        .map(|(c, _)| c.clone());
-                    if let Some(cn) = target {
-                        if let Some(m) = self.machines.get_mut(&cn) {
-                            m.link_pending_oid(oid);
+            // P1-C: Exchange UNKNOWN (5xx/timeout) -> reconciliation
+            let has_unknown = res.iter().any(|r| r.error.as_deref() == Some("exchange unknown"));
+            if has_unknown {
+                // reconciliation: cloid ile borsadaki emirleri eşleştir
+                for (i, r) in res.iter().enumerate() {
+                    if r.error.as_deref() == Some("exchange unknown") && i < places.len() {
+                        let w = &places[i];
+                        if let Some(cloid) = &w.cloid {
+                            let coin = self
+                                .executor
+                                .assets
+                                .iter()
+                                .find(|(_, (a, _, _))| *a == w.asset)
+                                .map(|(c, _)| c.clone())
+                                .unwrap_or_else(|| format!("#{}", w.asset));
+                            let cands = self.executor.refresh_orders().await?;
+                            let found = cands.iter().find(|(c, _)| c == &coin);
+                            if let Some((_, oid)) = found {
+                                if let Some(m) = self.machines.get_mut(&coin) {
+                                    m.link_pending_oid(*oid);
+                                }
+                                tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
+                            } else {
+                                if let Some(m) = self.machines.get_mut(&coin) {
+                                    if m.oid_zero_pending() {
+                                        m.state = crate::state_machine::PosState::Flat;
+                                    }
+                                }
+                                tracing::warn!("[RECON] cloid={cloid} coin={coin} borsada YOK -> machine Flat revert");
+                            }
                         }
                     }
                 }
@@ -1873,6 +1917,29 @@ impl Engine {
                 "[LEARN] tracker durumu yazılamadı ({}): {e} — restart'ta öğrenme KAYBOLUR",
                 self.track_state_path
             );
+        }
+    }
+
+    /// P0-A: Health sonucunu engin'e bildir — entries_allowed = health_ok && !risk_locked.
+    /// Bot.rs artık `engine.entries_allowed = ...` YAZMAZ; bu metod çağrılır.
+    pub fn set_health_ok(&mut self, health_ok: bool) {
+        let new_allowed = health_ok && !self.risk_locked;
+        if new_allowed != self.entries_allowed {
+            self.entries_allowed = new_allowed;
+            tracing::info!(
+                "[RISK-LOCK] entries_allowed={} (health_ok={}, risk_locked={})",
+                new_allowed, health_ok, self.risk_locked
+            );
+        }
+    }
+
+    /// P0-A: Risk lock manuel açma (operatör müdahalesi için).
+    pub fn unlock_risk(&mut self) {
+        if self.risk_locked {
+            self.risk_locked = false;
+            self.risk_lock_flat_count = 0;
+            self.entries_allowed = true;
+            tracing::warn!("[RISK-LOCK] MANUEL AÇILDI — operatör müdahalesi");
         }
     }
 }
