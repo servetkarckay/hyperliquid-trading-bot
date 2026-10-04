@@ -58,32 +58,36 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = hyperliquid_api::Config::from_env()?;
-    // ENGINE_COINS verilmez/boş/"all" → TÜM AKTİF EVREN
-    let mut ing_cfg = data::IngestorConfig {
+    // P1-D — TEK KAYNAKLI EVREN. Sıralama ÖNEMLİ:
+    //   1. `ENGINE_COINS` spec'i çözülür (tam sayı → TopByVolume, liste → Exact)
+    //   2. aktif evren çekilir (delist + hacim filtresi) — `max_coins` ARTIK YOK
+    //   3. `TradingUniverse::build` evreni BİR KEZ çözer (sessiz kırpma yok)
+    //   4. engine listesi, ingestor aboneliği, risk ve WS hepsi AYNI nesneden
+    //
+    // ÖNCE: `max_coins = Some(n)` ingestor kendi TOP-N'ini seçiyordu, engine
+    // config listesini kullanıyordu. Sayılar eşit, SET'ler farklıydı.
+    let ing_cfg = data::IngestorConfig {
         shard_count: 2,
         min_day_volume_usd: 0.0,
         l2book_top_n: 5,
-        max_coins: None,
         ..Default::default()
     };
-    let coins: Vec<String> = match std::env::var("ENGINE_COINS") {
-        Ok(v) if !v.trim().is_empty() && !v.trim().eq_ignore_ascii_case("all") => {
-            let c: Vec<String> = v
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            ing_cfg.max_coins = Some(c.len());
-            c
-        }
-        _ => {
-            // Önce ingestor'dan universe al, sonra engine coins'a ata
-            let ing = data::Ingestor::new(cfg.clone(), ing_cfg.clone()).await?;
-            let names = ing.universe.names();
-            tracing::info!("ENGINE_COINS boş → tam evren: {} coin (ingestor da aynı sete abone)", names.len());
-            names
-        }
-    };
+    let spec = data::UniverseSpec::parse(std::env::var("ENGINE_COINS").ok().as_deref())?;
+    let active = data::ingestor::load_universe(
+        &hyperliquid_api::Info::new(cfg.clone())?,
+        &ing_cfg,
+    )
+    .await?;
+    let universe = data::TradingUniverse::build(&active, spec)?;
+    let coins: Vec<String> = universe.names();
+    // Katman doğrulaması: engine listesi ile ingestor aboneliği birebir aynı
+    // olmalı; değilse CONFIG ERROR logu + bot başlamaz (sessiz kırpma yasak).
+    universe.verify_layers(&ing_cfg)?;
+    tracing::info!(
+        "[UNIVERSE] {} coin evren çözüldü (spec={}) — engine/ingestor/risk/WS aynı kaynaktan",
+        coins.len(),
+        universe.spec().describe()
+    );
     let interval: u64 = std::env::var("ENGINE_INTERVAL")
         .ok().and_then(|v| v.parse().ok()).unwrap_or(60);
     let min_score: f64 = std::env::var("ENGINE_MIN_SCORE")
@@ -138,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
     let mut engine = Engine::new(cfg.clone(), lc).await?;
 
     // akış + döngü
-    let ingestor = data::Ingestor::new(cfg.clone(), ing_cfg).await?;
+    let ingestor = data::Ingestor::with_universe(cfg.clone(), ing_cfg, universe.clone()).await?;
     let _rx = ingestor.start(cfg.clone());
 
     // KULLANICI EVENT AKIŞI (orderUpdates + userEvents) — gerçek fill geri beslemesi

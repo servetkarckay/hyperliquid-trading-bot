@@ -23,8 +23,10 @@ pub mod backfill_job;
 pub mod ingestor;
 pub mod market_ctx;
 pub mod storage;
+pub mod universe;
 
 pub use aggregator::{Aggregator, AggregatorConfig, Candle};
-pub use ingestor::{Ingestor, IngestorConfig, StreamEvent, Universe};
+pub use ingestor::{CoinInfo, Ingestor, IngestorConfig, StreamEvent, Universe};
+pub use universe::{TradingUniverse, UniverseSpec};
 pub use market_ctx::{CtxState, MarketCtx};
 pub use storage::{MemoryStorage, RedisCache, Storage, TradeRecord};

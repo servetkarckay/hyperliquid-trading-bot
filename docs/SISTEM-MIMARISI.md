@@ -148,9 +148,10 @@ Trait: `Strategy{name(); evaluate(MarketInput)->Signal}`; `registry()` kayıt de
 **engine/src/bin/bot.rs** — ana process:
 1. logger+ NTP senkron
 2. USER_ADDRESS (varsa) → WS orderUpdates/userEvents aboneliği → `engine.ingest_oe`
-3. Ingestor WS (2-4 shard, top-30 coin) → `engine.ingest_step` (tokio::select!)
-4. `ENGINE_CYCLE_SECS` döngü → `engine.run_cycle` → sinyal tablosu ekrana
-5. 30 dk NTP resync; 5 dk ağırlık dump (`/root/hyperliquid/config/ensemble_weights.json`); 5 hata üst üste → durdur (kill-switch)
+3. `TradingUniverse` çözülür (P1-D: `ENGINE_COINS` + hacim + delist filtresi **bir kez**); engine listesi / ingestor aboneliği / risk / WS hepsi bu nesneden. `verify_layers` eşleşmezse **CONFIG ERROR + durdur**
+4. Ingestor WS (2-4 shard) → `engine.ingest_step` (tokio::select!)
+5. `ENGINE_CYCLE_SECS` döngü → `engine.run_cycle` → sinyal tablosu ekrana
+6. 30 dk NTP resync; 5 dk ağırlık dump (`/root/hyperliquid/config/ensemble_weights.json`); 5 hata üst üste → durdur (kill-switch)
 
 ENV: ENGINE_COINS, ENGINE_CYCLE_SECS, ENGINE_INTERVAL, ENGINE_HIST_BARS, ENGINE_TOP_N, ENGINE_MIN_SCORE, ENGINE_LEVERAGE, ENGINE_BUDGET_USD, ENGINE_FLATTEN, ENGINE_EXPLORE, ENSEMBLE_WEIGHTS_IN, ENSEMBLE_LIVE_WEIGHTS_OUT.
 
@@ -162,6 +163,7 @@ ENV: ENGINE_COINS, ENGINE_CYCLE_SECS, ENGINE_INTERVAL, ENGINE_HIST_BARS, ENGINE_
 | `ENGINE_TOP_N` | 3 | azami **açık** pozisyon (döngü seçimi + açık tavanı) |
 | `ENGINE_MIN_SCORE` | 0.30 | ensemble kapısı |
 | `ENGINE_LEVERAGE` | 5 | kaldıraç (coin'in `maxLeverage`'ine kırpılır) |
+| `ENGINE_COINS` | `all` | **TEK KAYNAK evren** (P1-D). Boş/`all` → tüm aktif evren · `50` → hacme göre ilk 50 · `BTC,ETH,SOL` → o exact set (sıra korunur). Exact listede aktif evrende olmayan coin → **CONFIG ERROR, bot başlamaz** (sessiz kırpma yok) |
 | `ENGINE_BUDGET_USD` | — | verilirse bakiye-oranı yerine mutlak bütçe |
 | `ENGINE_FLATTEN` | — | `1` → açılışta tüm pozisyonları kapat, sıfırdan başla |
 | `DRY_RUN` / `DRY_RUN_EQUITY_USD` | — | **YOK** (kuru koşum tamamen silindi) |
@@ -827,6 +829,7 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 15 + recon 4 | 98/98 ✓ |
 | api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
 | data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
+| data | P1-D tek kaynaklı evren: exact/top-N, sessiz kırpma yok, katman doğrulama | 7/7 ✓ |
 | engine | KIYAMET (bozuk coin + stale + resync + kötü boyut + korelasyon çöküşü) | 0 panik; graceful skip; risk kapısı aktif |
 
 Detaylı kıyamet senaryo denetimi: `docs/KIYAMET-AUDIT.md`.
@@ -867,7 +870,8 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 98, api 5, data 2, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 98, api 5, data 9, strategy 6).
+- P1-D `TradingUniverse`: `data/src/universe.rs`. `IngestorConfig::max_coins` **kaldırıldı** (sessiz kırpma kaynağı). `Ingestor::with_universe` evreni dışarıdan alır.
 - P1-B ring-wrap kabul testleri (`history_ring_wrap_tum_barlar`, `history_snapshot_sadece_kapanista_guncellenir`).
 - P1-C exchange UNKNOWN → gerçek cloid reconciliation (5 api + 4 engine test).
 - P0-A risk-lock testleri (`risk_lock_tests`, 15 test) gerçek `Engine::risk_lock_step` /
@@ -886,4 +890,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 98, api 5, data 2, strategy 6 = 111, hepsi yeşil.*
+*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 98, api 5, data 9, strategy 6 = 118, hepsi yeşil.*
