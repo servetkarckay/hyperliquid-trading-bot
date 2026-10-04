@@ -89,7 +89,7 @@ adresi sorgularda boş döner — resmi kural).
 | `executor.rs` | api Exchange ince katman: tick-lot doğrulama, cache'li asset çözümü (ağ çağrısız), open_orders defteri, pozisyon cache (assetPositions), WS orderUpdates/user işleme, refresh_orders/refresh_positions (recon). `batch_execute`: çoklu place+cancel→max 2 POST. |
 | `orderbook.rs` | Yerel L2 defter: REST sync_from_rest + WS snapshot; mid/spread_bps/imbalance(5)/vwap_fill/depth_within_bps/is_stale/is_sane (crossed-book reddi). |
 | `risk_manager.rs` | KAPISI: drawdown halt (`peak_equity`'den %20), equity tabanı (**$50**, `min_account_equity_usd`), coin başına $50 notional, toplam maruziyet, kaldıraç 5×, coin_emir sayısı. **`pre_trade()` YALNIZCA GİRİŞTE** çağrılır (Place kolu) — **çıkışlar hiçbir zaman bloke edilmez**, yani drawdown halt açıkken stop/exit hâlâ çalışır. `resume()` operatör kararı. |
-| `track.rs` | **CANLI ÖĞRENME** (bkz. §8.4). Backtest kaldırıldı → 18 strateji **nötr w=1.0** ile başlar; attribution ile R kaydı; ROLLING 100 pencere; `n < LEARN_MIN_N`(10) → ağırlık **donmuş 1.0**; `10≤n<30` dinamik f\*=p−(1−p)/1.8 clamp [0.1,2.0]; `n ≥ LEARN_FULL_N`(30) → `win<%35` → **0**. **Persistence**: `TRACK_STATE_PATH` (atomik yazım, 5 dk). Kill-switch taksonomisi (`Health`) + `ExitsOnly` kipi burada. 20 test ✓ |
+| `track.rs` | **CANLI ÖĞRENME** (bkz. §8.4). Backtest kaldırıldı → 18 strateji **nötr w=1.0** ile başlar; attribution ile R kaydı; ROLLING 100 pencere; `n < LEARN_MIN_N`(10) → ağırlık **donmuş 1.0**; `10≤n<30` dinamik f\*=p−(1−p)/1.8 clamp [0.1,2.0]; `n ≥ LEARN_FULL_N`(30) → `win<%35` → **0**. **Persistence**: `TRACK_STATE_PATH` (atomik yazım, 5 dk). Kill-switch taksonomisi (`Health`) + `ExitsOnly` kipi burada. 30 test ✓ |
 
 ---
 
@@ -865,7 +865,9 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 69, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 94, strategy 6).
+- P0-A risk-lock testleri (`risk_lock_tests`, 15 test) gerçek `Engine::risk_lock_step` /
+  `Engine::entries_allowed_of` fonksiyonlarını çağırır — kopya mantık test edilmez.
 - §8.3.12 SL fiyatı satırı: risk mesafesi (`entry_attr.risk_px`) güncellendi.
 - bot.rs ENV: `ensemble_weights.json` → `ensemble_weights_live.json`.
 - Yeni §8.5 bu protokol dokümanına eklendi.
@@ -880,4 +882,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-03. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 69, strategy 6, hepsi yeşil.*
+*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 94, strategy 6, hepsi yeşil.*

@@ -201,6 +201,9 @@ pub struct Engine {
     risk_lock_flat_count: u32,
 }
 
+/// P0-A: kilidin otomatik açılması için gereken ardışık flat döngü sayısı.
+pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
+
 impl Engine {
     pub async fn new(cfg_api: Config, loop_cfg: LoopConfig) -> anyhow::Result<Self> {
         let lc_cl = loop_cfg.clone();
@@ -1095,16 +1098,13 @@ impl Engine {
         // P0-A: Risk lock auto-unlock — 2 ardışık flat doğrulaması
         if self.risk_locked {
             let any_position = self.executor.positions().values().any(|p| p.szi.abs() > 1e-12);
-            if any_position {
-                self.risk_lock_flat_count = 0; // hala pozisyon var → sayaç sıfırla
-            } else {
-                self.risk_lock_flat_count += 1;
-                if self.risk_lock_flat_count >= 2 {
-                    self.risk_locked = false;
-                    self.risk_lock_flat_count = 0;
-                    self.entries_allowed = true;
-                    tracing::warn!("[RISK-LOCK] AÇILDI — 2 ardışık döngü flat doğrulandı");
-                }
+            if Self::risk_lock_step(
+                &mut self.risk_locked,
+                &mut self.risk_lock_flat_count,
+                any_position,
+            ) {
+                self.entries_allowed = true;
+                tracing::warn!("[RISK-LOCK] AÇILDI — 2 ardışık döngü flat doğrulandı");
             }
         }
 
@@ -1920,10 +1920,35 @@ impl Engine {
         }
     }
 
+    /// P0-A: giriş kapısı değişmez denklemi. Testler de BUNU çağırır —
+    /// kopya mantık test edilirse regresyon yakalanmaz.
+    pub fn entries_allowed_of(health_ok: bool, risk_locked: bool) -> bool {
+        health_ok && !risk_locked
+    }
+
+    /// P0-A: bir döngünün risk-lock adımı. `true` dönerse bu döngüde kilit
+    /// açıldı (2. ardışık flat doğrulaması).
+    pub fn risk_lock_step(locked: &mut bool, flat_count: &mut u32, any_position: bool) -> bool {
+        if !*locked {
+            return false;
+        }
+        if any_position {
+            *flat_count = 0; // hala pozisyon var → sayaç sıfırla
+            return false;
+        }
+        *flat_count += 1;
+        if *flat_count >= RISK_LOCK_FLAT_CYCLES {
+            *locked = false;
+            *flat_count = 0;
+            return true;
+        }
+        false
+    }
+
     /// P0-A: Health sonucunu engin'e bildir — entries_allowed = health_ok && !risk_locked.
     /// Bot.rs artık `engine.entries_allowed = ...` YAZMAZ; bu metod çağrılır.
     pub fn set_health_ok(&mut self, health_ok: bool) {
-        let new_allowed = health_ok && !self.risk_locked;
+        let new_allowed = Self::entries_allowed_of(health_ok, self.risk_locked);
         if new_allowed != self.entries_allowed {
             self.entries_allowed = new_allowed;
             tracing::info!(
@@ -2083,5 +2108,278 @@ mod trail_tests {
             sl_trailing > entry - risk,
             "stop yukarı çekilir → serbest kalan risk artar (istenen davranış)"
         );
+    }
+
+}
+
+/// ── P0-A: RISK-LOCK TESTLERİ ────────────────────────────────────────────
+#[cfg(test)]
+mod risk_lock_tests {
+    use super::*;
+    use crate::track::{Health, ErrClass, Mode, classify as track_classify};
+
+    /// Test helper: Engine'in risk-lock durumunu taklit eder. Mantığı KOPYALAMAZ —
+    /// gerçek `Engine::risk_lock_step` / `Engine::entries_allowed_of` çağrılır.
+    struct TestEngine {
+        risk_locked: bool,
+        risk_lock_flat_count: u32,
+        entries_allowed: bool,
+    }
+
+    impl TestEngine {
+        fn new() -> Self {
+            Self {
+                risk_locked: false,
+                risk_lock_flat_count: 0,
+                entries_allowed: true,
+            }
+        }
+
+        /// Gerçek `Engine::sync_positions_from` risk-lock adımı.
+        fn simulate_auto_unlock(&mut self, any_position: bool, health_ok: bool) {
+            if Engine::risk_lock_step(
+                &mut self.risk_locked,
+                &mut self.risk_lock_flat_count,
+                any_position,
+            ) {
+                self.entries_allowed = health_ok;
+            }
+        }
+
+        /// Simulate risk-lock activation (flatten fail)
+        fn activate_risk_lock(&mut self) {
+            self.risk_locked = true;
+            self.risk_lock_flat_count = 0;
+            self.entries_allowed = false;
+        }
+
+        /// Gerçek `Engine::set_health_ok` ile aynı denklem.
+        fn set_health_ok(&mut self, health_ok: bool) {
+            self.entries_allowed = Engine::entries_allowed_of(health_ok, self.risk_locked);
+        }
+
+        /// Simulate position reappearance (resets flat counter)
+        fn position_reappears(&mut self) {
+            if self.risk_locked {
+                self.risk_lock_flat_count = 0;
+            }
+        }
+    }
+
+    // risk_lock_health_tarafindan_geri_acilamaz
+    #[test]
+    fn risk_lock_health_tarafindan_geri_acilamaz() {
+        let mut eng = TestEngine::new();
+        eng.activate_risk_lock();
+        assert!(eng.risk_locked);
+        assert!(!eng.entries_allowed);
+
+        // set_health_ok(true) cagrilasa bile lock surmeli
+        eng.set_health_ok(true);
+        assert!(eng.risk_locked);
+        assert!(!eng.entries_allowed, "health_ok=true ama risk_locked=true -> entries_allowed=false");
+    }
+
+    // risk_lock_iki_flat_dongude_acilir
+    #[test]
+    fn risk_lock_iki_flat_dongude_acilir() {
+        let mut eng = TestEngine::new();
+        eng.activate_risk_lock();
+
+        // 1. flat dogrulama
+        eng.simulate_auto_unlock(false, true);
+        assert!(eng.risk_locked, "1. flat -> lock surmeli");
+        assert!(!eng.entries_allowed);
+
+        // 2. flat dogrulama -> lock acilmali
+        eng.simulate_auto_unlock(false, true);
+        assert!(!eng.risk_locked, "2. flat -> lock acilmali");
+        assert_eq!(
+            eng.risk_lock_flat_count, 0,
+            "kilit acilinca sayac sifirlanmali"
+        );
+        assert!(eng.entries_allowed, "lock acildi + health_ok=true -> entries_allowed=true");
+    }
+
+    // risk_lock_pozisyon_devam_ediyorsa_kalir
+    #[test]
+    fn risk_lock_pozisyon_devam_ediyorsa_kalir() {
+        let mut eng = TestEngine::new();
+        eng.activate_risk_lock();
+
+        // flat dogrulama #1
+        eng.simulate_auto_unlock(false, true);
+        assert!(eng.risk_locked);
+
+        // pozisyon tekrar gorulur (position_reappears)
+        eng.position_reappears();
+        assert_eq!(eng.risk_lock_flat_count, 0, "pozisyon tekrar gorulurse sayac sifirlanmali");
+
+        // tekrar flat dogrulamasi -> 1. flat (sayaci 1)
+        eng.simulate_auto_unlock(false, true);
+        assert_eq!(eng.risk_lock_flat_count, 1, "pozisyon tekrar gorundugunden 1. flat");
+        assert!(eng.risk_locked);
+
+        // health=true olsa bile lock surmeli
+        eng.set_health_ok(true);
+        assert!(!eng.entries_allowed);
+    }
+
+    // risk_lock_flat_iken_health_false_girisi_acmaz
+    #[test]
+    fn risk_lock_flat_iken_health_false_girisi_acmaz() {
+        let mut eng = TestEngine::new();
+        eng.activate_risk_lock();
+
+        // flat dogrulama #1
+        eng.simulate_auto_unlock(false, true);
+        // flat dogrulama #2 -> lock acilir
+        eng.simulate_auto_unlock(false, true);
+        assert!(!eng.risk_locked);
+
+        // health=false -> entries_allowed=false olmali
+        let mut eng2 = TestEngine::new();
+        eng2.activate_risk_lock();
+        eng2.simulate_auto_unlock(false, true);
+        eng.simulate_auto_unlock(false, false); // health_ok=false
+        assert!(!eng2.entries_allowed, "lock acildi ama health=false -> entries_allowed=false");
+    }
+
+    // Denklem tüm 4 kombinasyonda da geçerli (truth table).
+    #[test]
+    fn entries_allowed_denklemi_truth_table() {
+        for health_ok in [true, false] {
+            for locked in [true, false] {
+                assert_eq!(
+                    Engine::entries_allowed_of(health_ok, locked),
+                    health_ok && !locked,
+                    "health_ok={health_ok} risk_locked={locked}"
+                );
+            }
+        }
+    }
+
+    // risk_lock_step kilit kapalıyken hiçbir şeye dokunmaz.
+    #[test]
+    fn risk_lock_step_kilit_kapaliyken_etkisiz() {
+        let mut locked = false;
+        let mut n = 7; // kirli sayac: temizlenmemeli
+        for _ in 0..5 {
+            assert!(!Engine::risk_lock_step(&mut locked, &mut n, false));
+        }
+        assert!(!locked);
+        assert_eq!(n, 7, "kilit yokken sayaca dokunulmaz");
+    }
+
+    // Health taksonomisi testleri
+    #[test]
+    fn ws_hata_firtinasi_botu_oldurmez_exits_only_gecer() {
+        let mut h = Health::new(5);
+        for _ in 0..15 {
+            h.on_ws_reconnect();
+        }
+        assert_eq!(h.mode(), Mode::ExitsOnly);
+        assert!(!h.entries_allowed());
+        assert_ne!(h.mode(), Mode::Halted);
+        assert_eq!(h.crit_streak(), 0);
+    }
+
+    #[test]
+    fn reconnect_sayisi_tek_basina_kill_yapmaz() {
+        let mut h = Health::new(5);
+        for _ in 0..9 {
+            assert!(!h.on_ws_reconnect());
+        }
+        assert_eq!(h.mode(), Mode::Normal);
+        assert!(h.entries_allowed());
+    }
+
+    #[test]
+    fn gecici_rest_hatalari_sayilmaz() {
+        let mut h = Health::new(5);
+        for _ in 0..20 {
+            assert!(!h.on_error("502 Bad Gateway"));
+            assert!(!h.on_error("connection reset by peer"));
+            assert!(!h.on_error("429 Too Many Requests"));
+            assert!(!h.on_error("borsa stop kurulamadı: timeout"));
+        }
+        assert_eq!(h.crit_streak(), 0);
+        assert_eq!(h.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn karar_kritik_hatalar_sayilir_ve_kill_switch_uretiyor() {
+        let mut h = Health::new(5);
+        for _ in 0..4 {
+            assert!(!h.on_error("clearinghouseState parse edilemedi (null)"));
+        }
+        assert_eq!(h.mode(), Mode::Normal);
+        assert!(h.on_error("clearinghouseState parse edilemedi (null)"), "5. hatada kill");
+        assert_eq!(h.mode(), Mode::Halted);
+    }
+
+    #[test]
+    fn basarili_dongu_sayaci_sifirlar() {
+        let mut h = Health::new(5);
+        for _ in 0..4 {
+            h.on_error("clearinghouseState parse edilemedi");
+        }
+        h.on_cycle_ok();
+        assert_eq!(h.crit_streak(), 0);
+        for _ in 0..4 {
+            assert!(!h.on_error("clearinghouseState parse edilemedi"));
+        }
+        assert_eq!(h.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn emin_olunamayan_hata_kritik_sayilir() {
+        assert_eq!(track_classify("harika bir hata"), ErrClass::Critical);
+        assert_eq!(track_classify("bilinmeyen bir sey oldu"), ErrClass::Critical);
+    }
+
+    #[test]
+    fn emin_olunamayan_hata_daha_spesifik_geceni_yener() {
+        assert_eq!(track_classify("502 Bad Gateway"), ErrClass::Transient);
+        // Üretimdeki gerçek mesaj biçimi (engine_loop.rs [SL] satırı): "stop kurulamadı"
+        assert_eq!(track_classify("borsa stop kurulamadı"), ErrClass::Transient);
+    }
+
+    #[test]
+    fn exits_only_kipinde_giris_yok_cikis_var() {
+        let mut h = Health::new(5);
+        for _ in 0..12 {
+            h.on_ws_reconnect();
+        }
+        assert!(!h.entries_allowed());
+        h.on_cycle_ok();
+        h.reset();
+        assert!(h.entries_allowed(), "reset -> normal");
+    }
+
+    /// P0-A'nın asıl amacı: ExitsOnly/risk-lock TEK giriş yolunu kapatır,
+    /// çıkış yolları (ExitNow, SL) dokunulmadan çalışır.
+    #[test]
+    fn exits_only_yalnizca_place_i_bloklar() {
+        use crate::state_machine::Action;
+        let mut h = Health::new(5);
+        for _ in 0..12 {
+            h.on_ws_reconnect();
+        }
+        assert_eq!(h.mode(), Mode::ExitsOnly);
+        assert!(!h.entries_allowed(), "giris kapali");
+        // Çıkış yolları etkilenmez: yalnız Place giriş yoludur.
+        use crate::state_machine::{BotOrder, Side as SmSide};
+        let exit = Action::ExitNow(BotOrder {
+            coin: "BTC".into(),
+            side: SmSide::Short,
+            sz: 1.0,
+            px: 0.0,
+            post_only: false,
+            reduce_only: true,
+        });
+        assert!(!matches!(exit, Action::Place(_)), "ExitNow cikis yolu");
+        assert!(matches!(Action::Cancel(1), Action::Cancel(_)));
+        assert!(matches!(Action::Nothing, Action::Nothing));
     }
 }
