@@ -140,6 +140,9 @@ impl AllocationManager {
     }
 
     /// SL/TP fiyatları: long → mid−slA·ATR / mid+tpA·ATR (ayna short)
+    /// NOT: TP mutlak hesaplanıyor (tahsis anındaki mid'e göre).
+    /// Gerçek TP hedefi (analytical) pozisyon açıldığında `tp_from_entry()`
+    /// ile `entry_eff ± tp_atr_mult × risk_mesafesi` olarak türetilir.
     pub fn sl_tp(&self, dir: Dir, mid: f64, atr_usd: f64) -> (f64, f64) {
         match dir {
             Dir::Long => (
@@ -151,6 +154,21 @@ impl AllocationManager {
                 mid - self.cfg.tp_atr_mult * atr_usd,
             ),
             Dir::Neutral => (mid, mid),
+        }
+    }
+
+    /// Gerçek TP hedefi: entry_eff ± tp_atr_mult × risk_mesafesi.
+    /// `entry_eff` = gerçek dolum fiyatı (REST entryPx düzeltmesi).
+    /// `risk_mesafesi` = |entry_eff - SL| = `entry_attr.risk_px`.
+    /// Yan kapısı: TP daima dolumun kâr tarafında; min TP mesafesi = 2 × min_risk_dist.
+    pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+        let min_tp_dist = risk_mesafesi * 2.0;
+        let tp_dist = (self.cfg.tp_atr_mult / self.cfg.sl_atr_mult) * risk_mesafesi;
+        let tp_dist = tp_dist.max(min_tp_dist);
+        match dir {
+            Dir::Long => entry_eff + tp_dist,
+            Dir::Short => entry_eff - tp_dist,
+            Dir::Neutral => entry_eff,
         }
     }
 
@@ -705,5 +723,49 @@ mod ev_tests {
         assert!(!ok);
         assert!((risk_bps - 15.0).abs() < 1e-6, "ölçülen risk DEĞİŞMEDİ");
         assert!(risk_bps < floor, "sadece karşılaştırma yapıldı");
+    }
+
+    // ── TP FROM ENTRY TESTLERİ ──────────────────────────────────────────
+    #[test]
+    fn tp_duzeltilmis_giristen_turetilir() {
+        let am = AllocationManager::new(AllocationConfig::default());
+        // Long: entry=100, SL=97 (risk=3), tp_atr_mult=3, sl_atr_mult=1.5
+        // risk=3, tp_dist = (3/1.5)*3 = 6, min=2*3=6 → TP = 100+6 = 106
+        let tp = am.tp_from_entry(Dir::Long, 100.0, 3.0);
+        assert!((tp - 106.0).abs() < 1e-9, "Long TP = 106, got {tp}");
+
+        // Short: entry=100, SL=103 (risk=3)
+        // TP = 100 - 6 = 94
+        let tp = am.tp_from_entry(Dir::Short, 100.0, 3.0);
+        assert!((tp - 94.0).abs() < 1e-9, "Short TP = 94, got {tp}");
+
+        // Risk mesafesi farklı: entry=50000, SL=49500 (risk=500)
+        // tp_dist = (3/1.5)*500 = 1000, min=1000 → TP = 50000+1000 = 51000
+        let tp = am.tp_from_entry(Dir::Long, 50000.0, 500.0);
+        assert!((tp - 51000.0).abs() < 1e-9, "TP = 51000, got {tp}");
+    }
+
+    #[test]
+    fn kayma_tp_kar_tarafinda_kalir() {
+        let am = AllocationManager::new(AllocationConfig::default());
+        // Entry kayması: planlanan entry=100, gerçek dolum=101 (Long)
+        // SL=97 (risk=3 from planned), ama gerçek entry=101
+        // TP = 101 + 6 = 107 (kâr tarafında)
+        let tp = am.tp_from_entry(Dir::Long, 101.0, 3.0);
+        assert!(tp > 101.0, "TP kâr tarafında: {tp} > 101");
+
+        // Short: entry=100, dolum=99, SL=103 (risk=3)
+        // TP = 99 - 6 = 93 < 99 (kâr tarafında)
+        let tp = am.tp_from_entry(Dir::Short, 99.0, 3.0);
+        assert!(tp < 99.0, "Short TP kâr tarafında: {tp} < 99");
+    }
+
+    #[test]
+    fn tp_min_mesafe_iki_kati_risk() {
+        let am = AllocationManager::new(AllocationConfig::default());
+        // Çok küçük risk: risk=1, tp_atr_mult/sl_atr_mult = 2
+        // tp_dist = 2*1 = 2, min = 2*1 = 2 → TP daima 2×risk
+        let tp = am.tp_from_entry(Dir::Long, 100.0, 1.0);
+        assert!((tp - 102.0).abs() < 1e-9, "TP = entry + 2×risk = 102");
     }
 }

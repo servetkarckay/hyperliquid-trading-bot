@@ -24,7 +24,31 @@
 //! Çalıştırma süresi yok — Ctrl+C ile kes.
 
 use engine::engine_loop::{Engine, LoopConfig};
+use engine::track::TradeExit;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use utils::{logger, time};
+
+// S4: WS kuyruk izleme için basit sarmalayıcı
+struct MonitoredRx {
+    rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>,
+    pending: Arc<AtomicUsize>,
+}
+impl MonitoredRx {
+    fn new(rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>, pending: Arc<AtomicUsize>) -> Self {
+        Self { rx, pending }
+    }
+    async fn recv(&mut self) -> Option<hyperliquid_api::websocket::WsEvent> {
+        let event = self.rx.recv().await;
+        if event.is_some() {
+            self.pending.fetch_sub(1, Ordering::Relaxed);
+        }
+        event
+    }
+    fn pending(&self) -> usize {
+        self.pending.load(Ordering::Relaxed)
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -119,18 +143,63 @@ async fn main() -> anyhow::Result<()> {
 
     // KULLANICI EVENT AKIŞI (orderUpdates + userEvents) — gerçek fill geri beslemesi
     let user = std::env::var("USER_ADDRESS").unwrap_or_default();
+    // WS kuyruk izleme için sarmalayıcı
+    struct MonitoredRx {
+        rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>,
+        pending: Arc<AtomicUsize>,
+    }
+    impl MonitoredRx {
+        fn new(rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>, pending: Arc<AtomicUsize>) -> Self {
+            Self { rx, pending }
+        }
+        async fn recv(&mut self) -> Option<hyperliquid_api::websocket::WsEvent> {
+            let event = self.rx.recv().await;
+            if event.is_some() {
+                self.pending.fetch_sub(1, Ordering::Relaxed);
+            }
+            event
+        }
+        fn pending(&self) -> usize {
+            self.pending.load(Ordering::Relaxed)
+        }
+    }
+
+    // S4: WS kuyruk izleme için sayaç
+    let pending_ws = Arc::new(AtomicUsize::new(0));
     let mut oe_rx = {
         if user.is_empty() {
             None
         } else {
-            let ws = hyperliquid_api::WsClient::new(cfg.clone());
-            let (tx, rx) = tokio::sync::mpsc::channel(2048);
+            let (tx, rx): (tokio::sync::mpsc::Sender<hyperliquid_api::websocket::WsEvent>, tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>) = tokio::sync::mpsc::channel(2048);
             let subs = vec![
                 serde_json::json!({ "type": "orderUpdates", "user": user.to_ascii_lowercase() }),
                 serde_json::json!({ "type": "userEvents", "user": user.to_ascii_lowercase() }),
             ];
-            tokio::spawn(async move { ws.run(subs, tx).await.ok(); });
-            Some(rx)
+            let (tx, rx): (tokio::sync::mpsc::Sender<hyperliquid_api::websocket::WsEvent>, tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>) = tokio::sync::mpsc::channel(2048);
+            let (monitored_tx, monitored_rx) = tokio::sync::mpsc::channel(2048);
+            
+            // Spawn 1: WS client
+            let cfg_ws = cfg.clone();
+            let subs_clone = subs.clone();
+            let ws_tx = tx.clone();
+            tokio::spawn(async move {
+                let ws = hyperliquid_api::WsClient::new(cfg_ws);
+                ws.run(subs.clone(), ws_tx).await.ok();
+            });
+            
+            // Spawn 2: Bridge WS events -> monitored channel
+            let pending_bridge = Arc::new(AtomicUsize::new(0));
+            let pending_bridge_clone = pending_bridge.clone();
+            let monitored_tx = monitored_tx.clone();
+            let mut rx = rx;
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    pending_bridge_clone.fetch_add(1, Ordering::Relaxed);
+                    if monitored_tx.send(event).await.is_err() { break; }
+                }
+            });
+            
+            Some((monitored_rx, pending_bridge))
         }
     };
 
@@ -206,6 +275,9 @@ async fn main() -> anyhow::Result<()> {
     // [LEARN] tablosu 60 sn'de bir (döngü 5 sn → 12 döngüde bir). Log spam olmaz.
     let mut learn_table_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
     learn_table_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // S4: WS kuyruk izleme (her 60 sn)
+    let mut ws_q_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
+    ws_q_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // P1-2: Restart exponential backoff
     let mut restart_count_last_hour: Vec<u64> = Vec::new();
@@ -277,9 +349,21 @@ async fn main() -> anyhow::Result<()> {
                 _ = learn_table_cycle.tick() => {
                     engine.log_learn_table();
                 }
+                // S4: WS kuyruk izleme (her 60 sn)
+                _ = ws_q_cycle.tick() => {
+                    if let Some((_, ref pending)) = oe_rx {
+                        let depth = pending.load(Ordering::Relaxed);
+                        let cap = 2048;
+                        let pct = (depth * 100) / cap;
+                        tracing::info!("[WS-Q] doluluk=%{} | bekleyen={} | toplam_kuyruk={}", pct, depth, cap);
+                        if pct >= 80 {
+                            tracing::warn!("[WS-Q] UYARI: kuyruk %{} dolu ({}/{})", pct, depth, cap);
+                        }
+                    }
+                }
                 oe_ev = async {
                     match oe_rx.as_mut() {
-                        Some(ch) => ch.recv().await,
+                        Some((ch, _)) => ch.recv().await,
                         None => std::future::pending::<Option<hyperliquid_api::websocket::WsEvent>>().await,
                     }
                 } => {
