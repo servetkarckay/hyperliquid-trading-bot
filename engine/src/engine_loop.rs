@@ -112,6 +112,7 @@ pub struct TrailState {
 
 /// Giriş atribüsyonu: (katkı veren stratejiler, pozisyon yönü, giriş fiyatı, çıkış sebebi)
 pub struct EntryAttr {
+    pub coin: String,
     pub voters: Vec<String>,
     pub side: SmSide,
     pub entry_px: f64,
@@ -120,8 +121,64 @@ pub struct EntryAttr {
     /// giriş boyutu — risk_usd = risk_px × size
     pub size: f64,
     pub ts: u64,
+    /// **ANALYTICAL TP HEDEFİ** — gerçek dolum (`entry_px`) üzerinden
+    /// `AllocationConfig::tp_from_entry()` ile türetilir.
+    ///
+    /// ⚠️ `TakeProfit` **bugün gerçek bir kapanış kaynağı değil** (analytical
+    /// target); TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
+    /// Borsada TP limit emri asılmaz; bu değer yalnız MFE/R analizi ve
+    /// "TP'ye ulaşsaydı kârlı mıydı" ölçümü içindir.
+    pub tp_px: Option<f64>,
     /// çıkış sebebi: gerçek kapanış sebebi (MFE>0 TP demek DEĞİL)
     pub exit_reason: Option<ExitReason>,
+}
+
+impl EntryAttr {
+    /// Analytical TP'yi **gerçek dolumdan** türetip kaydeder (P1-E).
+    ///
+    /// `entry_px` = gerçek dolum (REST `entryPx`), `risk_px` = gerçek SL
+    /// mesafesi (stop entry'ye göre taşınır → kayma risk mesafesini değiştirmez).
+    /// Geçersiz giriş/risk'te `None` döner ve eski hedef **silinmez**
+    /// (yarım kalan veri, sıfırlanmış veriden daha dürüst).
+    pub fn set_analytical_tp(&mut self, cfg: &AllocationConfig) -> Option<f64> {
+        let dir = if self.side.is_buy() { Dir::Long } else { Dir::Short };
+        let tp = cfg.tp_from_entry(dir, self.entry_px, self.risk_px);
+        if !(tp > 0.0) || !tp.is_finite() {
+            return None;
+        }
+        self.tp_px = Some(tp);
+        Some(tp)
+    }
+
+    /// REST `entryPx` (gerçek dolum) geldiğinde `entry_px`'i düzeltir ve
+    /// analytical TP'yi **yeniden** türetir. `true` = kayma ölçüldü ve düzeltildi.
+    ///
+    /// Kayma ölçülür (`[SL] … kayma=%`) çünkü aynı değer stop fiyatını ve
+    /// R-çarpanını da besler. TP yeniden türetilmezse yanlış fiyatta kalır:
+    /// long'da dolum yukarı kaydıysa TP eski fiyatta (kâr tarafında ama
+    /// gerekenden yakın), short'ta aşağı kaydıysa TP **zarar tarafına** düşer.
+    pub fn apply_real_fill(&mut self, rest_entry: f64, cfg: &AllocationConfig) -> bool {
+        if !(rest_entry > 0.0) || !rest_entry.is_finite() {
+            return false;
+        }
+        let gap = (rest_entry - self.entry_px) / self.entry_px.abs().max(1e-12);
+        if gap.abs() <= 1e-9 {
+            return false;
+        }
+        let planned = self.entry_px;
+        self.entry_px = rest_entry;
+        let tp = self.set_analytical_tp(cfg);
+        tracing::info!(
+            "[SL] {} giriş fiyatı düzeltildi: karar(defter)={:.8} dolum(REST)={:.8} \
+             kayma={:+.3}% → analytical TP={}",
+            self.coin,
+            planned,
+            rest_entry,
+            gap * 100.0,
+            tp.map(|t| format!("{t:.8}")).unwrap_or_else(|| "-".into())
+        );
+        true
+    }
 }
 
 /// Gerçek çıkış sebebi — MFE/MAE analizi için critical
@@ -952,6 +1009,10 @@ impl Engine {
                 // MFE/MAE'yi besler → REST `entryPx` (otoriter) ile
                 // üzerine yazılır. AKSI halde stop yan tarafa kurulur
                 // (ölçülen: 1.1 sn'de tetiklenen kısa pozisyon).
+                // P1-E: düzeltme analytical TP'yi de yeniden türetir —
+                // eski entry'de kalan TP, short'ta dolumdan sonra
+                // **zarar tarafına** düşebilirdi.
+                let am_cfg = self.am.cfg.clone();
                 let rest_entries: Vec<(String, f64)> = self
                     .executor
                     .positions()
@@ -963,17 +1024,7 @@ impl Engine {
                         continue;
                     }
                     if let Some(a) = self.entry_attr.get_mut(&cn) {
-                        let gap = (rest_entry - a.entry_px) / a.entry_px.max(1e-12);
-                        if gap.abs() > 1e-9 {
-                            tracing::info!(
-                                "[SL] {cn} giriş fiyatı düzeltildi: karar(defter)={:.8} \
-                                 dolum(REST)={:.8} kayma={:+.3}%",
-                                a.entry_px,
-                                rest_entry,
-                                gap * 100.0
-                            );
-                            a.entry_px = rest_entry;
-                        }
+                        a.apply_real_fill(rest_entry, &am_cfg);
                     }
                 }
                 for c in closed {
@@ -1704,15 +1755,27 @@ impl Engine {
                     if let Err(err) = self.executor.ensure_leverage(&coin_lv, lev).await {
                         tracing::warn!("{coin_lv}: kaldıraç ayarlanamadı ({err})");
                     }
-                    let attr = EntryAttr {
+                    let mut attr = EntryAttr {
+                        coin: e.coin.clone(),
                         ts: hyperliquid_api::now_ms(),
                         voters: selected.iter().find(|c| c.coin == e.coin).map(|c| c.voters.clone()).unwrap_or_default(),
                         side: side_sm,
                         entry_px,
                         risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
                         size: sz,
+                        // Analytical TP, tahsis anında karar fiyatından türetilir
+                        tp_px: None,
                         exit_reason: None,
                     };
+                    // P1-E: TP formülü ÜRETİMDE de aynı fonksiyondan gelir.
+                    // Buradaki değer PLAN (henüz dolum yok); `apply_real_fill`
+                    // gelince gerçek dolumla YENİDEN türetilir.
+                    if let Some(tp) = attr.set_analytical_tp(&self.am.cfg) {
+                        tracing::info!(
+                            "[TP] {} analytical hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
+                            e.coin, entry_px, attr.risk_px, tp
+                        );
+                    }
                     // EMİR FİYATI: ALO(post-only) KALDIRILDI. Long'da ask'a,
                     // short'ta bid'e post-only yazmak spread'i kestiği için
                     // borsa reddediyordu ("Post only order would have
@@ -2413,5 +2476,119 @@ mod risk_lock_tests {
         assert!(!matches!(exit, Action::Place(_)), "ExitNow cikis yolu");
         assert!(matches!(Action::Cancel(1), Action::Cancel(_)));
         assert!(matches!(Action::Nothing, Action::Nothing));
+    }
+}
+
+/// P1-E: **TP_FROM_ENTRY GERÇEK AKIŞA BAĞLI** — entegrasyon testleri.
+///
+/// Bu modül saf formülü değil, `run_cycle`'in **çağırdığı fonksiyonları**
+/// sınar: `EntryAttr::set_analytical_tp` ve `EntryAttr::apply_real_fill`.
+#[cfg(test)]
+mod tp_entry_tests {
+    use super::*;
+    use crate::allocation_manager::AllocationConfig;
+
+    fn cfg() -> AllocationConfig {
+        AllocationConfig::default()
+    }
+
+    /// ÜRETİMDEKİ GİRİŞ KAYDI (run_cycle, `Action::Place` kolu).
+    fn attr(coin: &str, side: SmSide, entry_px: f64, risk_px: f64) -> EntryAttr {
+        EntryAttr {
+            coin: coin.to_string(),
+            voters: vec!["s01".into()],
+            side,
+            entry_px,
+            risk_px,
+            size: 1.0,
+            ts: 0,
+            tp_px: None,
+            exit_reason: None,
+        }
+    }
+
+    /// P1-E ana kabul: `tp_from_entry()` **gerçek akışta** kullanılıyor.
+    ///
+    /// Kanıt zinciri:
+    /// 1. `set_analytical_tp` → plan TP, `entry_eff = karar fiyatı`
+    /// 2. `apply_real_fill(REST entryPx)` → entry düzeltilir **ve TP yeniden türetilir**
+    /// 3. `attr.tp_px == cfg.tp_from_entry(dir, GERÇEK DOLUM, risk)`
+    /// 4. plan TP'den **farklı** (kayma TP'yi 1:1 kaydırır) → eski fiyatta kalmıyor
+    #[test]
+    fn allocation_tp_entry_eff_ile_baglanir() {
+        let c = cfg();
+        let (decision, fill, risk) = (100.0f64, 100.9f64, 3.0f64);
+
+        let mut a = attr("BTC", SmSide::Long, decision, risk);
+        // 1) plan: karar fiyatından
+        let plan = a.set_analytical_tp(&c).expect("plan TP");
+        assert!((plan - c.tp_from_entry(Dir::Long, decision, risk)).abs() < 1e-12);
+        assert_eq!(a.tp_px, Some(plan));
+
+        // 2) gerçek dolum geldi → düzeltme YAPILDI
+        assert!(a.apply_real_fill(fill, &c), "kayma ölçülmeliydi");
+        assert_eq!(a.entry_px, fill, "entry artık gerçek dolum");
+
+        // 3) analytical TP GERÇEK dolumdan türetildi
+        let want = c.tp_from_entry(Dir::Long, fill, risk);
+        assert_eq!(a.tp_px, Some(want), "TP gerçek entry_eff'ten türetilmeli");
+        assert!((a.tp_px.unwrap() - (fill + 2.0 * risk)).abs() < 1e-12, "TP = dolum + 2R");
+
+        // 4) plan TP'de kalmadı (yoksa kayma TP'yi kaydırmazdı)
+        assert!((a.tp_px.unwrap() - plan).abs() > 1e-9, "TP kaymayı yansımalı");
+        assert!(
+            (a.tp_px.unwrap() - plan - (fill - decision)).abs() < 1e-12,
+            "TP kayması 1:1 (sabit mesafe entry ile birlikte taşınır)"
+        );
+
+        // TP daima dolumun kâr tarafında
+        assert!(a.tp_px.unwrap() > a.entry_px, "long TP kâr tarafında");
+
+        // 5) short aynası: aşağı kayma → TP aşağı taşınır, hâlâ kâr tarafında
+        let mut s = attr("ETH", SmSide::Short, 100.0, 3.0);
+        s.set_analytical_tp(&c).expect("plan");
+        assert!(s.apply_real_fill(99.1, &c), "short kayması ölçülmeliydi");
+        assert_eq!(s.tp_px, Some(c.tp_from_entry(Dir::Short, 99.1, 3.0)));
+        assert!(s.tp_px.unwrap() < s.entry_px, "short TP kâr tarafında");
+
+        // 6) R:R<1 config: min 2R kapısı TP'yi yine dolumun kâr tarafında tutar
+        let mut tight = cfg();
+        tight.tp_atr_mult = 0.5; // R:R = 0.33
+        let mut z = attr("SOL", SmSide::Short, 100.0, 10.0);
+        z.set_analytical_tp(&tight).unwrap();
+        assert!(z.apply_real_fill(105.0, &tight), "short yukarı kayma");
+        assert!(
+            z.tp_px.unwrap() < z.entry_px,
+            "R:R<1 olsa bile TP dolumun kâr tarafında (min 2R kapısı)"
+        );
+    }
+
+    /// Kaymasız girişte `apply_real_fill` dokunmaz → TP planla aynı kalır.
+    /// Geçersiz REST fiyatı mevcut hedefi silmez.
+    #[test]
+    fn allocation_tp_kaymasiz_giriste_degismez() {
+        let c = cfg();
+        let mut a = attr("BTC", SmSide::Long, 100.0, 3.0);
+        let plan = a.set_analytical_tp(&c).unwrap();
+        assert!(!a.apply_real_fill(100.0, &c), "kayma yoksa düzeltme olmamalı");
+        assert_eq!(a.tp_px, Some(plan));
+
+        assert!(!a.apply_real_fill(0.0, &c));
+        assert!(!a.apply_real_fill(f64::NAN, &c));
+        assert_eq!(a.entry_px, 100.0);
+        assert_eq!(a.tp_px, Some(plan), "geçersiz veri eski hedefi silmez");
+    }
+
+    /// Risk mesafesi kaymayla DEĞİŞMEZ (stop entry'ye göre taşınır):
+    /// dolum 100→105, stop 97→102, risk 3'te kalır → TP = dolum + 2R.
+    #[test]
+    fn allocation_tp_kaymada_risk_mesafesi_degismez() {
+        let c = cfg();
+        let risk = 3.0;
+        let mut a = attr("BTC", SmSide::Long, 100.0, risk);
+        a.set_analytical_tp(&c).unwrap();
+        a.apply_real_fill(105.0, &c);
+        assert_eq!(a.risk_px, risk, "risk mesafesi değişmemeli");
+        assert!((a.tp_px.unwrap() - 111.0).abs() < 1e-12, "TP = 105 + 2*3");
     }
 }

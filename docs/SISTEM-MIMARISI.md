@@ -84,7 +84,7 @@ adresi sorgularda boş döner — resmi kural).
 | Dosya | İçerik / mantık |
 |---|---|
 | `state_machine.rs` | Durumlar: Flat→Pending{side,oid,remaining}→InPosition{side,entry,size,peak}→PendingExit→Flat. Garantiler: **Idempotency** (aynı yönlü sinyal yeni emir üretmez), **Red→Flat**, **Kısmi dolum** (kalan Pending'te; timeout→Cancel), **Trailing stop** (peak izleme; %1.5 pull → reduce_only ExitNow), **State recovery** (borsadaki gerçek pozisyonlardan). 6 senaryo testi ✓ |
-| `allocation_manager.rs` | İNANÇ = (oy yoğunluğu × kelly ağırlığı × güc) / (1+20·ATR%) ; SL/TP = mid±ATR kısımları; **korelasyon filtresi** >%70 elenme (açgözlü top-N) ; tahsis = conviction-temelli (fractional Kelly dilimleri). 4 test ✓ |
+| `allocation_manager.rs` | İNANÇ = (oy yoğunluğu × kelly ağırlığı × güc) / (1+20·ATR%) ; SL = mid−sl·ATR, TP = `tp_from_entry(entry_eff, risk)` (tek formül, P1-E — "sabit 3×ATR" **değildir**); **korelasyon filtresi** >%70 elenme (açgözlü top-N) ; tahsis = conviction-temelli (fractional Kelly dilimleri). 4 test ✓ |
 | `engine_loop.rs` | 3 Faz: 1) tarama (stratejiler→ensemble+sinyal kapısı+mumlar+ATR) 2) tahsis (Vote=coin×dir×oy×kelly+corr) 3) yürütme: machine.on_decision→Place/Exit/Cancel; Place yalnız seçilenlere (reddediyse pending→Flat revert). **Kuru koşum tamamen silindi** — her dolum `user` kanalından gelen gerçek borsa verisidir. **batch_execute: TEK POST** (max 2\*POST: place+cancel). |
 | `executor.rs` | api Exchange ince katman: tick-lot doğrulama, cache'li asset çözümü (ağ çağrısız), open_orders defteri, pozisyon cache (assetPositions), WS orderUpdates/user işleme, refresh_orders/refresh_positions (recon). `batch_execute`: çoklu place+cancel→max 2 POST. |
 | `orderbook.rs` | Yerel L2 defter: REST sync_from_rest + WS snapshot; mid/spread_bps/imbalance(5)/vwap_fill/depth_within_bps/is_stale/is_sane (crossed-book reddi). |
@@ -452,7 +452,7 @@ Karar ve gerekçe:
 | | Karar | Neden |
 |---|---|---|
 | **SL** | ✅ **ratchet** (tepe ∓ k×ATR) | Zararı sınırlar. Trailing'in tek işi bu. |
-| **TP** | ❌ **sabit** (`tp_atr_mult = 3.0`) | Somut sayı (giriş 100, ATR 2, risk 3): sabit TP 106 → ödül:risk **2:1**. Fiyat 106'ya dokunup geri dönerse trailing TP 103'e çekilir → **1:1**. Yani trailing TP, tam TERSİR (kâr satışında) oranı yarıya düşürür, kazanan işlemleri kaybettirir. |
+| **TP** | ❌ **sabit** (`tp_atr_mult = 3.0`) | Somut sayı (giriş 100, ATR 2, risk 3): analytical TP = `entry_eff + 2×risk` = 106 → ödül:risk **2:1**. (TP sabit; **mesafesi** `tp/sl` oranı × gerçek risk — P1-E.) Fiyat 106'ya dokunup geri dönerse trailing TP 103'e çekilir → **1:1**. Yani trailing TP, tam TERSİR (kâr satışında) oranı yarıya düşürür, kazanan işlemleri kaybettirir. |
 
 > **Doküman düzeltmesi:** bu bölüm ve KIYAMET-AUDIT "3:1" diyordu.
 > `sl_atr_mult = 1.5` / `tp_atr_mult = 3.0` → gerçek oran **2:1**. Test
@@ -467,7 +467,30 @@ Karar ve gerekçe:
 > hareket edemez (koruma katmanı iki yönlü çelişir). Tek doğruluk kaynağı
 > **bot içi mantık**; borsa katmanı yalnız felaket-stop'u.
 >
-> **DOKÜMAN NOTU:** `ExitReason::TakeProfit` enum değeri bugün **gerçek bir kapanış kaynağı değil** (analytical target). TP execution yolu henüz bağlanmamış; TP tahsis anında `mid ± tp_atr_mult × ATR` mutlak seviye olarak saklanır ve sadece min distance kontrolünde kullanılır. TP-execution yolu bağlanınca `attr.exit_reason = Some(ExitReason::TakeProfit)` atanacaktır; k-protokolü "tp" kovasının boş olmasını bilerek bekler.
+> **DOKÜMAN NOTU (P1-E):** TakeProfit enum değeri bugün gerçek bir kapanış kaynağı değil (analytical target); TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
+>
+> **TP NEREDEN GELİYOR (P1-E)?** Tek formül: `AllocationConfig::tp_from_entry()`.
+> ```text
+> tp_dist = max( (tp_atr_mult / sl_atr_mult) × risk_mesafesi , 2 × risk_mesafesi )
+> TP(LONG) = entry_eff + tp_dist      TP(SHORT) = entry_eff − tp_dist
+> ```
+> - `entry_eff` = **gerçek dolum** (REST `entryPx`), karar anı defter fiyatı DEĞİL.
+>   Kayma TP'yi de taşır → TP daima dolumun kâr tarafında kalır (`kayma_tp_kar_tarafinda_kalir`).
+> - `risk_mesafesi` = `EntryAttr::risk_px` = gerçek SL mesafesi (stop entry'ye göre
+>   taşınır, kayma onu değiştirmez).
+> - Yan kapı `2 × risk_mesafesi`: R:R < 1 olsa bile TP girişin arkasına düsmez.
+>
+> **Kaldırılan yanlış yorumlar:**
+> - ~~"TP sabit 3×ATR"~~ → TP sabit ATR çarpanı DEĞİL; **oran** `tp/sl` × gerçek
+>   risk mesafesi. Varsayılanda (3.0/1.5 = 2) bu yine 2×risk verir, ama sebep
+>   farklıdır: çarpan yanlışsa (R:R<1) min kapı devreye girer.
+> - ~~"TP'nin allocation-time absolute target olduğu iddiası"~~ → `Candidate.tp_px`
+>   artık yalnız **PLAN** (karar `mid`'ine göre, min-distance kapısı için).
+>   Otoriter hedef `EntryAttr::tp_px`'dir ve **gerçek dolumdan** türetilir
+>   (`EntryAttr::set_analytical_tp` ← `apply_real_fill`) — `allocation_tp_entry_eff_ile_baglanir`.
+>
+> `exit_reason = Some(ExitReason::TakeProfit)` **hiçbir yolda atanmaz**;
+> k-protokolü "tp" kovasının boş olmasını bilerek bekler.
 
 #### Uygulama
 
@@ -826,7 +849,7 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 15 + recon 4 | 98/98 ✓ |
+| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 15 + recon 4 + tp-entry 3 | 101/101 ✓ |
 | api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
 | data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
 | data | P1-D tek kaynaklı evren: exact/top-N, sessiz kırpma yok, katman doğrulama | 7/7 ✓ |
@@ -855,7 +878,7 @@ TEK PR ile girer.
   CRITICAL + operatör müdahalesi. Kalıcı parse-fail: restart→RECON→5 crit→flatten→dur.
 
 **B — Kalan Paket (bir sonraki planlı restart'ta TEK PR):**
-- **P0-1**: TP dolum-fiyatı türetimi — `entry_eff` (REST `entryPx`) + `tp_atr_mult × risk_mesafesi`.
+- ~~**P0-1**: TP dolum-fiyatı türetimi~~ — **KAPANDI (P1-E)**: `AllocationConfig::tp_from_entry(entry_eff = REST entryPx, risk_mesafesi = EntryAttr::risk_px)`, `EntryAttr::tp_px` üzerinden gerçek akışa bağlı. Kalan iş: TP-execution yolu (borsada limit TP + `exit_reason=TakeProfit`).
 - **P0-2**: TID dedup ring buffer + `track_state.json` provenance (`origin + schema_version`).
 - **P1-2**: Restart exponential backoff (yukarıda A4).
 - **P1-3**: S5 periyodik recon 30 sn (cycle-sayacı yerine zaman).
@@ -870,7 +893,8 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 98, api 5, data 9, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 101, api 5, data 9, strategy 6).
+- P1-E TP: tek formül `AllocationConfig::tp_from_entry()`; otoriter hedef `EntryAttr::tp_px` (**gerçek dolumdan**). `Candidate.tp_px` yalnız PLAN. `TRAIL_ATR_K`/`TRAIL_MIN_STEP` değiştirilmedi.
 - P1-D `TradingUniverse`: `data/src/universe.rs`. `IngestorConfig::max_coins` **kaldırıldı** (sessiz kırpma kaynağı). `Ingestor::with_universe` evreni dışarıdan alır.
 - P1-B ring-wrap kabul testleri (`history_ring_wrap_tum_barlar`, `history_snapshot_sadece_kapanista_guncellenir`).
 - P1-C exchange UNKNOWN → gerçek cloid reconciliation (5 api + 4 engine test).
@@ -890,4 +914,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 98, api 5, data 9, strategy 6 = 118, hepsi yeşil.*
+*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 101, api 5, data 9, strategy 6 = 121, hepsi yeşil.*

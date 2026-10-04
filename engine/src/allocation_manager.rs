@@ -43,8 +43,15 @@ pub struct Candidate {
     pub allocated_usd: f64,
     /// katkı veren stratejiler (attribution)
     pub voters: Vec<String>,
-    /// ATR tabanlı SL/TP (mid'e göre; long: −sl/+tp)
+    /// ATR tabanlı SL (karar anı `mid`'e göre; long: −, short: +).
     pub sl_px: f64,
+    /// **PLANLANAN** TP hedefi — tahsis anındaki karar `mid`'ine göre
+    /// (`tp_from_entry(mid, risk)`). Otoriter analytical hedef DEĞİL: gerçek
+    /// dolum sonrası `EntryAttr::tp_px` üzerinden **yeniden türetilir**
+    /// (`Engine::apply_real_fill` → `EntryAttr::set_analytical_tp`).
+    ///
+    /// ⚠️ Bugün TP bir kapanış kaynağı değil (analytical target); borsada TP
+    /// limit emri asılmaz, `exit_reason=TakeProfit` hiçbir yolda atanmaz.
     pub tp_px: f64,
     /// oy veren keşif stratejilerinin payı (0..1); >0 ise keşif riski sınırlıdır
     pub explorer_share: f64,
@@ -70,6 +77,41 @@ pub struct AllocationConfig {
     pub explore_cap_frac: f64,
     /// keşif oyununun conviction indirimi (karıştırıcılık cezası)
     pub explore_discount: f64,
+}
+
+impl AllocationConfig {
+    /// **TEK TP FORMÜLÜ** — her yer bu çağırır (P1-E).
+    ///
+    /// ```text
+    /// tp_dist  = (tp_atr_mult / sl_atr_mult) × risk_mesafesi
+    /// tp_dist  = max(tp_dist, 2 × risk_mesafesi)   // yan kapı
+    /// TP(LONG) = entry_eff + tp_dist
+    /// TP(SHORT)= entry_eff - tp_dist
+    /// ```
+    ///
+    /// - `entry_eff` = **gerçek dolum** fiyatı (REST `entryPx`), karar anı
+    ///   defter fiyatı DEĞİL. Kayma TP'yi de kaydırır → TP daima dolumun
+    ///   kâr tarafında kalır.
+    /// - `risk_mesafesi` = |entry_eff − gerçek SL| = `EntryAttr::risk_px`
+    ///   (stop mesafesi entry'ye göre taşınır, bu yüzden kayma riski değiştirmez).
+    /// - Yan kapı: `tp_dist ≥ 2 × risk_mesafesi`. R:R oranı 1'den küçükse bile
+    ///   TP asla girişin arkasına (zarar tarafına) düşmez.
+    ///
+    /// ⚠️ `TakeProfit` **bugün gerçek bir kapanış kaynağı değil** (analytical
+    /// target). TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
+    pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+        let risk = risk_mesafesi.abs();
+        if !(entry_eff > 0.0) || !(risk > 0.0) {
+            return entry_eff;
+        }
+        let min_tp_dist = risk * 2.0;
+        let tp_dist = ((self.tp_atr_mult / self.sl_atr_mult) * risk).max(min_tp_dist);
+        match dir {
+            Dir::Long => entry_eff + tp_dist,
+            Dir::Short => entry_eff - tp_dist,
+            Dir::Neutral => entry_eff,
+        }
+    }
 }
 
 impl Default for AllocationConfig {
@@ -139,37 +181,28 @@ impl AllocationManager {
         (share * breadth * strength / risk).clamp(0.0, 1.0)
     }
 
-    /// SL/TP fiyatları: long → mid−slA·ATR / mid+tpA·ATR (ayna short)
-    /// NOT: TP mutlak hesaplanıyor (tahsis anındaki mid'e göre).
-    /// Gerçek TP hedefi (analytical) pozisyon açıldığında `tp_from_entry()`
-    /// ile `entry_eff ± tp_atr_mult × risk_mesafesi` olarak türetilir.
+    /// SL fiyatı: long → mid−slA·ATR / short → mid+slA·ATR.
+    ///
+    /// TP **ayrı formülle hesaplanmaz**; `tp_from_entry()` çağrılır, yani
+    /// tahsis anındaki `mid` üzerinden **planlanan** (henüz dolum olmamış)
+    /// hedef verilir. Gerçek dolum sonrası TP yeniden türetilir
+    /// (`EntryAttr::set_analytical_tp`). `sl_atr_mult·ATR` risk mesafesi
+    /// verildiği için iki yol **matematiksel olarak aynı** sonucu üretir —
+    /// fark yalnız `entry` kaymasında görünür, ki o zaten ikinci yolda
+    /// düzeltilir.
     pub fn sl_tp(&self, dir: Dir, mid: f64, atr_usd: f64) -> (f64, f64) {
-        match dir {
-            Dir::Long => (
-                mid - self.cfg.sl_atr_mult * atr_usd,
-                mid + self.cfg.tp_atr_mult * atr_usd,
-            ),
-            Dir::Short => (
-                mid + self.cfg.sl_atr_mult * atr_usd,
-                mid - self.cfg.tp_atr_mult * atr_usd,
-            ),
-            Dir::Neutral => (mid, mid),
-        }
+        let risk = self.cfg.sl_atr_mult * atr_usd;
+        let sl = match dir {
+            Dir::Long => mid - risk,
+            Dir::Short => mid + risk,
+            Dir::Neutral => mid,
+        };
+        (sl, self.tp_from_entry(dir, mid, risk))
     }
 
-    /// Gerçek TP hedefi: entry_eff ± tp_atr_mult × risk_mesafesi.
-    /// `entry_eff` = gerçek dolum fiyatı (REST entryPx düzeltmesi).
-    /// `risk_mesafesi` = |entry_eff - SL| = `entry_attr.risk_px`.
-    /// Yan kapısı: TP daima dolumun kâr tarafında; min TP mesafesi = 2 × min_risk_dist.
+    /// Gerçek TP hedefi: `AllocationConfig::tp_from_entry` (tek formül).
     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
-        let min_tp_dist = risk_mesafesi * 2.0;
-        let tp_dist = (self.cfg.tp_atr_mult / self.cfg.sl_atr_mult) * risk_mesafesi;
-        let tp_dist = tp_dist.max(min_tp_dist);
-        match dir {
-            Dir::Long => entry_eff + tp_dist,
-            Dir::Short => entry_eff - tp_dist,
-            Dir::Neutral => entry_eff,
-        }
+        self.cfg.tp_from_entry(dir, entry_eff, risk_mesafesi)
     }
 
     /// TAM KANAT: sırala → korelasyonla ele → tahsis.

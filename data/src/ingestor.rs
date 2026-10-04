@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use crate::universe::TradingUniverse;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use hyperliquid_api::{Config, Info, WsClient};
@@ -126,7 +126,7 @@ impl Ingestor {
     /// P1-D: evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
     /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
     pub async fn with_universe(
-        cfg: Config,
+        _cfg: Config,
         icfg: IngestorConfig,
         universe: TradingUniverse,
     ) -> Result<Self> {
