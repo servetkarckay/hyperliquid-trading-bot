@@ -295,3 +295,166 @@ impl Aggregator {
         Ok(n)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tek interval'lık test aggregator'ı: `cap` mum tutulur, zaman penceresi kapalı.
+    fn agg_single_iv(iv_secs: u64, cap: usize) -> Aggregator {
+        Aggregator::new(AggregatorConfig {
+            intervals_secs: vec![iv_secs],
+            history_len: cap,
+            history_span_secs: 0,
+            history_span_min_iv: u64::MAX,
+            history_len_max: cap,
+        })
+    }
+
+    /// P1-B kabul: VecDeque wrap olduğunda `history()` TAM ve KRONOLOJİK pencere
+    /// döndürmeli.
+    ///
+    /// ÖNCE: `history()` içinde `as_slices().0` kullanılıyordu; head `start`
+    /// sıfırdan uzaklaştığında ikinci fiziksel slice'taki mumlar görünmüyordu —
+    /// yani wrap anında history YARIM kalıyordu.
+    #[test]
+    fn history_ring_wrap_tum_barlar() {
+        const IV: u64 = 60;
+        const IV_MS: i64 = (IV * 1000) as i64;
+        let mut agg = agg_single_iv(IV, 5);
+
+        // 7 kapanış için 8 bucket gerekir: her tick bir bucket ilerletir ve
+        // önceki bucket O TICK'te kapanır.
+        let mut closed_ts = Vec::new();
+        for i in 0..8i64 {
+            let t = i * IV_MS;
+            for c in agg.on_trade("BTC", 100.0 + i as f64, 1.0, t, true) {
+                if c.1 == IV {
+                    closed_ts.push(c.2.t);
+                }
+            }
+        }
+        assert_eq!(closed_ts.len(), 7, "7 mum kapanmali");
+
+        let h = agg.history("BTC", IV);
+        assert_eq!(h.len(), 5, "history() TAM 5 mum döndürmeli");
+
+        let ts: Vec<i64> = h.iter().map(|c| c.t).collect();
+        assert!(
+            ts.windows(2).all(|w| w[0] < w[1]),
+            "kronolojik sıra bozuk: {ts:?}"
+        );
+        assert!(
+            h.iter().all(|c| c.closed),
+            "history() yalnız KAPANMIŞ mum içermeli"
+        );
+
+        // Son 5 KAPANMIŞ mum: bucket 2..6 (ilk 2 mum cap dışına atıldı).
+        let expected: Vec<i64> = (2..7i64).map(|i| i * IV_MS).collect();
+        assert_eq!(ts, expected, "son 5 kapanmış mum tam olarak beklenen olmalı");
+
+        // ── FAZ 2: fiziksel BÖLÜNME ──
+        // `as_slices()`'ın iki parça DÖNMESİ için head+len > VecDeque kapasitesi
+        // gerekir. 7 kapanışta (cap=5) head=2, len=5, kapasite=8 -> 7 <= 8,
+        // yani deque HENÜZ bölünmez. `as_slices().0` hatası tam da bu bölünme
+        // anında görünür olduğu için literal 7 kapanış YETMEZ: bölünme
+        // GÖRÜLENE kadar sürükleme yapılır ve aynı garanti her adımda
+        // doğrulanır.
+        let key = ("BTC".to_string(), IV);
+        let mut buckets = 8i64; // sıradaki tick'in bucket'ı
+        let mut splits = 0usize;
+        loop {
+            // B bucket'taki tick, B-1 bucket'ını kapatır.
+            let t = buckets * IV_MS;
+            let closed = agg.on_trade("BTC", 100.0 + buckets as f64, 1.0, t, true);
+            buckets += 1;
+            assert!(buckets < 64, "VecDeque fiziksel bolunmedi — on kosul saglanamadi");
+            // Beklenen son-5 pencere, DÖNEN kapanan mumdan türetilir: 5 mum
+            // (bu mum dâhil) geriye bakar.
+            let last_closed = closed
+                .iter()
+                .find(|c| c.1 == IV)
+                .map(|c| c.2.t)
+                .expect("bu tick bir mum kapatti");
+            let exp: Vec<i64> = (0..5).map(|i| last_closed - (4 - i) * IV_MS).collect();
+
+            let (first, second) = {
+                let s = agg.history.get(&key).unwrap().as_slices();
+                (s.0.len(), s.1.len())
+            };
+            if second > 0 {
+                splits += 1;
+                // Bölünme anında ikinci fiziksel slice'taki mumlar KAYBOLMAMALI
+                assert!(
+                    first > 0 && first + second == 5,
+                    "fiziksel bolunme bekleniyordu: ilk={first} ikinci={second}, toplam 5 olmali"
+                );
+                let h = agg.history("BTC", IV);
+                assert_eq!(
+                    h.len(),
+                    5,
+                    "bolunmede history() ikinci slice'i KAYBETTI: {:?}",
+                    h.iter().map(|c| c.t).collect::<Vec<_>>()
+                );
+                let ts: Vec<i64> = h.iter().map(|c| c.t).collect();
+                assert!(
+                    ts.windows(2).all(|w| w[0] < w[1]),
+                    "bolunmede sira bozuk: {ts:?}"
+                );
+                assert_eq!(ts, exp, "bolunmede son 5 mum yanlis: {ts:?} != {exp:?}");
+            }
+            if splits >= 3 {
+                break; // üç ayrı bölünme adımı doğrulandı
+            }
+        }
+    }
+
+    /// P1-B kabul: snapshot YALNIZ mum kapanışında yeniden kurulur.
+    ///
+    /// `on_trade` her tick'te çağrılır (canlıda ~5 sn'de bir). Snapshot
+    /// kopyalaması her tick'te yapılırsa maliyet `O(cap)` olurdu; kabul
+    /// kriteri: aynı bucket içinde `history()` DEĞİŞMEZ.
+    #[test]
+    fn history_snapshot_sadece_kapanista_guncellenir() {
+        const IV: u64 = 60;
+        const IV_MS: i64 = (IV * 1000) as i64;
+        let mut agg = agg_single_iv(IV, 5);
+
+        // bucket 0 açılır
+        agg.on_trade("BTC", 10.0, 1.0, 0, true);
+        assert!(agg.history("BTC", IV).is_empty(), "ilk mum kapanmadan history boş");
+
+        // bucket 1'e geç -> bucket 0 kapanır, snapshot oluşur
+        agg.on_trade("BTC", 11.0, 1.0, IV_MS, true);
+        let snap: Vec<(i64, f64)> = agg
+            .history("BTC", IV)
+            .iter()
+            .map(|c| (c.t, c.c))
+            .collect();
+        assert_eq!(snap, vec![(0, 10.0)], "ilk kapanışta snapshot oluşmalı");
+
+        // AYNI bucket içinde 3 tick: live mum değişir, snapshot DEĞİŞMEZ
+        for (i, (px_i, px)) in [(1, 20.0), (2, 30.0), (3, 40.0)].into_iter().enumerate() {
+            let ts = IV_MS + 1000 + px_i as i64 * 1000;
+            let closed = agg.on_trade("BTC", px, 1.0, ts, true);
+            assert!(closed.is_empty(), "ayni bucket icinde mum kapanmamali");
+        }
+        let live = agg.current("BTC", IV).expect("live mum var");
+        assert_eq!(live.c, 40.0, "live mum son tick ile guncellenmeli");
+        assert_eq!(live.h, 40.0);
+        assert_eq!(live.l, 11.0);
+        assert_eq!(live.n, 4, "bucket ici 4 tick birikti");
+
+        let after: Vec<(i64, f64)> = agg.history("BTC", IV).iter().map(|c| (c.t, c.c)).collect();
+        assert_eq!(
+            after, snap,
+            "bucket ici trade'ler snapshot'i DEGISTIRMEMELI (rebuild yalniz kapanista)"
+        );
+
+        // bucket 2'ye geç -> bucket 1 kapanır, snapshot GENİŞLER
+        agg.on_trade("BTC", 50.0, 1.0, 2 * IV_MS, true);
+        let grown: Vec<(i64, f64)> = agg.history("BTC", IV).iter().map(|c| (c.t, c.c)).collect();
+        assert_eq!(grown.len(), 2, "kapanista snapshot guncellenmeli");
+        assert_eq!(grown[1], (IV_MS, 40.0), "bucket1 son tick fiyati ile kapanmis olmali");
+    }
+}
