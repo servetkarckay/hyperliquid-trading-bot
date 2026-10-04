@@ -176,10 +176,15 @@ pub struct HyperliquidClient {
 
 impl HyperliquidClient {
     pub fn new(cfg: Config) -> Result<Self> {
+        Self::with_timeout(cfg, Duration::from_secs(30))
+    }
+
+    /// Testnet borsa 30 sn içinde dönmüyorse UNKNOWN şart: transport hatasını
+    /// retry etmek blind retry'dir (emir borsada işlenmiş olabilir).
+    /// Timeout ayarı dışarıdan verilebilir (testler kısa timeout kullanır).
+    pub fn with_timeout(cfg: Config, timeout: Duration) -> Result<Self> {
         let sk = signing_key_from_hex(&cfg.pk_hex())?;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let http = reqwest::Client::builder().timeout(timeout).build()?;
         Ok(Self { cfg, sk, http })
     }
 
@@ -245,8 +250,17 @@ impl HyperliquidClient {
                     attempt_429 += 1;
                 }
                 Err(ApiError::Http { status, .. }) if status >= 500 => {
-                    // 5xx/timeout -> retry YOK, UNKNOWN dondur
+                    // 5xx -> retry YOK, UNKNOWN dondur
                     tracing::error!("[EXCHANGE] HTTP {status} -- UNKNOWN (retry YOK, reconciliation bekleniyor)");
+                    return ExchangeOutcome::Unknown;
+                }
+                Err(ApiError::Http { status: 0, body }) => {
+                    // P1-C HATA 1: reqwest transport hatası (timeout, connect
+                    // kopması, gövde okunamadı) `From<reqwest::Error>` ile
+                    // `Http { status: 0 }` olur. `status >= 500` bu yüzden
+                    // YAKALAMAZ ve emir "Error" sayılırdı. Oysa istek sunucuya
+                    // ULAŞMIŞ olabilir -> sonuç UNKNOWN'dır.
+                    tracing::error!("[EXCHANGE] transport ({body}) -- UNKNOWN (timeout dahil, retry YOK)");
                     return ExchangeOutcome::Unknown;
                 }
                 Err(e) => return ExchangeOutcome::Error(e),
@@ -292,4 +306,152 @@ pub enum ExchangeOutcome {
     Success(Value),
     Unknown,
     Error(ApiError),
+}
+
+#[cfg(test)]
+mod exchange_unknown_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Sahte borsa: her isteği sayar, verilen yanıtları sırayla döner.
+    /// `None` = isteği AL but YANITLAMA (istemci timeout'a düşer -> UNKNOWN).
+    struct Fake {
+        url: String,
+        hits: Arc<AtomicUsize>,
+    }
+
+    async fn fake_exchange(responses: Vec<Option<(&'static str, &'static str)>>) -> Fake {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h2 = hits.clone();
+        tokio::spawn(async move {
+            let mut i = 0usize;
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { break };
+                // isteği oku (Content-Length kadar) — reqwest tam göndermeden
+                // yanıt vermek bağlantı reseti yapar, sayım kaçar.
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                h2.fetch_add(1, Ordering::SeqCst);
+                let r = responses
+                    .get(i.min(responses.len().saturating_sub(1)))
+                    .copied()
+                    .flatten();
+                i += 1;
+                let Some((status, body)) = r else {
+                    // YANIT VERME: timeout'u taklit et
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                };
+                if n == 0 {
+                    continue;
+                }
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\ncontent-length: {}\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+            }
+        });
+        Fake { url: format!("http://{addr}"), hits }
+    }
+
+    fn cfg(url: &str) -> Config {
+        Config {
+            network: "testnet".into(),
+            api_url: url.into(),
+            ws_url: "ws://127.0.0.1:1".into(),
+            // testnet gerçek anahtarı değil, geçerli bir test ağı anahtarı
+            private_key: "0x1111111111111111111111111111111111111111111111111111111111111111".into(),
+            agent_address: "0x".into(),
+        }
+    }
+
+    fn action() -> Value {
+        json!({"type": "order", "orders": [], "grouping": "na"})
+    }
+
+    /// P1-C: 5xx -> UNKNOWN, retry YOK (ikinci POST olmamalı).
+    #[tokio::test]
+    async fn exchange_5xx_kor_retry_yok() {
+        let f = fake_exchange(vec![Some(("500 Internal Server Error", r#"{"error":"boom"}"#))]).await;
+        let c = HyperliquidClient::with_timeout(cfg(&f.url), Duration::from_secs(3)).unwrap();
+        let out = c.exchange_action(action()).await;
+        assert!(
+            matches!(out, ExchangeOutcome::Unknown),
+            "5xx UNKNOWN olmali, got {out:?}"
+        );
+        // retry YOK: ikinci POST gönderilmemeli
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(f.hits.load(Ordering::SeqCst), 1, "5xx sonrasi ikinci POST VAR — blind retry!");
+    }
+
+    /// P1-C: 429 -> backoff ile retry, ikinci denemede başarı.
+    #[tokio::test]
+    async fn exchange_429_backoff_ile_retry() {
+        let ok = r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":42}}]}}}"#;
+        let f = fake_exchange(vec![
+            Some(("429 Too Many Requests", r#"{"error":"rate limit"}"#)),
+            Some(("200 OK", ok)),
+        ])
+        .await;
+        let c = HyperliquidClient::with_timeout(cfg(&f.url), Duration::from_secs(5)).unwrap();
+        let out = c.exchange_action(action()).await;
+        match out {
+            ExchangeOutcome::Success(v) => {
+                assert_eq!(
+                    v.pointer("/response/data/statuses/0/resting/oid").and_then(Value::as_i64),
+                    Some(42),
+                    "başarılı yanıt parse edilemedi"
+                );
+            }
+            other => panic!("429 sonrası başarı bekleniyordu, got {other:?}"),
+        }
+        assert_eq!(f.hits.load(Ordering::SeqCst), 2, "429 -> tam 1 retry bekleniyordu");
+    }
+
+    /// P1-C: timeout -> UNKNOWN, retry YOK.
+    ///
+    /// `reqwest` timeout'u `ApiError::Http { status: 0 }` olur; `status >= 500`
+    /// bunu YAKALAMAZ. ÖNCE bu durum `Error` oluyordu (bilgi kaybı).
+    #[tokio::test]
+    async fn exchange_timeout_unknown_retry_yok() {
+        let f = fake_exchange(vec![None]).await; // hiç yanıt verme -> timeout
+        let c = HyperliquidClient::with_timeout(cfg(&f.url), Duration::from_millis(400)).unwrap();
+        let out = c.exchange_action(action()).await;
+        assert!(
+            matches!(out, ExchangeOutcome::Unknown),
+            "timeout UNKNOWN olmali, got {out:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(f.hits.load(Ordering::SeqCst), 1, "timeout sonrasi ikinci POST VAR!");
+    }
+
+    /// Timeout UNKNOWN'yu verir, ama 4xx (emir gerçekten gitmedi) DEĞİL —
+    /// 4xx normal hata olarak kalmalı, reconciliation'a GÖNDERİLMEMELİ.
+    #[tokio::test]
+    async fn exchange_4xx_hata_kalir_unknown_degil() {
+        let f = fake_exchange(vec![Some(("422 Unprocessable Entity", r#"{"error":"invalid price"}"#))]).await;
+        let c = HyperliquidClient::with_timeout(cfg(&f.url), Duration::from_secs(3)).unwrap();
+        let out = c.exchange_action(action()).await;
+        assert!(
+            matches!(out, ExchangeOutcome::Error(_)),
+            "4xx Error olmali (emir borsaya hic gitmedi), got {out:?}"
+        );
+    }
+
+    /// 4xx ASLA retry edilmez (mevcut davranış, regresyon koruması).
+    #[tokio::test]
+    async fn exchange_4xx_retry_yok() {
+        let f = fake_exchange(vec![Some(("400 Bad Request", r#"{"error":"bad"}"#))]).await;
+        let c = HyperliquidClient::with_timeout(cfg(&f.url), Duration::from_secs(3)).unwrap();
+        let _ = c.exchange_action(action()).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(f.hits.load(Ordering::SeqCst), 1, "4xx retry edilmemeli");
+    }
 }

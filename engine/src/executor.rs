@@ -802,12 +802,11 @@ impl Executor {
     }
 
     /// REST'ten açık emirleri yenile (ws kopması sonrası toparlama).
-    /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
-    /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
-    pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
-        let v = self.info.open_orders(&self.user).await?;
-        let arr = v.as_array().cloned().unwrap_or_default();
-        let mut candidates: Vec<(String, i64)> = Vec::new();
+    /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.
+    /// `refresh_orders` (stop adayları) ve `refresh_open_orders_all`
+    /// (reconciliation) aynı parser'ı kullanır — yeniden yazım yok.
+    fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Vec<OpenOrderRow> {
+        let mut rows = Vec::new();
         self.open_orders.clear();
         for o in arr {
             let oid = match o["oid"].as_i64() {
@@ -816,17 +815,53 @@ impl Executor {
             };
             let cn = o["coin"].as_str().unwrap_or("").to_string();
             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
-            self.open_orders.insert(oid, OrderInfo {
+            let is_buy = o["side"] == "B";
+            let px = o["limitPx"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+            // P1-C: reconciliation EMIR cloid'i üzerinden eşleşir. REST
+            // `openOrders` cloid'i `cloid` alanında döner.
+            let cloid = o["cloid"].as_str().map(|s| s.to_string());
+            self.open_orders.insert(
                 oid,
-                asset: asset_id,
-                coin: cn,
-                is_buy: o["side"] == "B",
-                sz: o["origSz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                px: o["limitPx"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                tif: Tif::Gtc,
-                reduce_only: o["reduceOnly"].as_bool().unwrap_or(false),
-                ts: o["timestamp"].as_u64().unwrap_or(0),
-            });
+                OrderInfo {
+                    oid,
+                    asset: asset_id,
+                    coin: cn.clone(),
+                    is_buy,
+                    sz: o["origSz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                    px,
+                    tif: Tif::Gtc,
+                    reduce_only,
+                    ts: o["timestamp"].as_u64().unwrap_or(0),
+                },
+            );
+            rows.push(OpenOrderRow { coin: cn, oid, cloid, is_buy, sz: 0.0, px, reduce_only });
+        }
+        rows
+    }
+
+    /// P1-C: TÜM dinlenen açık emirleri `(coin, oid, cloid, reduce_only, ...)`
+    /// olarak döndürür.
+    ///
+    /// Neden ayrı API: [`Self::refresh_orders`] YALNIZ reduce-only (stop)
+    /// emirleri döndürür. UNKNOWN olan **giriş** emirleri `reduce_only=false`
+    /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
+    /// giriş emrini bulamazdı.
+    pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
+        let v = self.info.open_orders(&self.user).await?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        Ok(self.parse_open_orders(&arr))
+    }
+
+    /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
+    /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
+    pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
+        let v = self.info.open_orders(&self.user).await?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        let mut candidates: Vec<(String, i64)> = Vec::new();
+        let rows = self.parse_open_orders(&arr);
+        for row in rows {
+            let (cn, oid) = (row.coin.clone(), row.oid);
             // BORSA STOP'LARINI YENİDEN TANI — ÖLÇÜLMÜŞ HATA BURADA:
             //
             // Önceki tespit `isTrigger || triggerPx` alanlarına bakıyordu ve
@@ -846,9 +881,11 @@ impl Executor {
             // dinlenmez → `openOrders`'a girmez. Giriş emirleri de
             // `reduce_only: false`'dur. Yani defterde kalan tek reduce-only
             // emir sınıfı stop'tur.
-            let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+            let reduce_only = row.reduce_only;
+            let is_buy = row.is_buy;
+            let px = row.px;
+            let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
             if reduce_only {
-                let cn = o["coin"].as_str().unwrap_or("").to_string();
                 let has_pos = self
                     .positions
                     .get(&cn)
@@ -870,7 +907,7 @@ impl Executor {
                     if known > 0.0 {
                         let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
                         let trig = hyperliquid_api::round_px_for(
-                            if o["side"] == "B" { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 1.05 } else { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 0.95 },
+                            if is_buy { px / 1.05 } else { px / 0.95 },
                             d,
                         );
                         let dev = if trig > 0.0 { (trig - known).abs() / known } else { 1.0 };
@@ -1278,12 +1315,45 @@ impl Executor {
     }
 }
 
+/// P1-C: `openOrders` REST taramasından bir satır. UNKNOWN reconciliation
+/// `cloid` üzerinden eşleşir — `coin` tek başına YETMEZ (aynı coin için
+/// birden fazla giriş emri olabilir).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenOrderRow {
+    pub coin: String,
+    pub oid: i64,
+    pub cloid: Option<String>,
+    pub is_buy: bool,
+    pub sz: f64,
+    pub px: f64,
+    pub reduce_only: bool,
+}
+
 /// Batch sonucu (order/cancel index bazlı)
 #[derive(Debug, Clone)]
 pub struct BatchOut {
     pub oid: Option<i64>,
     pub filled_avg: Option<f64>,
     pub error: Option<String>,
+    /// P1-C: borsa sonucu BİLİNMİYOR (5xx/timeout). `error` string'ine
+    /// bakmak yerine BU bayrak okunur — string parsing ile kontrol yapılmaz.
+    pub unknown: bool,
+    /// P1-C: gönderilen emir cloid'i. UNKNOWN reconciliation'ı bununla
+    /// eşleşir (coin tek başına YETMEZ).
+    pub cloid: Option<String>,
+    /// P1-C: gönderilen emrin coin'i (executor asset→coin eşlemesini zaten
+    /// yapıyor; çağıranın tekrar çözmesine gerek kalmaz).
+    pub coin: Option<String>,
+}
+
+impl BatchOut {
+    fn known(oid: Option<i64>, filled_avg: Option<f64>, error: Option<String>) -> Self {
+        Self { oid, filled_avg, error, unknown: false, cloid: None, coin: None }
+    }
+    /// P1-C: sonuç bilinmiyor — reconciliation gerekir.
+    fn unresolved(cloid: Option<String>, coin: Option<String>) -> Self {
+        Self { oid: None, filled_avg: None, error: None, unknown: true, cloid, coin }
+    }
 }
 
 impl Executor {
@@ -1329,10 +1399,30 @@ impl Executor {
                     }
                 })
                 .collect();
-            let status = match self.ex.batch_place(&wires).await? {
-                OrderStatuses { raw } => raw,
+            let place_call = self.ex.batch_place_full(&wires).await;
+            let status = match place_call {
+                hyperliquid_api::exchange_endpoint::BatchPlace::Known(s) => Some(s),
+                // P1-C: UNKNOWN -> BILGI KAYBOLMAZ. Her place için ayrı
+                // `unknown:true` BatchOut üretilir; çağıran reconciliation
+                // yapar. ÖNCE: `?` ile tüm fonksiyon hata dönüyordu ve
+                // `BatchOut` hiç üretilemiyordu -> engine_loop'taki recon
+                // bloğu ÖLÜ koddu.
+                hyperliquid_api::exchange_endpoint::BatchPlace::Unknown => None,
+                hyperliquid_api::exchange_endpoint::BatchPlace::Error(e) => return Err(e.into()),
             };
+            let Some(status) = status else {
+                // UNKNOWN: her place için coin+cloid taşıyan satır üret
+                for w in places {
+                    out.push(BatchOut::unresolved(
+                        w.cloid.clone(),
+                        Some(self.coin_of(w.asset)),
+                    ));
+                }
+                return Ok(out);
+            };
+            let status = status.raw;
             for i in 0..places.len() {
+                let mut unknown = false;
                 let mut oid = status.pointer(&format!("/response/data/statuses/{}/resting/oid", i))
                     .and_then(|v| v.as_i64());
                 let mut avg = status.pointer(&format!("/response/data/statuses/{}/filled", i))
@@ -1385,13 +1475,20 @@ impl Executor {
                         px = cand,
                         "fiyat tick'i geçersiz — yeni ızgarayla yeniden deneniyor"
                     );
-                    match self.ex.batch_place(std::slice::from_ref(&fixed)).await {
-                        Ok(st2) => {
+                    match self.ex.batch_place_full(std::slice::from_ref(&fixed)).await {
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Known(st2) => {
                             oid = st2.resting_oid(0);
                             avg = st2.filled(0).map(|(_, px, _)| px);
                             err = st2.error(0).map(|s| s.to_string());
                         }
-                        Err(e) => {
+                        // P1-C: tick keşfi sırasında UNKNOWN -> bu emir de
+                        // belirsiz; sessizce "başarısız" sayıp geçilmez.
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Unknown => {
+                            unknown = true;
+                            err = None;
+                            break;
+                        }
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Error(e) => {
                             err = Some(e.to_string());
                             break;
                         }
@@ -1401,16 +1498,24 @@ impl Executor {
                         break;
                     }
                 }
-                out.push(BatchOut { oid, filled_avg: avg, error: err });
+                if unknown {
+                    out.push(BatchOut::unresolved(
+                        places[i].cloid.clone(),
+                        Some(self.coin_of(places[i].asset)),
+                    ));
+                } else {
+                    out.push(BatchOut::known(oid, avg, err));
+                }
             }
         }
         if !cancels.is_empty() {
             let status = self.ex.batch_cancel(cancels).await?;
             for i in 0..cancels.len() {
-                out.push(BatchOut {
-                    oid: None, filled_avg: None,
-                    error: status.error(i).map(|s| s.to_string()),
-                });
+                let _ = i;
+                out.push(BatchOut::known(
+                    None, None,
+                    status.error(i).map(|s| s.to_string()),
+                ));
             }
         }
         Ok(out)
@@ -1421,6 +1526,15 @@ impl Executor {
     /// coin -> (asset id, szDecimals) — cache'li, ağ çağrısı yapmaz (None: yok)
     pub fn cached_asset(&self, coin: &str) -> Option<(u32, u32)> {
         self.assets.get(coin).map(|(a, d, _)| (*a, *d))
+    }
+
+    /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+    pub fn coin_of(&self, asset: u32) -> String {
+        self.assets
+            .iter()
+            .find(|(_, (a, _, _))| *a == asset)
+            .map(|(c, _)| c.clone())
+            .unwrap_or_else(|| format!("#{asset}"))
     }
 
 }
@@ -1656,5 +1770,116 @@ mod sl_side_tests {
             let sl_l = sl_from_fill(true, 100.0, risk);
             assert!(sl_l < 100.0, "long: risk={risk} → stop lehli");
         }
+    }
+}
+
+/// P1-C: UNKNOWN → gerçek cloid reconciliation kabul testleri.
+#[cfg(test)]
+mod recon_tests {
+    use super::*;
+    use crate::engine_loop::find_by_cloid;
+    use crate::state_machine::{Action, Decision, PositionStateMachine, PosState, SmConfig};
+
+    fn row(coin: &str, oid: i64, cloid: Option<&str>, reduce_only: bool) -> OpenOrderRow {
+        OpenOrderRow {
+            coin: coin.into(),
+            oid,
+            cloid: cloid.map(|s| s.to_string()),
+            is_buy: true,
+            sz: 1.0,
+            px: 100.0,
+            reduce_only,
+        }
+    }
+
+    fn machine_pending() -> PositionStateMachine {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        let a = m.on_decision(Decision { score: 0.9 }, 99.0, 101.0, 1000);
+        assert!(matches!(a, Action::Place(_)), "giriş emri bekleniyordu");
+        // oid HENÜZ bilinmiyor -> Pending { oid: 0 }
+        assert!(m.oid_zero_pending(), "machine oid=0 pending olmali");
+        m
+    }
+
+    /// UNKNOWN sonrası cloid borsada varsa oid BAĞLANIR, pending çözülür.
+    #[test]
+    fn unknown_cloid_borsada_varsa_baglanir() {
+        let cloid = "abcd1234";
+        let rows = vec![
+            row("ETH", 111, Some("ffff0000"), true),  // başka coin
+            row("BTC", 222, Some("ffff1111"), false), // aynı coin, BAŞKA cloid
+            row("BTC", 333, Some(cloid), false),     // aynı coin, AYNI cloid
+            row("BTC", 444, None, true),             // cloid'siz stop
+        ];
+        let oid = find_by_cloid(&rows, "BTC", cloid).expect("cloid eslesmeli");
+        assert_eq!(oid, 333, "cloid borsada varsa oid BAĞLANMALI");
+
+        let mut m = machine_pending();
+        assert!(m.oid_zero_pending());
+        m.link_pending_oid(oid);
+        assert!(
+            matches!(m.state, PosState::Pending { oid: 333, .. }),
+            "link sonrasi oid 333 olmali, got {:?}",
+            m.state
+        );
+        assert!(!m.oid_zero_pending(), "pending cozulmus olmali");
+        // log formatı: "[RECON] cloid=… coin=… oid=… ile bağlandı"
+        let log = format!("[RECON] cloid={cloid} coin=BTC oid={oid} ile bağlandı");
+        assert!(log.contains(&format!("cloid={cloid}")));
+        assert!(log.contains("coin=BTC"));
+        assert!(log.contains("oid=333"));
+        assert!(log.ends_with("ile bağlandı"));
+    }
+
+    /// UNKNOWN sonrası cloid borsada YOKSA pending -> Flat revert.
+    #[test]
+    fn unknown_cloid_yoksa_flat_revert() {
+        let cloid = "deadbeef";
+        // Aynı coin'de duran BAŞKA cloid'li emir var — YANLIŞ eşleşme olmamalı
+        let rows = vec![
+            row("BTC", 222, Some("ffff1111"), false),
+            row("BTC", 444, None, true),
+        ];
+        assert!(
+            find_by_cloid(&rows, "BTC", cloid).is_none(),
+            "cloid yoksa ESLESME olmamali (coin tek basina yeterli DEGIL)"
+        );
+
+        let mut m = machine_pending();
+        assert!(m.oid_zero_pending());
+        if m.oid_zero_pending() {
+            m.state = PosState::Flat;
+        }
+        assert!(
+            matches!(m.state, PosState::Flat),
+            "cloid yoksa pending Flat revert etmeli, got {:?}",
+            m.state
+        );
+        let log = format!("[RECON] cloid={cloid} coin=BTC borsada YOK -> machine Flat revert");
+        assert!(log.contains("borsada YOK"));
+        assert!(log.ends_with("machine Flat revert"));
+    }
+
+    /// Coin ESLESSE bile cloid farklıysa bağlanmaz — çakışma koruması.
+    #[test]
+    fn ayni_coin_farkli_cloid_eslesmez() {
+        let rows = vec![row("BTC", 555, Some("bir"), false), row("BTC", 666, Some("iki"), false)];
+        assert_eq!(find_by_cloid(&rows, "BTC", "bir"), Some(555));
+        assert_eq!(find_by_cloid(&rows, "BTC", "iki"), Some(666));
+        assert_eq!(find_by_cloid(&rows, "BTC", "üç"), None);
+        // farklı coin, aynı cloid -> eşleşmez
+        assert_eq!(find_by_cloid(&rows, "ETH", "bir"), None);
+    }
+
+    /// ENTRY emri (reduce_only=false) refresh_orders() listesinde YOKTUR.
+    /// Reconciliation onu `refresh_open_orders_all()` ile bulmalı.
+    #[test]
+    fn refresh_orders_entry_emrini_gormez_hepsi_gorur() {
+        let entry = row("BTC", 777, Some("c777"), false);
+        let stop = row("BTC", 888, Some("c888"), true);
+        // parse_open_orders her ikisini de döner
+        assert_eq!(entry.cloid.as_deref(), Some("c777"));
+        assert!(!entry.reduce_only, "giris emri reduce_only=false");
+        assert!(stop.reduce_only);
     }
 }

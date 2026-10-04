@@ -55,7 +55,7 @@ Hyperliquid mainnet
 |---|---|
 | `signing.rs` | İmza zinciri: action→msgpack→+nonce(BE)+vaultprefix→keccak=action_hash→EIP-712 phantom-agent (Exchange/1/1337/0x0, source `a`)→secp256k1 RFC6979, low-s, v=27+recid. `now_ms()` nonce üretici. `float_to_wire` fiyat/boyut gödsutersi. HTTP taşıma: `info()`/`exchange_action()` (zarf: action+nonce+signature+vaultAddress+expiresAfter). SDK 0.24 ile bayt-bayt doğrulanmış. |
 | `info_endpoint.rs` | Okuma metotları: meta, metaAndAssetCtxs ([meta,ctxs] formatta, context = funding/OI/premium/mark/oracle/dayNtlVlm/prevDayPx), allMids(+spot @), l2Book(levels[0]=bids,[1]=asks), candleSnapshot (endTime gerçek ms ZORUNLU), fundingHistory, clearinghouseState (MASTER adres şart), userFees/openOrders/userFills/orderStatus, spotMeta, predictedFundings, `name_to_asset` (coin→asset ID). |
-| `exchange_endpoint.rs` | Emir zarfı: `{"type":"order","orders":[wire],"grouping":"na"}`; wire={a,b,p,s,r,t}; TIF Alo/Ioc/Gtc. place_limit/place_ioc/place_trigger/cancel/cancel_by_cloid/modify(batchModify)/update_leverage/update_isolated_margin/schedule_cancel. `round_5sig`(5 anlamlı hane)/`round_sz_up`(szDecimals). **batch_place/batch_cancel**: çoklu emir/iptal BİR POST (batching). |
+| `exchange_endpoint.rs` | Emir zarfı: `{"type":"order","orders":[wire],"grouping":"na"}`; wire={a,b,p,s,r,t}; TIF Alo/Ioc/Gtc. place_limit/place_ioc/place_trigger/cancel/cancel_by_cloid/modify(batchModify)/update_leverage/update_isolated_margin/schedule_cancel. `round_5sig`(5 anlamlı hane)/`round_sz_up`(szDecimals). **batch_place/batch_cancel**: çoklu emir/iptal BİR POST (batching). **P1-C**: 429→backoff retry · 5xx→`Unknown` (tek POST) · **timeout→`Unknown`** (`status:0` idi, `>=500` yakalamıyordu → `Error` oluyordu) · 4xx→`Error`. `batch_place_full()` UNKNOWN'u taşır, `batch_place()` hata olarak yutar. |
 | `websocket.rs` | `WsClient::run(subs,tx)`: bağlan→abonelik aç→(channel,data) pompla; 50sn ping (sunucu 60sn kapar), kopınca 5sn'de reconnect. `WsEvent{channel,data}`. |
 | `error_responses.rs` | ApiError: Http{status,body}/Api(HL mesajı)/Sign/Json/Hex/Ws/Other(anyhow). OrderStatuses.error(i) batch redlerini taşır. |
 | `types.rs` | Wire şemaları: PerpMeta/Meta/AssetCtx(	prevDayPx dahil)/Candle(t,T,s,i,o,c,h,l,v,n)/L2Book/L4Level/FundingEntry. |
@@ -824,7 +824,9 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + health 8 | 69/69 ✓ |
+| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 15 + recon 4 | 98/98 ✓ |
+| api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
+| data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
 | engine | KIYAMET (bozuk coin + stale + resync + kötü boyut + korelasyon çöküşü) | 0 panik; graceful skip; risk kapısı aktif |
 
 Detaylı kıyamet senaryo denetimi: `docs/KIYAMET-AUDIT.md`.
@@ -865,7 +867,9 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 94, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 98, api 5, data 2, strategy 6).
+- P1-B ring-wrap kabul testleri (`history_ring_wrap_tum_barlar`, `history_snapshot_sadece_kapanista_guncellenir`).
+- P1-C exchange UNKNOWN → gerçek cloid reconciliation (5 api + 4 engine test).
 - P0-A risk-lock testleri (`risk_lock_tests`, 15 test) gerçek `Engine::risk_lock_step` /
   `Engine::entries_allowed_of` fonksiyonlarını çağırır — kopya mantık test edilmez.
 - §8.3.12 SL fiyatı satırı: risk mesafesi (`entry_attr.risk_px`) güncellendi.
@@ -882,4 +886,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 94, strategy 6, hepsi yeşil.*
+*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 98, api 5, data 2, strategy 6 = 111, hepsi yeşil.*

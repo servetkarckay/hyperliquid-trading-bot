@@ -1858,45 +1858,63 @@ impl Engine {
         // ===== FAZ 4 — TEK ÇAĞRI YÜRÜT =====
         if !places.is_empty() || !cancels.is_empty() {
             let res = self.executor.batch_execute(&places, &cancels).await?;
-            // P1-C: Exchange UNKNOWN (5xx/timeout) -> reconciliation
-            let has_unknown = res.iter().any(|r| r.error.as_deref() == Some("exchange unknown"));
-            if has_unknown {
-                // reconciliation: cloid ile borsadaki emirleri eşleştir
-                for (i, r) in res.iter().enumerate() {
-                    if r.error.as_deref() == Some("exchange unknown") && i < places.len() {
-                        let w = &places[i];
-                        if let Some(cloid) = &w.cloid {
-                            let coin = self
-                                .executor
-                                .assets
-                                .iter()
-                                .find(|(_, (a, _, _))| *a == w.asset)
-                                .map(|(c, _)| c.clone())
-                                .unwrap_or_else(|| format!("#{}", w.asset));
-                            let cands = self.executor.refresh_orders().await?;
-                            let found = cands.iter().find(|(c, _)| c == &coin);
-                            if let Some((_, oid)) = found {
-                                if let Some(m) = self.machines.get_mut(&coin) {
-                                    m.link_pending_oid(*oid);
-                                }
-                                tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
-                            } else {
-                                if let Some(m) = self.machines.get_mut(&coin) {
-                                    if m.oid_zero_pending() {
-                                        m.state = crate::state_machine::PosState::Flat;
-                                    }
-                                }
-                                tracing::warn!("[RECON] cloid={cloid} coin={coin} borsada YOK -> machine Flat revert");
-                            }
-                        }
-                    }
-                }
+            // P1-C: Exchange UNKNOWN (5xx/timeout) -> GERÇEK reconciliation.
+            // Kontrol `error` string'i üzerinden DEĞİL, `BatchOut::unknown`
+            // bayrağı üzerinden yapılır (string parsing ile kontrol yok).
+            // Eşleşme `coin`e değil `cloid`e yapılır: aynı coin için birden
+            // fazla giriş emri olabilir, coin tek başına yanlış emri bağlar.
+            for r in res.iter().filter(|r| r.unknown) {
+                let Some(cloid) = r.cloid.clone() else {
+                    // cloid'siz emir UNKNOWN sonrası eşleştirilemez. Loglanır,
+                    // machine'e dokunulmaz (pozisyon zaten borsada olabilir).
+                    tracing::error!("[RECON] UNKNOWN emir cloid taşımıyor — eşleştirme yapılamadı");
+                    continue;
+                };
+                let coin = r.coin.clone().unwrap_or_default();
+                self.reconcile_unknown_cloid(&cloid, &coin).await?;
             }
         }
         // BORSA STOP SENKRONU: her döngü sonunda (açılışta devralınan
         // pozisyonlar dahil) her açık pozisyonun borsada SL'si var mı?
         self.sync_exchange_sl().await;
         Ok(summaries)
+    }
+
+    /// P1-C: UNKNOWN sonrası GERÇEK reconciliation.
+    ///
+    /// 1. `refresh_open_orders_all()` — TÜM dinlenen emirler (giriş dahil)
+    /// 2. aynı coin **VE aynı cloid**
+    /// 3. varsa `link_pending_oid(oid)`
+    /// 4. yoksa machine pending → Flat
+    /// 5. log
+    ///
+    /// `coin` tek başına YETMEZ: aynı coin için birden fazla giriş emri
+    /// olabilir ve yanlış emri bağlamak pozisyonu ikiye katlar.
+    pub async fn reconcile_unknown_cloid(
+        &mut self,
+        cloid: &str,
+        coin: &str,
+    ) -> anyhow::Result<()> {
+        let rows = self.executor.refresh_open_orders_all().await?;
+        match find_by_cloid(&rows, coin, cloid) {
+            Some(oid) => {
+                if let Some(m) = self.machines.get_mut(coin) {
+                    m.link_pending_oid(oid);
+                }
+                tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
+            }
+            None => {
+                if let Some(m) = self.machines.get_mut(coin) {
+                    if m.oid_zero_pending() {
+                        m.state = crate::state_machine::PosState::Flat;
+                    }
+                }
+                tracing::warn!(
+                    "[RECON] cloid={cloid} coin={coin} borsada YOK -> machine Flat revert"
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1967,6 +1985,20 @@ impl Engine {
             tracing::warn!("[RISK-LOCK] MANUEL AÇILDI — operatör müdahalesi");
         }
     }
+}
+
+/// P1-C: UNKNOWN reconciliation eşleşmesi — aynı coin **VE** aynı cloid.
+///
+/// Ayrı fonksiyon olmasının sebebi: test ağ olmadan çalışabilmeli. Emrin
+/// borsadaki `oid`'sini döndürür, yoksa `None`.
+pub fn find_by_cloid(
+    rows: &[crate::executor::OpenOrderRow],
+    coin: &str,
+    cloid: &str,
+) -> Option<i64> {
+    rows.iter()
+        .find(|r| r.coin == coin && r.cloid.as_deref() == Some(cloid))
+        .map(|r| r.oid)
 }
 
 /// Konsol özeti

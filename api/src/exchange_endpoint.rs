@@ -128,11 +128,23 @@ impl Exchange {
     }
 }
 
+/// P1-C: `batch_place` sonucu. UNKNOWN ayrı bir değerdir — `Err` değil,
+/// çünkü "emir borsada mı" sorusu hâlâ açıktır ve çağıran taraf
+/// reconciliation yapmak ZORUNDADIR.
+pub enum BatchPlace {
+    /// Borsa yanıtı geldi (status'lar okunabilir).
+    Known(OrderStatuses),
+    /// 5xx/timeout: istek gönderildi, sonuç bilinmiyor.
+    Unknown,
+    /// İstek hiç gönderilemedi (imza hatası, 4xx, ağ hatası) — UNKNOWN DEĞİL.
+    Error(ApiError),
+}
+
 impl Exchange {
-    /// ÇOKLU EMİR TEK ÇAĞRI (batching — rate limit dostu)
-    pub async fn batch_place(&self, orders: &[WireOrder]) -> Result<OrderStatuses> {
+    /// ÇOKLU EMİR TEK ÇAĞRI — UNKNOWN korunur (caller reconciliation yapar).
+    pub async fn batch_place_full(&self, orders: &[WireOrder]) -> BatchPlace {
         if orders.is_empty() {
-            return Ok(OrderStatuses { raw: json!({}) });
+            return BatchPlace::Known(OrderStatuses { raw: json!({}) });
         }
         let wires: Vec<Value> = orders
             .iter()
@@ -150,9 +162,20 @@ impl Exchange {
             .collect();
         let action = json!({ "type": "order", "orders": wires, "grouping": "na" });
         match self.c.exchange_action(action).await {
-            ExchangeOutcome::Success(raw) => Ok(OrderStatuses { raw }),
-            ExchangeOutcome::Unknown => Err(ApiError::Api("exchange unknown".into())),
-            ExchangeOutcome::Error(e) => Err(e),
+            ExchangeOutcome::Success(raw) => BatchPlace::Known(OrderStatuses { raw }),
+            ExchangeOutcome::Unknown => BatchPlace::Unknown,
+            ExchangeOutcome::Error(e) => BatchPlace::Error(e),
+        }
+    }
+
+    /// ÇOKLU EMİR TEK ÇAĞRI (batching — rate limit dostu).
+    /// UNKNOWN burada hata olarak yutulur; UNKNOWN'a ihtiyacı olan çağıranlar
+    /// [`Self::batch_place_full`] kullanmalı.
+    pub async fn batch_place(&self, orders: &[WireOrder]) -> Result<OrderStatuses> {
+        match self.batch_place_full(orders).await {
+            BatchPlace::Known(s) => Ok(s),
+            BatchPlace::Unknown => Err(ApiError::Api("exchange unknown".into())),
+            BatchPlace::Error(e) => Err(e),
         }
     }
 
