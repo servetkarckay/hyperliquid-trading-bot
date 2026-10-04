@@ -228,11 +228,18 @@ impl TradingUniverse {
         eng_set.dedup();
 
         if eng_set == ing_set {
+            // Log **coin sayısı** (iş emri formatı `engine=N ingestor=N`).
+            // `ingestor.len()` ham abonelik SATIRI sayısıdır: trades +
+            // activeAssetCtx + l2Book aynı coin'i defalarca listeler, bu yüzden
+            // ctx açıkken 158 coin → 321 satır. Karşılaştırma zaten dedupe
+            // edilmiş setler üzerinden yapılır; ham sayıyı log'a koymak
+            // `engine=158 ingestor=321` gibi yanlış izlenim veriyordu.
             tracing::info!(
-                "[UNIVERSE] engine={} ingestor={} exact_match=true (spec={})",
-                engine.len(),
-                ingestor.len(),
-                self.spec.describe()
+                "[UNIVERSE] engine={} ingestor={} exact_match=true (spec={}, abonelik satırı={})",
+                eng_set.len(),
+                ing_set.len(),
+                self.spec.describe(),
+                ingestor.len()
             );
             Ok(())
         } else {

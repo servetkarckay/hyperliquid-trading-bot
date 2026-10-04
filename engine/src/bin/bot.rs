@@ -100,8 +100,13 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.25);
+    // P1-E: "TP sabit 3×ATR" YANLIŞ YORUMU. TP sabit bir ATR çarpanı
+    // değil; mesafesi (tp_atr_mult/sl_atr_mult) × gerçek risk mesafesidir ve
+    // min 2×risk kapısına tabidir. Trailing yalnız SL'yi ratchet'ler; TP
+    // analytical target olarak yerinde durur (bkz. §8.3.15).
     tracing::info!(
-        "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          (TP sabit 3×ATR — trailing TP kâr elde etmeyi düşürür, §8.3.15)"
+        "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          \
+         (yalnız SL ratchet'lenir; TP analytical: entry_eff ± max(tp/sl×risk, 2×risk) — sabit 3×ATR DEĞİL, §8.3.15)"
     );
     let lc = LoopConfig {
         coins,
