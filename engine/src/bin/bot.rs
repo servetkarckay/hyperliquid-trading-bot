@@ -175,36 +175,41 @@ async fn main() -> anyhow::Result<()> {
     // Neden: o ağırlıklar look-ahead biased motordan geliyordu (S19). Motor
     // kaldırıldı; yine de bayat dosya sessizce yüklenirse sistem "eğitilmiş"
     // görünür ama veri biaslı olur — en kötü durum (görünmez yanlış).
+    // Dosya VARSA doğrulanır; geçersizse **AÇILIŞ BAŞARISIZ** (sessiz
+    // cold-start = öğrenilmiş ağırlıkların sessizce kaybı; P1-D'deki
+    // "universe uyuşmazlığı açılışı durdurur" disipliniyle aynı).
     match std::fs::read_to_string(&weights_in) {
-        Ok(txt) => match serde_json::from_str::<serde_json::Value>(&txt) {
-            Ok(v) => {
-                let origin = v
-                    .get("origin")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("(yok)");
-                if origin == "live" {
-                    let n = v
-                        .get("weights")
-                        .and_then(|w| w.as_object())
-                        .map(|o| o.len())
-                        .unwrap_or(0);
-                    engine.load_live_weights(&v);
-                    tracing::info!(
-                        "[LEARN] canlı ağırlıklar yüklendi: {n} strateji ← {weights_in} (origin=live)"
-                    );
-                } else {
-                    tracing::warn!(
-                        "[LEARN] {weights_in} REDDEDİLDİ: origin={origin:?} ≠ \"live\" \
-                         (backtest çıktısı kaldırıldı) — nötr cold-start (w=1.0)"
-                    );
-                }
+        Ok(txt) => {
+            let v = serde_json::from_str::<serde_json::Value>(&txt).map_err(|e| {
+                anyhow::anyhow!("[LEARN] canlı ağırlık dosyası PARSE EDİLEMEDİ ({weights_in}): {e}")
+            })?;
+            let rep = engine.load_live_weights(&v).map_err(|e| {
+                anyhow::anyhow!("[LEARN] canlı ağırlık dosyası GEÇERSİZ ({weights_in}): {e}")
+            })?;
+            if rep.defaulted.is_empty() {
+                tracing::info!(
+                    "[LEARN] canlı ağırlık dosyası doğrulandı: {weights_in} → {} strateji (origin=live)",
+                    rep.applied
+                );
+            } else {
+                tracing::info!(
+                    "[LEARN] canlı ağırlık dosyası doğrulandı: {weights_in} → {} strateji; \
+                     dosyada OLMAYAN {} strateji AÇIKÇA nötr 1.0: {:?}",
+                    rep.applied,
+                    rep.defaulted.len(),
+                    rep.defaulted
+                );
             }
-            Err(e) => tracing::warn!("[LEARN] {weights_in} parse edilemedi: {e} — nötr cold-start"),
-        },
-        Err(e) => tracing::warn!(
-            "[LEARN] ağırlık dosyası yok ({e}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => tracing::info!(
+            "[LEARN] ağırlık dosyası yok ({weights_in}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
             strategy::STRATEGY_COUNT
         ),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "[LEARN] canlı ağırlık dosyası okunamadı ({weights_in}): {e}"
+            ))
+        }
     }
     engine.explore_on = explore_on;
     engine.apply_effective_weights();
@@ -275,7 +280,18 @@ async fn main() -> anyhow::Result<()> {
                 _ = dump_cycle.tick() => {
                     let w = engine.tracker_weights_json();
                     if !w.is_empty() && w != "{}" {
-                        let _ = std::fs::write(&weights_out, w);
+                        // ATOMİK YAZIM: bu dosya restart'ta AÇILIŞI ETKİLİYOR
+                        // (geçersizse bot açılmaz). Yarım yazılmış dosya
+                        // kalıcı bozulma olurdu → tmp + rename.
+                        let tmp = format!("{weights_out}.tmp");
+                        if let Err(e) = std::fs::write(&tmp, w.as_bytes())
+                            .and_then(|()| std::fs::rename(&tmp, &weights_out))
+                        {
+                            tracing::error!(
+                                "[LEARN] canlı ağırlık dosyası yazılamadı ({weights_out}): {e} \
+                                 — restart'ta bu ağırlıklar KAYBOLUR"
+                            );
+                        }
                     }
                     let _ = engine.executor.save_px_dec(&tick_cache_out);
                     // P0-B: tracker durumu diske. YAZILMAZSA restart'ta

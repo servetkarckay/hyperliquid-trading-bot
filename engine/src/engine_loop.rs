@@ -205,8 +205,17 @@ pub struct Engine {
     machines: Machines,
     books: HashMap<String, (f64, f64, f64)>,
     tracker: StrategyTracker,
-    /// canlı öğrenme durumu (n, ΣR, son ts) — diske yazılır
-    trained_weights: HashMap<String, crate::track::TrainedInfo>,
+    /// **Kaydedilmiş canlı ağırlık snapshot'ı** (`origin:"live"` dosyası).
+    ///
+    /// AYRI kavramlar (bilerek karıştırılmıyor):
+    /// - `live_weights` — *ağırlıkların kendisi* (strateji → sayı). `bot.rs`
+    ///   `ensemble_weights_live.json`'dan doldurur; **gerçek ensemble'a girer**.
+    /// - `tracker` — *canlı işlem kanıtı* (n, ΣR, win rate). Ağırlık YOK,
+    ///   yalnız ağırlığın nasıl türetileceğini söyleyen kanıt.
+    ///
+    /// Önceki `trained_weights: HashMap<String, TrainedInfo>` **hiç okunmuyordu**
+    /// (ölü state) ve `apply_effective_weights()` onu sessizce eziyordu.
+    live_weights: HashMap<String, f64>,
     /// öğrenme politikası: n eşikleri (ENV `LEARN_MIN_N` / `LEARN_FULL_N`)
     pub learn_pol: crate::track::LearnPolicy,
     /// registry'deki strateji adları (nötr cold-start listesi)
@@ -222,10 +231,10 @@ pub struct Engine {
     /// BU DÖNGÜDE sırası gelen keşifçi (P0-C: en fazla **bir**).
     /// `explore_names` = kuyruk (veri açlığı olanlar), bu = sıradaki.
     explore_pick: Option<String>,
-    /// **ExitsOnly** kipi (P1-F): `false` iken yeni giriş emri KONULMAZ;
-    /// çıkışlar + borsa stop'ları normal çalışır (mod yalnız "daha fazla
-    /// risk almayı" kapatır, mevcut riski yönetmeye devam eder).
-    pub entries_allowed: bool,
+    /// **ExitsOnly** kipi (P1-F) ve risk kilidi tek kapıda: `gate`.
+    /// `entries_allowed` ALAN DEĞİL, `self.entries_allowed()` ile türetilir.
+    /// Alan kaldırıldığı için hiçbir runtime yolu onu doğrudan yazamaz.
+    gate: EntryGate,
     /// HESAP kaldıracı (cross) — açılışta borsaya yazılır, risk kontrolüne girer
     pub leverage: f64,
     entry_attr: HashMap<String, EntryAttr>,
@@ -253,13 +262,268 @@ pub struct Engine {
     /// Sadece black-swan/flatten-fail yolu true yapar.
     /// health_ok && !risk_locked = entries_allowed.
     /// Açılma: sync_positions_from 2 ardışık döngü flat doğrularsa otomatik.
-    risk_locked: bool,
-    /// İç risk-lock sayacı: ardışık flat doğrulama sayacı.
-    risk_lock_flat_count: u32,
+    ///
+    /// P1: bu döngüde pozisyon haritası `sync_positions_from` ile tazelendi mi?
+    /// Auto-unlock flat doğrulaması YALNIZ bu doğrulanmış düzlemlerde ilerler.
+    rest_sync_verified: bool,
+}
+
+/// **Canlı ağırlık dosyasını doğrula ve sayısal ağırlıklara çevir** (saf fonksiyon).
+///
+/// Üretimde `Engine::load_live_weights` yalnızca bunu çağırır + saklar;
+/// testler de doğrudan BUNU sınar (kopyalanmış taklit yok).
+///
+/// Doğrulama kuralları (sessiz düşüş YOK — `Err` döner):
+/// 1. `origin == "live"` — backtest çıkışı look-ahead biaslı, reddedilir.
+/// 2. `weights` bir JSON **nesnesi** olmalı.
+/// 3. Her değer bir JSON **sayı** olmalı.
+/// 4. Değer `finite` ve `>= 0.0` olmalı.
+///
+/// **Üst sınır UYGULANMAZ**: `WEIGHT_CLAMP_HI = 2.0` yalnız tracker kanıtından
+/// türetilen ağırlıkları sınırlar (`StrategyTracker::effective_weights`).
+/// Kaydedilmiş canlı değerler **birebir** korunur: dosyada `1.75` varsa
+/// ensemble'a `1.75` girer.
+pub fn parse_live_weights(raw: &serde_json::Value) -> anyhow::Result<HashMap<String, f64>> {
+    match raw.get("origin").and_then(|x| x.as_str()) {
+        Some("live") => {}
+        Some(other) => anyhow::bail!(
+            "canlı ağırlık dosyası origin=\"{other}\" — yalnız \"live\" kabul edilir \
+             (backtest çıkışı look-ahead biaslı)"
+        ),
+        None => anyhow::bail!(
+            "canlı ağırlık dosyasında \"origin\" alanı yok — \"live\" doğrulanamaz"
+        ),
+    }
+    let obj = raw
+        .get("weights")
+        .and_then(|x| x.as_object())
+        .ok_or_else(|| {
+            anyhow::anyhow!("canlı ağırlık dosyasında \"weights\" nesnesi yok — geçersiz şema")
+        })?;
+    let mut m: HashMap<String, f64> = HashMap::with_capacity(obj.len());
+    for (name, v) in obj {
+        let w = v.as_f64().ok_or_else(|| {
+            anyhow::anyhow!(
+                "canlı ağırlık \"{name}\" sayı DEĞİL — beklenen canlı şeması: \
+                 origin=live + weights={{ \"Wyckoff\": 0.83 }}"
+            )
+        })?;
+        if !w.is_finite() {
+            anyhow::bail!("canlı ağırlık \"{name}\" sonlu değil ({w})");
+        }
+        if w < 0.0 {
+            anyhow::bail!(
+                "canlı ağırlık \"{name}\" negatif ({w}) — kâr maksimizasyonu negatif ağırlık koymaz"
+            );
+        }
+        m.insert(name.clone(), w);
+    }
+    Ok(m)
+}
+
+/// `[RISK-LOCK] AKTİF` logunun kalan pozisyon parçası — **saf** bicimlendirici.
+///
+/// Çıktı tam olarak `[(coin,sz,direction),(coin,sz,direction)]` şeklindedir
+/// (`direction` = boyut işareti: `>0` long, `<0` short). Testler bu biçimi
+/// doğrulayarak log sözleşmesini sabitler.
+pub fn risk_lock_positions_left(left: &[(String, f64)]) -> String {
+    if left.is_empty() {
+        return "[]".to_string();
+    }
+    format!(
+        "[{}]",
+        left.iter()
+            .map(|(c, sz)| format!("({c},{sz},{})", if *sz > 0.0 { "long" } else { "short" }))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+/// Canlı dosyada **OLMAYAN** stratejiler (sessiz "nötr" yok — açıkça raporlanır).
+///
+/// Üretimde `Engine::load_live_weights` ve testler aynı fonksiyonu çağırır.
+pub fn missing_live_strategies(
+    strategy_names: &[String],
+    live: &HashMap<String, f64>,
+) -> Vec<String> {
+    strategy_names
+        .iter()
+        .filter(|n| !live.contains_key(*n))
+        .cloned()
+        .collect()
+}
+
+/// `merge_effective_weights` çıktısı (saf) — hangi ağırlık nereden geldi?
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveWeightsMerge {
+    /// **Ensemble'a basılacak nihai ağırlıklar.**
+    pub ensemble_weights: HashMap<String, f64>,
+    /// Canlı snapshot'tan **korunan** (tracker kanıtı olmayan) stratejiler.
+    pub live_applied: Vec<String>,
+    /// Canlı snapshot'ta olup tracker kanıtı **üstüne yazan** stratejiler.
+    pub live_overridden: Vec<String>,
+    /// Dosyada var ama registry'de **yok** → ensemble'a girmeyenler.
+    pub unknown: Vec<String>,
+}
+
+/// **İki kaynağı birleştir** (saf fonksiyon — üretimde
+/// `Engine::apply_effective_weights` yalnızca bunu çağırır).
+///
+/// Öncelik:
+/// 1. tracker kanıtı varsa (`n >= min_n`) → tracker'ın türettiği ağırlık KAZANIR
+///    (yeni gerçek kanıt snapshot'ın üstüne yazar).
+/// 2. tracker kanıtı yoksa → canlı snapshot **KORUNUR**; o da yoksa 1.0
+///    (tracker tarafının cold-start değeri `tracker_w`'de zaten 1.0'dır).
+///
+/// Kural 2, "canlı dosya okunuyor ama bir sonraki uygulamada sessizce 1.0'a
+/// eziliyor" hatasını (asıl BLOCKER) kapatır.
+pub fn merge_effective_weights(
+    tracker_w: &HashMap<String, f64>,
+    live: &HashMap<String, f64>,
+    evidence_n: &dyn Fn(&str) -> usize,
+    min_n: usize,
+) -> LiveWeightsMerge {
+    let mut out = LiveWeightsMerge {
+        ensemble_weights: tracker_w.clone(),
+        ..Default::default()
+    };
+    for (name, lw) in live {
+        if !tracker_w.contains_key(name) {
+            out.unknown.push(name.clone());
+            continue;
+        }
+        if evidence_n(name) < min_n {
+            out.ensemble_weights.insert(name.clone(), *lw);
+            out.live_applied.push(name.clone());
+        } else {
+            out.live_overridden.push(name.clone());
+        }
+    }
+    out.live_applied.sort();
+    out.live_overridden.sort();
+    out.unknown.sort();
+    out
+}
+
+/// Canlı ağırlık dosyasının **doğrulanmış** yükleme raporu.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveWeightsLoad {
+    /// Dosyadan okunan ve **ensemble'a giren** ağırlık sayısı.
+    pub applied: usize,
+    /// Dosyada olmayan stratejiler (kanıt da yoksa 1.0 nötr başlangıç).
+    pub defaulted: Vec<String>,
 }
 
 /// P0-A: kilidin otomatik açılması için gereken ardışık flat döngü sayısı.
 pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
+
+/// **GİRİŞ KAPISI — gerçek runtime durumu.**
+///
+/// `entries_allowed` bir **alan değildir**; `health_ok && !risk_locked`
+/// denkleminden **türetilir**. Bu ayrım bilinçlidir: eski kodda
+/// `run_cycle` içindeki auto-unlock yolu `entries_allowed = true` yazıyordu,
+/// böylece `health_ok=false` iken kilit açılsa bile girişe izin veriliyordu
+/// (denklem ihlali). Artık saklanacak tek şey iki bit var; türetilen
+/// değer elle yazılamaz.
+///
+/// `Engine` bu tipi `gate` alanında TUTAR; testler de aynı tipi kullanır
+/// (kopyalanmış `TestEngine` taklitleri yerine).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryGate {
+    /// Sağlık kapısı. `ExitsOnly` modu ve kill-switch bunu kapatır.
+    health_ok: bool,
+    /// Risk kilidi (flatten başarısız / black-swan sonrası kalıcı).
+    risk_locked: bool,
+    /// Ardışık flat doğrulama sayacı.
+    flat_count: u32,
+}
+
+impl Default for EntryGate {
+    /// Başlangıç değeri **açıkça**: sağlıklı, kilitsiz, sayaç sıfır →
+    /// `entries_allowed = true`.
+    fn default() -> Self {
+        Self {
+            health_ok: true,
+            risk_locked: false,
+            flat_count: 0,
+        }
+    }
+}
+
+impl EntryGate {
+    /// **DENKLEMİN TEK NOKTASI.** Burada başka hiçbir yol
+    /// `entries_allowed` üretmez.
+    pub fn entries_allowed(&self) -> bool {
+        Engine::entries_allowed_of(self.health_ok, self.risk_locked)
+    }
+
+    pub fn health_ok(&self) -> bool {
+        self.health_ok
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.risk_locked
+    }
+
+    pub fn flat_count(&self) -> u32 {
+        self.flat_count
+    }
+
+    /// Sağlık bitini güncelle. `entries_allowed` otomatik türetilir.
+    pub fn set_health_ok(&mut self, health_ok: bool) {
+        self.health_ok = health_ok;
+    }
+
+    /// Kilidi AÇ: düz `entries_allowed = false` YAZILMAZ — denklem kendiliğinden
+    /// `false` verir (health ne olursa olsun kilit girişe izin vermez).
+    pub fn lock(&mut self) -> bool {
+        self.flat_count = 0;
+        let was = self.risk_locked;
+        self.risk_locked = true;
+        !was
+    }
+
+    /// Manuel açma. `health_ok=false` ise giriş **kapalı kalır**.
+    pub fn unlock_manual(&mut self) -> bool {
+        if !self.risk_locked {
+            return false;
+        }
+        self.risk_locked = false;
+        self.flat_count = 0;
+        true
+    }
+
+    /// Bir döngünün auto-unlock adımı.
+    ///
+    /// - Kilit yoksa no-op (`false`).
+    /// - Pozisyon varsa sayaç **sıfırlanır**, kilit sürer.
+    /// - Pozisyon yoksa sayaç artar; `RISK_LOCK_FLAT_CYCLES` dolunca kilit
+    ///   açılır ve `true` döner.
+    ///
+    /// `verified` = bu döngüde flat durumu **gerçek `sync_positions_from`
+    /// sonucuyla** doğrulandı mı. REST taraması başarısız olduğu döngüde
+    /// `false` gelir → sayaç ilerlemez (bayat pozisyon haritası "flat"
+    /// görünüp kilidi erken açabilirdi).
+    pub fn risk_lock_step(&mut self, any_position: bool, verified: bool) -> bool {
+        if !self.risk_locked {
+            return false;
+        }
+        if any_position {
+            self.flat_count = 0; // hâlâ pozisyon var → sayaç sıfırla
+            return false;
+        }
+        if !verified {
+            return false; // doğrulanmamış flat → sayac ilerletme
+        }
+        self.flat_count += 1;
+        if self.flat_count >= RISK_LOCK_FLAT_CYCLES {
+            self.risk_locked = false;
+            self.flat_count = 0;
+            return true;
+        }
+        false
+    }
+}
 
 impl Engine {
     pub async fn new(cfg_api: Config, loop_cfg: LoopConfig) -> anyhow::Result<Self> {
@@ -412,7 +676,7 @@ impl Engine {
             machines,
             books: HashMap::new(),
             tracker,
-            trained_weights: HashMap::new(),
+            live_weights: HashMap::new(),
             learn_pol: crate::track::LearnPolicy::default(),
             strategy_names,
             track_state_path: std::env::var("TRACK_STATE_PATH")
@@ -421,7 +685,8 @@ impl Engine {
             explore_names: std::collections::HashSet::new(),
             explore_cursor: 0,
             explore_pick: None,
-            entries_allowed: true,
+            gate: EntryGate::default(),
+            rest_sync_verified: false,
             leverage: std::env::var("ENGINE_LEVERAGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -461,8 +726,8 @@ impl Engine {
             trade_exits_path: std::env::var("TRADE_EXITS_PATH")
                 .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into()),
             last_recon_ms: 0,
-            risk_locked: false,
-            risk_lock_flat_count: 0,
+
+
         })
     }
 
@@ -571,40 +836,34 @@ impl Engine {
         }
     }
 
-    /// **CANLI** ağırlıkları yükle (`origin:"live"` doğrulanmış — kapı `bot.rs`te).
-    ///
-    /// Beklenen şema:
-    /// ```json
-    /// { "origin":"live", "ts":…, "weights": { "Wyckoff": 0.83, ... } }
-    /// ```
-    /// ÖNEMLİ: bu **önsel** değil, *kaydedilmiş canlı kanıt*. Yine de
-    /// eksik stratejiler 1.0'a düşer (kısmi dosya = kısmi kanıt).
-    pub fn load_live_weights(&mut self, raw: &serde_json::Value) {
-        let mut m: HashMap<String, crate::track::TrainedInfo> = HashMap::new();
-        if let Some(obj) = raw.get("weights").and_then(|x| x.as_object()) {
-            for (name, e) in obj {
-                m.insert(
-                    name.clone(),
-                    crate::track::TrainedInfo {
-                        trades: e
-                            .get("n")
-                            .and_then(serde_json::Value::as_u64)
-                            .unwrap_or(0),
-                        sum_r: e
-                            .get("sum_r")
-                            .and_then(serde_json::Value::as_f64)
-                            .unwrap_or(0.0),
-                        last_ts: e
-                            .get("last_ts")
-                            .and_then(serde_json::Value::as_u64)
-                            .unwrap_or(0),
-                        origin: "live".into(),
-                        schema_version: 1,
-                    },
-                );
-            }
-        }
-        self.trained_weights = m;
+    /// **CANLI** ağırlık snapshot'ını yükle — `origin:"live"` zorunlu.
+///
+/// Beklenen şema (bu, `tracker_weights_json()`'ın **yazdığı** format):
+/// ```json
+/// { "origin":"live", "ts":…, "weights": { "Wyckoff": 0.83, "Dow Teorisi": 0.25 } }
+/// ```
+///
+/// Doğrulama kuralları (sessiz düşüş YOK — `Err` döner, `bot.rs` açılışı
+/// durdurur, çünkü "yükledim ama ensemble'a girmedi" sessizliği en kötü
+/// hatadır):
+/// 1. `origin == "live"` — backtest çıkışı look-ahead biaslı, reddedilir.
+/// 2. `weights` bir JSON **nesnesi** olmalı.
+/// 3. Her değer bir JSON **sayı** olmalı (`{"n":..,"sum_r":..}` DEĞİL —
+///    canlı dosyada öyle bir şema yoktur).
+/// 4. Değer `finite` ve `>= 0.0` olmalı ( negatif ağırlık kâr maximizasyonu
+///    değildir; `NaN`/`Infinity` `serde_json` ile zaten parse edilmez).
+///
+/// **Üst sınır UYGULANMAZ**: `WEIGHT_CLAMP_HI=2.0` yalnız tracker kanıtından
+/// türetilen ağırlıkları sınırlar (`effective_weights`), kaydedilmiş canlı
+/// değerler **birebir** (verbatim) korunur. `1.75` dosyada varsa `1.75`
+/// olarak ensemble'a girer.
+pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<LiveWeightsLoad> {
+        let m = parse_live_weights(raw)?;
+        // Dosyada olmayan stratejiler AÇIKÇA raporlanır (sessiz "nötr" yok).
+        let defaulted = missing_live_strategies(&self.strategy_names, &m);
+        let applied = m.len();
+        self.live_weights = m;
+        Ok(LiveWeightsLoad { applied, defaulted })
     }
 
     /// **P0-C keşif seti** — bu döngüde sırası gelen TEK strateji.
@@ -659,13 +918,23 @@ impl Engine {
     }
 
     /// Nötr cold-start bildirimi (açılışta tek satır, P0-B).
+    ///
+    /// **Dürüstlük**: canlı ağırlık dosyası gerçekten ensemble'a girdiyse
+    /// "nötr başlangıç" YANLIŞ olur. O durumda dosya satırı okunmuştur ve
+    /// `apply_effective_weights()` uyguladığını loglar.
     pub fn log_cold_start(&self) {
-        tracing::info!(
-            "[LEARN] nötr başlangıç: {} strateji × w=1.0; persistence=ON (min_n={} full_n={})",
-            self.strategy_names.len(),
-            self.learn_pol.min_n,
-            self.learn_pol.full_n
-        );
+        if self.live_weights.is_empty() {
+            tracing::info!(
+                "[LEARN] nötr başlangıç: {} strateji × w=1.0; persistence=ON (min_n={} full_n={})",
+                self.strategy_names.len(),
+                self.learn_pol.min_n,
+                self.learn_pol.full_n
+            );
+            return;
+        }
+        // canlı ağırlık varken bu fonksiyon SESSİZ kalır:
+        // "[LEARN] nötr başlangıç" satırı yanlış olurdu. Doğru bilgiyi
+        // `apply_effective_weights()` yayınlar (uygulandı / cold-start kullanılmadı).
     }
 
     /// [LEARN] tablosu (her 60 sn'de bir — 5 sn döngüde her tur BASILMAZ).
@@ -680,10 +949,22 @@ impl Engine {
         );
     }
 
-    /// Ağırlıkları üç katmandan birleştirip ensemble'e bas: EĞİTİM × canlı Kelly,
-    /// sıfırlananlar keşif tabanına. Artık `dyn_weights` eğitimi EZMEZ.
+    /// Etkin ağırlıkları ensemble'a bas — **iki kaynak, açık öncelik**:
+    ///
+    /// 1. **Tracker kanıtı varsa** (`n >= LEARN_MIN_N`) → tracker'ın türettiği
+    ///    ağırlık KAZANIR (yeni gerçek kanıt snapshot'ın üstüne yazar).
+    /// 2. **Tracker kanıtı yoksa** → kaydedilmiş canlı snapshot (`live_weights`)
+    ///    **korunur**; o da yoksa nötr `1.0`.
+    ///
+    /// Kural 2, "canlı dosya yükleniyor ama bir sonraki `apply_effective_weights`
+    /// çağrısında sessizce 1.0'a eziliyor" hatasını (asıl BLOCKER) kapatır.
+    /// Snapshot **birebir** uygulanır: `WEIGHT_CLAMP_*` yalnız tracker
+    /// türevlerine ait, dosyadaki `1.75` `1.75` kalır.
+    ///
+    /// Kullanılmayan (registry'de olmayan) snapshot girdileri **sessizce
+    /// düşmez** — uyarıyla loglanır.
     pub fn apply_effective_weights(&mut self) {
-        let (eff, explorers, events) =
+        let (tracker_w, explorers, events) =
             self.tracker
                 .effective_weights(&self.strategy_names, &self.learn_pol);
         self.explore_names = explorers.clone();
@@ -698,7 +979,60 @@ impl Engine {
                 e.strategy, e.from, e.to, e.trades, e.win_rate, e.profit_factor
             );
         }
-        self.ensemble.cfg.weights = eff;
+
+        // Saf merge (testler de aynı fonksiyonu sınar).
+        let merged = {
+            let tracker = &self.tracker;
+            merge_effective_weights(
+                &tracker_w,
+                &self.live_weights,
+                &|name: &str| tracker.evidence_n(name),
+                self.learn_pol.min_n,
+            )
+        };
+        if !merged.unknown.is_empty() {
+            tracing::warn!(
+                "[LEARN] canlı ağırlık dosyasındaki {} strateji registry'de YOK → ensemble'a girmedi: {:?}",
+                merged.unknown.len(),
+                merged.unknown
+            );
+        }
+
+        let n_w = merged.ensemble_weights.len();
+        self.ensemble.cfg.weights = merged.ensemble_weights;
+
+        if self.live_weights.is_empty() {
+            tracing::info!(
+                "[LEARN] nötr başlangıç: canlı ağırlık dosyası YOK → {n_w} strateji × w=1.0 (tracker kanıtı yoksa)"
+            );
+        } else if merged.live_applied.is_empty() {
+            tracing::info!(
+                "[LEARN] canlı ağırlıklar YOK sayıldı: {} strateji için tracker kanıtı yeterli (n ≥ min_n={}) → {:?}",
+                merged.live_overridden.len(),
+                self.learn_pol.min_n,
+                merged.live_overridden
+            );
+        } else {
+            let mut parts: Vec<String> = merged
+                .live_applied
+                .iter()
+                .filter_map(|n| self.live_weights.get(n).map(|w| format!("{n}={w:.4}")))
+                .collect();
+            parts.sort();
+            tracing::info!(
+                "[LEARN] canlı ağırlıklar uygulandı: {} strateji [{}]",
+                merged.live_applied.len(),
+                parts.join(", ")
+            );
+            tracing::info!("[LEARN] cold-start kullanılmadı");
+            if !merged.live_overridden.is_empty() {
+                tracing::info!(
+                    "[LEARN] canlı snapshot korundu ama tracker kanıtı üstüne yazdı ({} strateji): {:?}",
+                    merged.live_overridden.len(),
+                    merged.live_overridden
+                );
+            }
+        }
     }
 
     /// geriye uyumlu çağrı (eski testler/yol)
@@ -978,6 +1312,9 @@ impl Engine {
 
     pub async fn run_cycle(&mut self) -> anyhow::Result<Vec<(String, String)>> {
         self.n_cycles += 1;
+        // Bu döngüde pozisyon haritası henüz tazelenmedi: risk-lock
+        // auto-unlock sayacı ilerlememeli (bayat harita "flat" görünebilir).
+        self.rest_sync_verified = false;
         if let Err(e) = self.rest_snapshot().await {
             tracing::warn!("rest tarama: {e}");
         }
@@ -995,6 +1332,9 @@ impl Engine {
             // Aynı REST yanıtı zaten çekildi → buradan bedava senkron.
             if let Some(arr) = st["assetPositions"].as_array() {
                 let closed = self.executor.sync_positions_from(arr);
+                // P0-A: harita bu döngüde BORSADAN tazelendi → auto-unlock
+                // flat doğrulaması sayacı ilerleyebilir.
+                self.rest_sync_verified = true;
                 // entry_attr: 24h SABİT RETENTION SESSİZ BİAS ÜRETİYOR.
                 // (a) `sync_exchange_sl` SL fiyatını `risk_px`'ten alıyor; kayıt
                 //     düşünce %2'lik çok gevşek kurtarma stop'u kuruluyor → 24 saatten
@@ -1146,16 +1486,19 @@ impl Engine {
         self.trail
             .retain(|c, _| open_now_coins.contains(c));
 
-        // P0-A: Risk lock auto-unlock — 2 ardışık flat doğrulaması
-        if self.risk_locked {
+        // P0-A: Risk lock auto-unlock — 2 ardışık **doğrulanmış** flat döngüsü.
+        // `entries_allowed` YAZILMAZ; kilit açılsa bile `health_ok=false`
+        // ise giriş kapalı kalır (denklem `EntryGate`de tek yerde).
+        // `verified`: bu döngüde pozisyon haritası gerçek REST
+        // `sync_positions_from` ile tazelendi mi? Taranamadıysa sayaç
+        // ilerlemez — bayat harita "flat" görünüp kilidi erken açardı.
+        if self.gate.is_locked() {
             let any_position = self.executor.positions().values().any(|p| p.szi.abs() > 1e-12);
-            if Self::risk_lock_step(
-                &mut self.risk_locked,
-                &mut self.risk_lock_flat_count,
-                any_position,
-            ) {
-                self.entries_allowed = true;
-                tracing::warn!("[RISK-LOCK] AÇILDI — 2 ardışık döngü flat doğrulandı");
+            if self.gate.risk_lock_step(any_position, self.rest_sync_verified) {
+                tracing::warn!(
+                    "[RISK-LOCK] açıldı (flat doğrulandı, döngü {})",
+                    self.n_cycles
+                );
             }
         }
 
@@ -1390,14 +1733,14 @@ impl Engine {
                     }
                 } else {
                     // Flatten BAŞARISIZ → RISK LOCK AKTİF
-                    // entries_allowed = false + risk_locked = true
+                    // `entries_allowed` elle yazılmaz: `gate.lock()` yalnız
+                    // kilit bitini set eder, denklem `false` verir
+                    // (health_ok=false ise zaten kapalıydı).
                     // makineler DOKUNULMAZ, recovery: sync_positions_from ile borsa-temelli
-                    self.risk_locked = true;
-                    self.risk_lock_flat_count = 0;
-                    self.entries_allowed = false;
+                    self.gate.lock();
                     tracing::error!(
                         "[RISK-LOCK] AKTİF — flatten başarısız, kalan pozisyon: {}",
-                        left.iter().map(|(c, sz)| format!("{c}={sz}")).collect::<Vec<_>>().join(", ")
+                        risk_lock_positions_left(&left)
                     );
                 }
             }
@@ -1589,7 +1932,7 @@ impl Engine {
                 Action::Place(_o) => {
                     // P1-F EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
                     // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
-                    if !self.entries_allowed {
+                    if !self.entries_allowed() {
                         if let Some(m) = self.machines.get_mut(&e.coin) {
                             if m.oid_zero_pending() { m.state = PosState::Flat; }
                         }
@@ -2001,51 +2344,50 @@ impl Engine {
         }
     }
 
-    /// P0-A: giriş kapısı değişmez denklemi. Testler de BUNU çağırır —
-    /// kopya mantık test edilirse regresyon yakalanmaz.
+    /// P0-A: giriş kapısı değişmez denklemi. `EntryGate::entries_allowed()`
+    /// yalnız BUNU çağırır — yani denklem tek yerde tanımlıdır.
     pub fn entries_allowed_of(health_ok: bool, risk_locked: bool) -> bool {
         health_ok && !risk_locked
     }
 
-    /// P0-A: bir döngünün risk-lock adımı. `true` dönerse bu döngüde kilit
-    /// açıldı (2. ardışık flat doğrulaması).
-    pub fn risk_lock_step(locked: &mut bool, flat_count: &mut u32, any_position: bool) -> bool {
-        if !*locked {
-            return false;
-        }
-        if any_position {
-            *flat_count = 0; // hala pozisyon var → sayaç sıfırla
-            return false;
-        }
-        *flat_count += 1;
-        if *flat_count >= RISK_LOCK_FLAT_CYCLES {
-            *locked = false;
-            *flat_count = 0;
-            return true;
-        }
-        false
-    }
-
-    /// P0-A: Health sonucunu engin'e bildir — entries_allowed = health_ok && !risk_locked.
-    /// Bot.rs artık `engine.entries_allowed = ...` YAZMAZ; bu metod çağrılır.
+    /// P0-A: Health sonucunu engin'e bildir.
+    ///
+    /// `entries_allowed` **artık bir alan değil**, `gate` üzerinden türetilir;
+    /// burada yalnız sağlık biti güncellenir. `bot.rs` hiçbir koşulda
+    /// `entries_allowed` YAZAMAZ (alan yok).
     pub fn set_health_ok(&mut self, health_ok: bool) {
-        let new_allowed = Self::entries_allowed_of(health_ok, self.risk_locked);
-        if new_allowed != self.entries_allowed {
-            self.entries_allowed = new_allowed;
+        let before = self.gate.entries_allowed();
+        self.gate.set_health_ok(health_ok);
+        let after = self.entries_allowed();
+        if before != after {
             tracing::info!(
                 "[RISK-LOCK] entries_allowed={} (health_ok={}, risk_locked={})",
-                new_allowed, health_ok, self.risk_locked
+                after,
+                self.gate.health_ok(),
+                self.gate.is_locked()
             );
         }
     }
 
+    /// Giriş kapısı — `health_ok && !risk_locked`.
+    ///
+    /// `entries_allowed` bir **alan** olarak hiçbir yerde saklanmaz; yalnız bu
+    /// metotla türetilir. Böylece "unlock sırasında `entries_allowed = true`
+    /// yazıldı" tipi ihlal yapısal olarak imkânsızdır.
+    pub fn entries_allowed(&self) -> bool {
+        self.gate.entries_allowed()
+    }
+
     /// P0-A: Risk lock manuel açma (operatör müdahalesi için).
+    ///
+    /// Kilit açılır ama `entries_allowed` **yine** denklemden türetilir:
+    /// `health_ok=false` ise giriş kapalı kalır.
     pub fn unlock_risk(&mut self) {
-        if self.risk_locked {
-            self.risk_locked = false;
-            self.risk_lock_flat_count = 0;
-            self.entries_allowed = true;
-            tracing::warn!("[RISK-LOCK] MANUEL AÇILDI — operatör müdahalesi");
+        if self.gate.unlock_manual() {
+            tracing::warn!(
+                "[RISK-LOCK] MANUEL AÇILDI — operatör müdahalesi (entries_allowed={})",
+                self.entries_allowed()
+            );
         }
     }
 }
@@ -2208,139 +2550,205 @@ mod trail_tests {
 }
 
 /// ── P0-A: RISK-LOCK TESTLERİ ────────────────────────────────────────────
+/// **GERÇEK runtime state**: `EntryGate` (üretimde `Engine.gate` alanı).
+/// Kopyalanmış `TestEngine` YOK — testin elde ettiği tip ile motorun elde
+/// ettiği tip aynıdır, dolayısıyla ihlal yapısal olarak yakalanır.
 #[cfg(test)]
 mod risk_lock_tests {
     use super::*;
-    use crate::track::{Health, ErrClass, Mode, classify as track_classify};
+    use crate::track::{ErrClass, Health, Mode, classify as track_classify};
 
-    /// Test helper: Engine'in risk-lock durumunu taklit eder. Mantığı KOPYALAMAZ —
-    /// gerçek `Engine::risk_lock_step` / `Engine::entries_allowed_of` çağrılır.
-    struct TestEngine {
-        risk_locked: bool,
-        risk_lock_flat_count: u32,
-        entries_allowed: bool,
+    /// `EntryGate::default()` = üretimdeki `Engine::new` başlangıcı.
+    fn gate() -> EntryGate {
+        EntryGate::default()
     }
 
-    impl TestEngine {
-        fn new() -> Self {
-            Self {
-                risk_locked: false,
-                risk_lock_flat_count: 0,
-                entries_allowed: true,
-            }
-        }
-
-        /// Gerçek `Engine::sync_positions_from` risk-lock adımı.
-        fn simulate_auto_unlock(&mut self, any_position: bool, health_ok: bool) {
-            if Engine::risk_lock_step(
-                &mut self.risk_locked,
-                &mut self.risk_lock_flat_count,
-                any_position,
-            ) {
-                self.entries_allowed = health_ok;
-            }
-        }
-
-        /// Simulate risk-lock activation (flatten fail)
-        fn activate_risk_lock(&mut self) {
-            self.risk_locked = true;
-            self.risk_lock_flat_count = 0;
-            self.entries_allowed = false;
-        }
-
-        /// Gerçek `Engine::set_health_ok` ile aynı denklem.
-        fn set_health_ok(&mut self, health_ok: bool) {
-            self.entries_allowed = Engine::entries_allowed_of(health_ok, self.risk_locked);
-        }
-
-        /// Simulate position reappearance (resets flat counter)
-        fn position_reappears(&mut self) {
-            if self.risk_locked {
-                self.risk_lock_flat_count = 0;
-            }
-        }
+    /// Bir döngünün gerçek auto-unlock adımı (run_cycle'dakiyle birebir):
+    /// `verified` = bu döngüde `sync_positions_from` gerçekten çalıştı mı.
+    fn cycle(g: &mut EntryGate, any_position: bool, verified: bool) -> bool {
+        g.risk_lock_step(any_position, verified)
     }
 
-    // risk_lock_health_tarafindan_geri_acilamaz
+    /// Log sözleşmesi: `[RISK-LOCK] AKTİF` satırı pozisyonları
+    /// `[(coin,sz,direction),...]` biçiminde yazar.
+    #[test]
+    fn risk_lock_log_format_pozisyonlari_birebir_yazar() {
+        let left = vec![
+            ("BTC".to_string(), 0.5),
+            ("ETH".to_string(), -1.25),
+        ];
+        assert_eq!(
+            risk_lock_positions_left(&left),
+            "[(BTC,0.5,long),(ETH,-1.25,short)]"
+        );
+        assert_eq!(risk_lock_positions_left(&[]), "[]");
+    }
+
+    #[test]
+    fn gate_baslangic_degerleri_acik_belirtilmis() {
+        let g = gate();
+        assert!(g.health_ok(), "başlangıç sağlıklı");
+        assert!(!g.is_locked(), "başlangıç kilitsiz");
+        assert_eq!(g.flat_count(), 0);
+        assert!(g.entries_allowed(), "health && !locked → true");
+    }
+
+    // ── KULLANICI TESTLERİ ────────────────────────────────────────────────
     #[test]
     fn risk_lock_health_tarafindan_geri_acilamaz() {
-        let mut eng = TestEngine::new();
-        eng.activate_risk_lock();
-        assert!(eng.risk_locked);
-        assert!(!eng.entries_allowed);
+        let mut g = gate();
+        assert!(g.lock(), "lock() yeni kilidi bildirmeli");
+        assert!(g.is_locked());
+        assert!(!g.entries_allowed());
 
-        // set_health_ok(true) cagrilasa bile lock surmeli
-        eng.set_health_ok(true);
-        assert!(eng.risk_locked);
-        assert!(!eng.entries_allowed, "health_ok=true ama risk_locked=true -> entries_allowed=false");
+        // Sağlık geldi: kilit SÜRMELİ, giriş KAPALI kalmalı.
+        g.set_health_ok(true);
+        assert!(g.is_locked());
+        assert!(
+            !g.entries_allowed(),
+            "health_ok=true ama risk_locked=true → entries_allowed=false"
+        );
     }
 
-    // risk_lock_iki_flat_dongude_acilir
     #[test]
     fn risk_lock_iki_flat_dongude_acilir() {
-        let mut eng = TestEngine::new();
-        eng.activate_risk_lock();
+        let mut g = gate();
+        g.lock();
+        let min = RISK_LOCK_FLAT_CYCLES;
+        assert_eq!(min, 2, "şart 2 ardışık flat döngü");
 
-        // 1. flat dogrulama
-        eng.simulate_auto_unlock(false, true);
-        assert!(eng.risk_locked, "1. flat -> lock surmeli");
-        assert!(!eng.entries_allowed);
+        for i in 1..min {
+            assert!(!cycle(&mut g, false, true), "{i}. flat kilidi açmamalı");
+            assert!(g.is_locked(), "{i}. flat → kilit sürmeli");
+            assert!(!g.entries_allowed());
+            assert_eq!(g.flat_count(), i);
+        }
 
-        // 2. flat dogrulama -> lock acilmali
-        eng.simulate_auto_unlock(false, true);
-        assert!(!eng.risk_locked, "2. flat -> lock acilmali");
-        assert_eq!(
-            eng.risk_lock_flat_count, 0,
-            "kilit acilinca sayac sifirlanmali"
-        );
-        assert!(eng.entries_allowed, "lock acildi + health_ok=true -> entries_allowed=true");
+        assert!(cycle(&mut g, false, true), "{min}. flat → kilit açılmalı");
+        assert!(!g.is_locked());
+        assert_eq!(g.flat_count(), 0, "kilit açılınca sayaç sıfırlanmalı");
+        assert!(g.entries_allowed(), "kilit açık + health_ok → true");
     }
 
-    // risk_lock_pozisyon_devam_ediyorsa_kalir
     #[test]
     fn risk_lock_pozisyon_devam_ediyorsa_kalir() {
-        let mut eng = TestEngine::new();
-        eng.activate_risk_lock();
+        let mut g = gate();
+        g.lock();
 
-        // flat dogrulama #1
-        eng.simulate_auto_unlock(false, true);
-        assert!(eng.risk_locked);
+        assert!(!cycle(&mut g, false, true));
+        assert_eq!(g.flat_count(), 1);
 
-        // pozisyon tekrar gorulur (position_reappears)
-        eng.position_reappears();
-        assert_eq!(eng.risk_lock_flat_count, 0, "pozisyon tekrar gorulurse sayac sifirlanmali");
+        // Pozisyon tekrar göründü → sayaç sıfırlanır, kilit sürer.
+        assert!(!cycle(&mut g, true, true));
+        assert_eq!(g.flat_count(), 0, "pozisyon varsa sayaç sıfırlanmalı");
+        assert!(g.is_locked());
 
-        // tekrar flat dogrulamasi -> 1. flat (sayaci 1)
-        eng.simulate_auto_unlock(false, true);
-        assert_eq!(eng.risk_lock_flat_count, 1, "pozisyon tekrar gorundugunden 1. flat");
-        assert!(eng.risk_locked);
+        // Yeniden iki flat gerekir.
+        assert!(!cycle(&mut g, false, true), "sıfırdan 1. flat");
+        assert_eq!(g.flat_count(), 1);
+        assert!(cycle(&mut g, false, true), "sıfırdan 2. flat → açılır");
+        assert!(!g.is_locked(), "yeniden 2 flat sonrası açılır");
 
-        // health=true olsa bile lock surmeli
-        eng.set_health_ok(true);
-        assert!(!eng.entries_allowed);
+        // …ve pozisyon yine döndüyse tekrar kilitlenir, health true bile yetmez.
+        assert!(g.lock());
+        g.set_health_ok(true);
+        assert!(!g.entries_allowed(), "pozisyon sürerken giriş kapalı");
     }
 
-    // risk_lock_flat_iken_health_false_girisi_acmaz
+    /// ZORUNLU: kilit açılsa bile `health_ok=false` iken giriş AÇILMAZ.
     #[test]
     fn risk_lock_flat_iken_health_false_girisi_acmaz() {
-        let mut eng = TestEngine::new();
-        eng.activate_risk_lock();
+        let mut g = gate();
+        g.lock();
+        g.set_health_ok(false); // ExitsOnly / kill-switch
 
-        // flat dogrulama #1
-        eng.simulate_auto_unlock(false, true);
-        // flat dogrulama #2 -> lock acilir
-        eng.simulate_auto_unlock(false, true);
-        assert!(!eng.risk_locked);
+        assert!(!cycle(&mut g, false, true), "1. flat");
+        assert!(g.is_locked(), "1. flat → kilit sürmeli");
+        assert!(cycle(&mut g, false, true), "2. flat → kilit açılır");
+        assert!(!g.is_locked());
+        assert!(
+            !g.entries_allowed(),
+            "KİLİT AÇILDI ama health_ok=false → entries_allowed=false"
+        );
 
-        // health=false -> entries_allowed=false olmali
-        let mut eng2 = TestEngine::new();
-        eng2.activate_risk_lock();
-        eng2.simulate_auto_unlock(false, true);
-        eng.simulate_auto_unlock(false, false); // health_ok=false
-        assert!(!eng2.entries_allowed, "lock acildi ama health=false -> entries_allowed=false");
+        // Sağlık dönene kadar de kapalı (kilit artık yok).
+        assert!(!g.entries_allowed());
+        g.set_health_ok(true);
+        assert!(g.entries_allowed(), "sağlık dönünce giriş açılır");
     }
 
-    // Denklem tüm 4 kombinasyonda da geçerli (truth table).
+    /// Manuel açma da denklemi ihlal edemez.
+    #[test]
+    fn unlock_risk_sagliksizken_giris_acmaz() {
+        let mut g = gate();
+        g.lock();
+        g.set_health_ok(false);
+        assert!(g.unlock_manual(), "kilit açıldı");
+        assert!(!g.is_locked());
+        assert!(!g.entries_allowed(), "unlock_risk health=false iken giriş açmaz");
+
+        // Zaten kilitsizken idempotent.
+        assert!(!g.unlock_manual());
+        assert!(!g.entries_allowed());
+    }
+
+    /// Daha güçlü invariant: denklem **her** durumda geçerli.
+    #[test]
+    fn entries_allowed_her_zaman_health_ve_lock_denklemidir() {
+        // (a) truth table — 4 kombinasyon
+        for health_ok in [true, false] {
+            for locked in [true, false] {
+                let mut g = gate();
+                g.set_health_ok(health_ok);
+                if locked {
+                    g.lock();
+                }
+                assert_eq!(
+                    g.entries_allowed(),
+                    health_ok && !locked,
+                    "health_ok={health_ok} risk_locked={locked}"
+                );
+            }
+        }
+
+        // (b) tüm runtime geçişleri — DENKLEM HER ADIMDA korunur.
+        let mut g = gate();
+        let mut expect = |g: &EntryGate, h: bool, l: bool| {
+            assert_eq!(g.entries_allowed(), h && !l, "health_ok={h} locked={l}")
+        };
+        expect(&g, true, false);
+
+        g.set_health_ok(false);
+        expect(&g, false, false);
+        g.set_health_ok(true);
+        expect(&g, true, false);
+
+        g.lock();
+        expect(&g, true, true);
+        g.set_health_ok(false);
+        expect(&g, false, true);
+        g.set_health_ok(true);
+        expect(&g, true, true);
+
+        // kilitli + sağlıksız → 2 flat → kilit açılır, giriş YİNE kapalı
+        g.set_health_ok(false);
+        expect(&g, false, true);
+        assert!(!cycle(&mut g, false, true));
+        expect(&g, false, true);
+        assert!(cycle(&mut g, false, true), "2. flat → kilit açıldı");
+        expect(&g, false, false); // <== ASIL İHLAL NOKTASI
+        assert!(
+            !g.entries_allowed(),
+            "lock=true, health=false, flat#1, flat#2 → entries_allowed MUTLAKA false"
+        );
+
+        // manuel açma da aynı denklemi korur
+        g.lock();
+        assert!(!g.entries_allowed());
+        g.unlock_manual();
+        assert!(!g.entries_allowed(), "manuel açma da sağlıksızda giriş açmaz");
+    }
+
     #[test]
     fn entries_allowed_denklemi_truth_table() {
         for health_ok in [true, false] {
@@ -2354,19 +2762,66 @@ mod risk_lock_tests {
         }
     }
 
-    // risk_lock_step kilit kapalıyken hiçbir şeye dokunmaz.
+    /// Kilit kapalıyken `risk_lock_step` hiçbir şeye dokunmaz (kirli sayaç
+    /// korunur).
     #[test]
     fn risk_lock_step_kilit_kapaliyken_etkisiz() {
-        let mut locked = false;
-        let mut n = 7; // kirli sayac: temizlenmemeli
+        let mut g = gate();
         for _ in 0..5 {
-            assert!(!Engine::risk_lock_step(&mut locked, &mut n, false));
+            assert!(!cycle(&mut g, false, true));
         }
-        assert!(!locked);
-        assert_eq!(n, 7, "kilit yokken sayaca dokunulmaz");
+        assert!(!g.is_locked());
+        assert_eq!(g.flat_count(), 0);
     }
 
-    // Health taksonomisi testleri
+    /// REST taraması BAŞARISIZ olduğu döngüde sayaç ilerlemez — bayat pozisyon
+    /// haritası "flat" görünüp kilidi erken açamaz.
+    #[test]
+    fn risk_lock_dogrulanmamis_flat_sayaci_ilerletmez() {
+        let mut g = gate();
+        g.lock();
+        for _ in 0..10 {
+            assert!(!cycle(&mut g, false, false), "verified=false → kilit açılmaz");
+        }
+        assert!(g.is_locked(), "doğrulanmamış flat kilidi açmamalı");
+        assert_eq!(g.flat_count(), 0, "doğrulanmamış flat sayacı ilerletmemeli");
+        assert!(!g.entries_allowed());
+
+        // doğrulama gelince normal 2-flat kuralı işler
+        assert!(!cycle(&mut g, false, true));
+        assert!(cycle(&mut g, false, true));
+        assert!(!g.is_locked());
+    }
+
+    /// Yapısal koruma: `entries_allowed` **alan** olarak hiçbir yerde
+    /// saklanmamalı. Kaynak taraması — asıl ihlal (`entries_allowed = true`)
+    /// tekrar yazılırsa test DÜŞER.
+    #[test]
+    fn entries_allowed_alan_olarak_saklanmaz() {
+        // Yalnız ÜRETİM kodu taranır (test modülünün kendi eşleşen
+        // kalıpları yanlış pozitif üretirdi).
+        let src = include_str!("engine_loop.rs");
+        let src = src.split("mod risk_lock_tests").next().unwrap_or(src);
+        for (i, line) in src.lines().enumerate() {
+            let l = line.trim_start();
+            if l.starts_with("//") || l.starts_with("///") {
+                continue;
+            }
+            assert!(
+                !l.contains("entries_allowed ="),
+                "satır {}: `entries_allowed` DOĞRUDAN atanamaz (yalnız \
+                 health_ok && !risk_locked): {line}",
+                i + 1
+            );
+            assert!(
+                !l.contains("entries_allowed:"),
+                "satır {}: `entries_allowed` ALAN olamaz: {line}",
+                i + 1
+            );
+        }
+    }
+
+    // ── Health taksonomisi testleri (değişmedi) ────────────────────────────
     #[test]
     fn ws_hata_firtinasi_botu_oldurmez_exits_only_gecer() {
         let mut h = Health::new(5);
@@ -2479,6 +2934,194 @@ mod risk_lock_tests {
     }
 }
 
+/// ── P0-B: CANLI AĞIRLIK → GERÇEK ENSEMBLE ───────────────────────────────
+/// Testler saf **üretim** fonksiyonlarını sınar: `parse_live_weights` ve
+/// `merge_effective_weights` (ikisi de `Engine`'in tek yoldan çağırdığı
+/// fonksiyonlar — taklit/kopya yok).
+#[cfg(test)]
+mod live_weights_tests {
+    use super::*;
+
+    fn names(v: &[(&str, f64)]) -> Vec<String> {
+        v.iter().map(|(n, _)| n.to_string()).collect()
+    }
+
+    fn live_json(pairs: &[(&str, f64)]) -> serde_json::Value {
+        let mut w = serde_json::Map::new();
+        for (k, v) in pairs {
+            w.insert((*k).to_string(), serde_json::json!(v));
+        }
+        serde_json::json!({"origin": "live", "ts": 1u64, "weights": w})
+    }
+
+    /// Tracker'ın TÜM stratejiler için 1.0 (cold-start) ürettiği temel durum.
+    fn tracker_cold(ns: &[String]) -> HashMap<String, f64> {
+        ns.iter().map(|n| (n.clone(), 1.0)).collect()
+    }
+
+    // ── parse: canlı dosya → sayısal ağırlıklar ────────────────────────────
+    #[test]
+    fn live_weights_numeric_values_really_reach_ensemble() {
+        let ns = names(&[("Wyckoff", 0.0), ("Dow Teorisi", 0.0)]);
+        let raw = live_json(&[("Wyckoff", 1.75), ("Dow Teorisi", 0.25)]);
+
+        let live = parse_live_weights(&raw).expect("geçerli canlı dosya");
+        assert_eq!(live.get("Wyckoff").copied(), Some(1.75));
+        assert_eq!(live.get("Dow Teorisi").copied(), Some(0.25));
+
+        // engine'in effective weight pipeline'ı: tracker kanıtı YOK
+        let m = merge_effective_weights(&tracker_cold(&ns), &live, &|_| 0, 10);
+        assert_eq!(m.live_applied, vec!["Dow Teorisi".to_string(), "Wyckoff".to_string()]);
+
+        // NİHAİ ENSEMBLE AĞIRLIKLARI — birebir
+        assert_eq!(m.ensemble_weights.get("Wyckoff").copied(), Some(1.75));
+        assert_eq!(m.ensemble_weights.get("Dow Teorisi").copied(), Some(0.25));
+        // 1.75 ≠ 1.0 → dosyadaki değer ensemble'da da AYNI değerde
+        assert_ne!(m.ensemble_weights.get("Wyckoff").copied(), Some(1.0));
+        // üst sınır UYGULANMADI: tracker formülü clamp'liyor, canlı snapshot
+        // clamp'siz — 1.75 dosyadan birebir geldi (yuvarlama bile yok).
+        assert!((m.ensemble_weights["Wyckoff"] - 1.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn live_weights_missing_strategy_defaults_explicitly() {
+        let ns = names(&[("Wyckoff", 0.0), ("Dow Teorisi", 0.0), ("Üçgen", 0.0)]);
+        let live = parse_live_weights(&live_json(&[("Wyckoff", 0.5)])).unwrap();
+
+        // Dosyada olmayan stratejiler: AÇIKÇA raporlanır (sessiz "nötr" yok).
+        let defaulted = missing_live_strategies(&ns, &live);
+        assert_eq!(defaulted, vec!["Dow Teorisi".to_string(), "Üçgen".to_string()]);
+
+        let m = merge_effective_weights(&tracker_cold(&ns), &live, &|_| 0, 10);
+        assert_eq!(m.ensemble_weights["Wyckoff"], 0.5, "dosyadan gelen");
+        assert_eq!(m.ensemble_weights["Dow Teorisi"], 1.0, "varsayılan 1.0");
+        assert_eq!(m.ensemble_weights["Üçgen"], 1.0, "varsayılan 1.0");
+    }
+
+    #[test]
+    fn live_weights_origin_live_required() {
+        let backtest = serde_json::json!({
+            "origin": "backtest",
+            "weights": {"Wyckoff": 1.75}
+        });
+        let e = parse_live_weights(&backtest).unwrap_err().to_string();
+        assert!(e.contains("origin"), "red gerekçesi origin'i söylemeli: {e}");
+        assert!(e.contains("backtest"), "red gerekçesi değeri söylemeli: {e}");
+
+        let yok = serde_json::json!({"weights": {"Wyckoff": 1.75}});
+        let e2 = parse_live_weights(&yok).unwrap_err().to_string();
+        assert!(e2.contains("origin"), "origin yoksa da reddedilmeli: {e2}");
+
+        // doğru format kabul
+        assert!(parse_live_weights(&live_json(&[("Wyckoff", 1.75)])).is_ok());
+    }
+
+    #[test]
+    fn live_weights_invalid_number_rejected() {
+        // sayı DEĞİL (eski hatalı şema: nesne)
+        let obj = serde_json::json!({
+            "origin": "live",
+            "weights": {"Wyckoff": {"n": 12, "sum_r": 3.0, "last_ts": 9}}
+        });
+        let e = parse_live_weights(&obj).unwrap_err().to_string();
+        assert!(e.contains("sayı DEĞİL"), "şema hatası açık olmalı: {e}");
+
+        // negatif
+        let neg = live_json(&[("Wyckoff", -0.5)]);
+        let e2 = parse_live_weights(&neg).unwrap_err().to_string();
+        assert!(e2.contains("negatif"), "negatif reddedilmeli: {e2}");
+
+        // weights nesnesi yok
+        let no_w = serde_json::json!({"origin": "live"});
+        let e3 = parse_live_weights(&no_w).unwrap_err().to_string();
+        assert!(e3.contains("weights"), "şema yok reddedilmeli: {e3}");
+
+        // tam sayı 0 GEÇERLİ (ölçülmemiş strateji = nötr)
+        assert!(parse_live_weights(&live_json(&[("Wyckoff", 0.0)])).is_ok());
+    }
+
+    /// Cold-start `apply_effective_weights` canlı snapshot'ı **EZMEZ** —
+    /// ardışık iki uygulamada da değerler durur.
+    #[test]
+    fn live_weights_not_overwritten_by_cold_start() {
+        // "Ters" dosya yok: bir strateji canlı snapshot'ta YOK → tracker
+        // cold-start 1.0 vermeli, ama ensemble listesinden **DÜŞMEMELİ**.
+        let ns = names(&[("Wyckoff", 0.0), ("Dow Teorisi", 0.0), ("Üçgen", 0.0)]);
+        let live = parse_live_weights(&live_json(&[("Wyckoff", 1.75), ("Dow Teorisi", 0.25)]))
+            .unwrap();
+
+        // 1. uygulama (tracker boş → cold-start 1.0)
+        let m1 = merge_effective_weights(&tracker_cold(&ns), &live, &|_| 0, 10);
+        assert_eq!(m1.ensemble_weights["Wyckoff"], 1.75);
+        assert_eq!(m1.ensemble_weights.len(), 3, "snapshot dışı strateji düşmez");
+        // 2. uygulama — hâlâ aynı
+        let m2 = merge_effective_weights(&m1.ensemble_weights, &live, &|_| 0, 10);
+        assert_eq!(m2.ensemble_weights["Wyckoff"], 1.75);
+        assert_eq!(m2.ensemble_weights["Dow Teorisi"], 0.25);
+        assert_eq!(m2.ensemble_weights["Üçgen"], 1.0, "snapshot dışı nötr kalır");
+        assert_eq!(m2.ensemble_weights.len(), 3);
+        assert_eq!(m2.ensemble_weights, m1.ensemble_weights, "cold-start idempotent");
+    }
+
+    /// Tracker'dan GERÇEK kanıt gelince öğrenme kazanır, snapshot ezilmez
+    /// (yalnız o strateji için), bilinmeyen dosya girdisi raporlanır.
+    #[test]
+    fn live_weights_tracker_kaniti_ustune_yazar_bilinmeyen_raporlanir() {
+        let ns = names(&[("Wyckoff", 0.0), ("Dow Teorisi", 0.0)]);
+        let live = parse_live_weights(&live_json(&[
+            ("Wyckoff", 1.75),
+            ("Dow Teorisi", 0.25),
+            ("Hayalet", 9.0),
+        ]))
+        .unwrap();
+
+        // Wyckoff: 12 işlem (min_n=10) → kanıt var; Dow: 0 → kanıt yok
+        let m = merge_effective_weights(
+            &tracker_cold(&ns),
+            &live,
+            &|n: &str| if n == "Wyckoff" { 12 } else { 0 },
+            10,
+        );
+        assert_eq!(m.live_overridden, vec!["Wyckoff".to_string()]);
+        assert_eq!(m.live_applied, vec!["Dow Teorisi".to_string()]);
+        assert_eq!(m.unknown, vec!["Hayalet".to_string()], "registry dışı sessiz düşmez");
+        assert!(!m.ensemble_weights.contains_key("Hayalet"));
+        // kanıt varsa tracker kazanır (değer cold-start 1.0)
+        assert_eq!(m.ensemble_weights["Wyckoff"], 1.0);
+        assert_eq!(m.ensemble_weights["Dow Teorisi"], 0.25, "kanıtsızda snapshot korunur");
+    }
+
+    /// Dosya → `tracker_weights_json()` → dosya turu şema olarak tutarlı
+    /// (yazan ve okuyan aynı formatı kullanır).
+    #[test]
+    fn live_weights_json_round_trip_uyumlu() {
+        let w: HashMap<String, f64> = HashMap::from([
+            ("Wyckoff".to_string(), 1.75),
+            ("Dow Teorisi".to_string(), 0.25),
+        ]);
+        let txt = crate::track::live_weights_json(&w, 12345);
+        let raw: serde_json::Value = serde_json::from_str(&txt).expect("yazılan JSON geçerli");
+        let back = parse_live_weights(&raw).expect("kendi yazdığımız dosya okunur");
+        assert_eq!(back.len(), 2);
+        assert!((back["Wyckoff"] - 1.75).abs() < 1e-4);
+        assert!((back["Dow Teorisi"] - 0.25).abs() < 1e-4);
+    }
+
+    /// `track.rs` kanıt sayacı: `evidence_n` = `effective_weights`'in
+    /// `frozen(n)` kararıyla aynı girdiyi verir.
+    #[test]
+    fn evidence_n_frozen_karariyla_ayni_girdiyi_verir() {
+        let mut t = crate::track::StrategyTracker::default();
+        let pol = crate::track::LearnPolicy { min_n: 3, full_n: 6 };
+        assert_eq!(t.evidence_n("Yok"), 0);
+        for i in 0..3 {
+            t.record_outcome_r(vec!["Az".into()], 1_000 + i as u64, 1.0);
+        }
+        assert_eq!(t.evidence_n("Az"), 3);
+        assert!(!pol.frozen(t.evidence_n("Az")), "n=min_n → donmuş DEĞİL");
+        assert!(pol.frozen(t.evidence_n("Yok")), "kanıt yok → donmuş");
+    }
+}
 /// P1-E: **TP_FROM_ENTRY GERÇEK AKIŞA BAĞLI** — entegrasyon testleri.
 ///
 /// Bu modül saf formülü değil, `run_cycle`'in **çağırdığı fonksiyonları**

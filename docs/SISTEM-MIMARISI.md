@@ -849,7 +849,7 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 15 + recon 4 + tp-entry 3 | 101/101 ✓ |
+| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 20 + live-weights 8 + recon 4 + tp-entry 3 | 115/115 ✓ |
 | api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
 | data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
 | data | P1-D tek kaynaklı evren: exact/top-N, sessiz kırpma yok, katman doğrulama | 7/7 ✓ |
@@ -893,7 +893,9 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 101, api 5, data 9, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 115, api 5, data 9, strategy 6).
+- **Risk-lock invariant**: `entries_allowed` ARAN DEĞİLDİR — `EntryGate` (`engine_loop.rs`) içinde `health_ok && !risk_locked` denkleminden **türetilir** (`Engine::entries_allowed()`). Hiçbir runtime yolu onu doğrudan yazamaz; `entries_allowed_alan_olarak_saklanmaz` testi kaynak taramasıyla bunu korur. Auto-unlock yalnız **gerçek `sync_positions_from`** ile doğrulanmış flat döngülerde ilerler (`rest_sync_verified`). Kilit açılsa bile `health_ok=false` ise giriş KAPALI kalır.
+- **Canlı ağırlık → ensemble**: `Engine::live_weights: HashMap<String, f64>` (kaydedilmiş canlı snapshot) ile `StrategyTracker` (canlı işlem kanıtı) **ayrı kavramlar**. `trained_weights: HashMap<String, TrainedInfo>` **kaldırıldı** (ölü state — hiç okunmuyordu; `TrainedInfo` de kaldırıldı). Doğrulama: `parse_live_weights()` (origin=live zorunlu, sayısal, finite, ≥0; üst sınır **uygulanmaz** → `1.75` birebir). Birleştirme: `merge_effective_weights()` — tracker kanıtı varsa tracker kazanır, kanıt yoksa canlı snapshot **korunur**. Dosya bozuksa **açılış başarısız** (sessiz cold-start yok); dump **atomik** (tmp+rename).
 - P1-E TP: tek formül `AllocationConfig::tp_from_entry()`; otoriter hedef `EntryAttr::tp_px` (**gerçek dolumdan**). `Candidate.tp_px` yalnız PLAN. `TRAIL_ATR_K`/`TRAIL_MIN_STEP` değiştirilmedi.
 - P1-D `TradingUniverse`: `data/src/universe.rs`. `IngestorConfig::max_coins` **kaldırıldı** (sessiz kırpma kaynağı). `Ingestor::with_universe` evreni dışarıdan alır.
 - P1-B ring-wrap kabul testleri (`history_ring_wrap_tum_barlar`, `history_snapshot_sadece_kapanista_guncellenir`).
@@ -914,4 +916,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --release --workspace`: engine 101, api 5, data 9, strategy 6 = 121, hepsi yeşil.*
+*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --workspace`: engine 115, api 5, data 9, strategy 6 = **135**, hepsi yeşil (+1 ignored doc-test).*

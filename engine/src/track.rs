@@ -143,35 +143,14 @@ pub const DEFAULT_LEARN_FULL_N: usize = 30;
 pub const WEIGHT_CLAMP_LO: f64 = 0.1;
 pub const WEIGHT_CLAMP_HI: f64 = 2.0;
 
-/// Bir stratejinin **canlı** öğrenme durumu (persistence ile diske yazılır).
-///
-/// Eski `TrainedInfo` backtestten gelen önseldi (`trades` = backtest işlem
-/// sayısı). Backtest kaldırıldığı için bu yapı yeniden tanımlandı: artık
-/// **yalnız canlı dolum** sayacı tutar ve nötr cold-start'tan başlar.
-///
-/// Provenans: `origin` = "live" (backtest çıkışı değil), `schema_version` = 1.
-/// Sürüm uyuşmazsa load_state WARN + nötr sıfırla. Sessiz yükleme yok.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct TrainedInfo {
-    /// pencere içi canlı işlem sayısı (n)
-    pub trades: u64,
-    /// toplam R (ΣR) — özet tabloda gösterilir
-    pub sum_r: f64,
-    /// son işlem zaman damgası (ms)
-    pub last_ts: u64,
-    /// köken işareti — backtestten gelirse "live" DEĞİL, yükleme reddedilir
-    pub origin: String,
-    /// şema sürümü — gelecekteki migrate için
-    pub schema_version: u32,
-}
-
-impl TrainedInfo {
-    /// KALDIRILDI: keşif sınıfı artık **isimle değil**, **veri açlığıyla**
-    /// (`n < LEARN_FULL_N`) belirlenir. Bkz. `StrategyTracker::explore_queue`.
-    pub fn is_explorer(&self) -> bool {
-        false
-    }
-}
+// KALDIRILDI (bu görev): `TrainedInfo` — `Engine.trained_weights` alanı
+// **hiç okunmuyordu** (ölü state): `load_live_weights()` canlı dosyanın
+// `weights: {name: number}` haritasını bu yapı gibi okumaya çalışıyor,
+// sonuç `trades=0 / sum_r=0` ve ensemble'a hiç girmiyordu. Yerine:
+//   • `Engine::live_weights: HashMap<String, f64>`  — kaydedilmiş canlı
+//     snapshot (asıl ağırlık)
+//   • `StrategyTracker`                            — canlı işlem KANITI
+// İkisi de `parse_live_weights` / `merge_effective_weights` ile ayrılır.
 
 /// Öğrenme politikası: `n` eşikleri (ENV `LEARN_MIN_N` / `LEARN_FULL_N`).
 #[derive(Debug, Clone, Copy)]
@@ -298,6 +277,15 @@ impl StrategyTracker {
         for name in strategy_names {
             self.stats.entry(name).or_default().record_r(ts, r);
         }
+    }
+
+    /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
+    ///
+    /// `effective_weights`'in `pol.frozen(n)` kararıyla **aynı** girdiyi
+    /// verir; canlı ağırlık snapshot'ının hangi stratejilerde korunacağı
+    /// (tracker kanıtı varsa tracker kazanır) buradan belirlenir.
+    pub fn evidence_n(&self, name: &str) -> usize {
+        self.stats.get(name).map(|x| x.rs.len()).unwrap_or(0)
     }
 
     /// ETKİLİ AĞIRLIK — **nötr cold-start + canlı öğrenme** (P0-B).
