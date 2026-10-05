@@ -29,6 +29,15 @@ pub struct ConsensusSignal {
     /// (strateji adı, katkı, kısa not)
     pub contributors: Vec<(String, f64)>,
     pub note: String,
+    /// **ÇIKIŞ KANALI — ayrı bir karar hattı, entry skoruna KARIŞMAZ.**
+    ///
+    /// `Signal::Exit` skoru nötr etkiler (eski davranış) ama artık **note
+    /// defterine gömülüp ölü kalmaz**: en az bir Exit oyu varsa `true`.
+    /// Motor, `exit_requested && pozisyon açık` iken gerçek `ExitNow`
+    /// yürütür; Flat pozisyonda hiçbir emir üretmez.
+    pub exit_requested: bool,
+    /// Exit oyu veren stratejiler (audit/log). Tekrarlanan oylar **tek** girdi.
+    pub exit_contributors: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,11 +77,17 @@ impl Ensemble {
     }
 
     /// Stratejilerin sinyallerini tek karara birleştirir.
+    ///
+    /// `Signal::Exit` → `exit_requested=true` (+ `exit_contributors`).
+    /// Skora dokunmaz (entry konsensüsü ayrı kanal); ÇOKLU Exit oyu
+    /// **idempotent**tir (aynı strateji listeye ikinci kez girmez).
     pub fn combine(&self, signals: Vec<(String, Signal)>) -> ConsensusSignal {
         let mut wsum = 0.0;
         let mut score = 0.0;
         let mut contributors = Vec::new();
         let mut notes = Vec::new();
+        let mut exit_requested = false;
+        let mut exit_contributors: Vec<String> = Vec::new();
 
         for (name, sig) in signals {
             let w = self.cfg.weights.get(&name).copied().unwrap_or(1.0);
@@ -90,8 +105,14 @@ impl Ensemble {
                     notes.push(format!("{name}[-{strength:.2}]: {note}"));
                 }
                 Signal::Exit { note } => {
-                    // Exit oyu pozisyona muhtemel kapanış bilgisi; skora nötr etkiler
+                    // ÇIKIŞ KANALI: skora nötr etki ama **ölü note değil** —
+                    // `exit_requested` bayrağı motorun gerçek ExitNow akışını
+                    // tetikler. Idempotent: aynı strateji ikinci kez eklenmez.
                     notes.push(format!("{name}[EXIT]: {note}"));
+                    exit_requested = true;
+                    if !exit_contributors.contains(&name) {
+                        exit_contributors.push(name);
+                    }
                 }
                 Signal::Hold { note } => {
                     notes.push(format!("{name}[HOLD]: {note}"));
@@ -122,6 +143,8 @@ impl Ensemble {
             } else {
                 notes.join(" | ")
             },
+            exit_requested,
+            exit_contributors,
         }
     }
 
@@ -130,10 +153,20 @@ impl Ensemble {
         match gate {
             RegimeGate::Open => cs,
             RegimeGate::Blocked => {
+                // ÇIKIŞ KANALI REJİM ENGELLERDEN ETKİLENMEZ: rejim filtresi
+                // yalnız YENİ GİRİŞİ yasaklar; "pozisyonu kapat" isteği
+                // risk yönetimi gereği daima geçmeli.
                 if cs.dir == Dir::Neutral {
                     cs
                 } else {
-                    ConsensusSignal { dir: Dir::Neutral, score: 0.0, contributors: cs.contributors, note: format!("REJİMENGELİ: {}", cs.note) }
+                    ConsensusSignal {
+                        dir: Dir::Neutral,
+                        score: 0.0,
+                        exit_requested: cs.exit_requested,
+                        exit_contributors: cs.exit_contributors,
+                        contributors: cs.contributors,
+                        note: format!("REJİMENGELİ: {}", cs.note),
+                    }
                 }
             }
             RegimeGate::TrendBoost => ConsensusSignal { score: (cs.score * 1.2).clamp(-1.0, 1.0), ..cs },
@@ -230,5 +263,76 @@ impl Ensemble {
             }
         }
         self.cfg.weights = w;
+    }
+}
+/// ── B — SIGNAL::EXIT KANALI (ensemble) ──────────────────────────────────
+#[cfg(test)]
+mod exit_channel_tests {
+    use super::*;
+
+    /// Exit oyu ARTIK ÖLÜ DEĞİL: `exit_requested=true` + `exit_contributors`.
+    /// Skor HÂLÂ nötr etkilidir (entry konsensüsü ayrı kanal).
+    #[test]
+    fn ensemble_exit_signal_is_not_ignored() {
+        let e = Ensemble::new(EnsembleConfig::default());
+        let cs = e.combine(vec![
+            ("A".into(), Signal::Long { strength: 0.9, note: "a".into() }),
+            ("B".into(), Signal::Exit { note: "rank kayması".into() }),
+        ]);
+        assert!(cs.exit_requested, "Exit oyu bayrak ÜRETMEK ZORUNDA");
+        assert_eq!(cs.exit_contributors, vec!["B".to_string()]);
+        // skor Exit'ten etkilenmez: yalnız A'nın Long katkısı
+        assert!((cs.score - 0.9).abs() < 1e-9);
+        // eski davranıştan fark: eski kod yalnız note'a yazardı; note da hâlâ var
+        assert!(cs.note.contains("EXIT"), "note korunur ama tek kanal o değil");
+    }
+
+    /// ÇOKLU Exit oyu idempotent: bayrak tek, contributors tekrarsız.
+    #[test]
+    fn multiple_exit_votes_are_idempotent() {
+        let e = Ensemble::new(EnsembleConfig::default());
+        let cs = e.combine(vec![
+            ("A".into(), Signal::Exit { note: "1".into() }),
+            ("A".into(), Signal::Exit { note: "2".into() }),
+            ("B".into(), Signal::Exit { note: "3".into() }),
+        ]);
+        assert!(cs.exit_requested);
+        assert_eq!(cs.exit_contributors.len(), 2, "aynı strateji ikinci kez eklenmez");
+        assert_eq!(cs.exit_contributors, vec!["A".to_string(), "B".to_string()]);
+        // skor Exit oylarından etkilenmez → nötr
+        assert_eq!(cs.score, 0.0);
+        assert_eq!(cs.dir, Dir::Neutral, "Exit skoru değiştirmez (dir hesabı değişmedi)");
+    }
+
+    /// Exit oyu olmayan konsensüs: bayrak FALSE (varsayım üretme).
+    #[test]
+    fn exit_olmayanda_bayrak_false() {
+        let e = Ensemble::new(EnsembleConfig::default());
+        let cs = e.combine(vec![
+            ("A".into(), Signal::Long { strength: 0.8, note: "a".into() }),
+            ("B".into(), Signal::Hold { note: "b".into() }),
+        ]);
+        assert!(!cs.exit_requested);
+        assert!(cs.exit_contributors.is_empty());
+    }
+
+    /// Rejim engeli ENTRY'yi öldürür ama ÇIKIŞ kanalını öldürMEZ.
+    #[test]
+    fn rejim_engeli_exit_kanalini_kapatmaz() {
+        let e = Ensemble::new(EnsembleConfig::default());
+        // dir != Neutral olsun ki Blocked GERÇEKTE girişi öldürsün (Neutral
+        // passthrough yolu testi atlatırdı — mutasyon doğrulamasında yakalandı).
+        let cs = e.combine(vec![
+            ("A".into(), Signal::Long { strength: 0.9, note: "giriş".into() }),
+            ("B".into(), Signal::Exit { note: "kayma".into() }),
+        ]);
+        assert!(cs.exit_requested);
+        let blocked = e.apply_regime(cs, RegimeGate::Blocked);
+        assert_eq!(blocked.dir, Dir::Neutral, "giriş engellendi");
+        assert!(
+            blocked.exit_requested,
+            "GİRİŞ engellendi ama exit kanalı rejimden etkilenmez"
+        );
+        assert_eq!(blocked.exit_contributors, vec!["B".to_string()]);
     }
 }

@@ -8,7 +8,7 @@
 //! NOT: HL'de opsiyon yok; çıktı pozisyon değil — risk katmanı +
 //! komşu stratejiler için vol-rejim bilgisi.
 //! GEREKLİ VERİ: (IV mod) >=60 mum; (proxy) >=120 mum.
-use crate::{closes, MarketInput, Signal, Strategy};
+use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
 pub struct VolatiliteArbitraj;
@@ -55,6 +55,16 @@ impl Strategy for VolatiliteArbitraj {
             Signal::Hold { note: format!("RV kısa/uzun={ratio:.2} — vol gerileme beklentisi") }
         } else {
             Signal::Hold { note: format!("RV terim yapısı nötr: {ratio:.2}") }
+        }
+    }
+
+    /// IV feed bağlı değilken GERÇEK VRP üretilemez → `DATA-MISSING`.
+    /// (SAHTE IV ÜRETMEZ: yerel RV proxy yalnız bilgi notudur, skor üretmez.)
+    fn status(&self, input: &MarketInput) -> StratStatus {
+        if input.iv.is_none() {
+            StratStatus::DataMissing
+        } else {
+            StratStatus::Active
         }
     }
 }

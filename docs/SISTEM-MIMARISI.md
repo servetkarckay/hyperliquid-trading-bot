@@ -467,7 +467,10 @@ Karar ve gerekçe:
 > hareket edemez (koruma katmanı iki yönlü çelişir). Tek doğruluk kaynağı
 > **bot içi mantık**; borsa katmanı yalnız felaket-stop'u.
 >
-> **DOKÜMAN NOTU (P1-E):** TakeProfit enum değeri bugün gerçek bir kapanış kaynağı değil (analytical target); TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
+> **GÜNCELLEME (P1-H):** TakeProfit artık **GERÇEK kapanış kaynağıdır**. Giriş dolumunda
+> `pending_tp` mesafesiyle reduce-only TP trigger (`tpsl="tp"`, `is_market=false`,
+> **cloid'li**) borsaya asılır (`Executor::ensure_tp`, `place_tp_grid`). TP fill
+> (oid eşleşmesi) → `ExitReason::TakeProfit` — MFE pozitif diye TP YAZILMAZ.
 >
 > **TP NEREDEN GELİYOR (P1-E)?** Tek formül: `AllocationConfig::tp_from_entry()`.
 > ```text
@@ -489,8 +492,11 @@ Karar ve gerekçe:
 >   Otoriter hedef `EntryAttr::tp_px`'dir ve **gerçek dolumdan** türetilir
 >   (`EntryAttr::set_analytical_tp` ← `apply_real_fill`) — `allocation_tp_entry_eff_ile_baglanir`.
 >
-> `exit_reason = Some(ExitReason::TakeProfit)` **hiçbir yolda atanmaz**;
-> k-protokolü "tp" kovasının boş olmasını bilerek bekler.
+> **P1-H ile `exit_reason = Some(ExitReason::TakeProfit)` tek yoldan atanır**:
+> TP trigger fill'in oid'i `executor.tp_orders[coin]` ile eşleştiğinde
+> (`exit_reason_from_fill` — F: birebir `TP fill → TakeProfit`). Reconciliation
+> (`restore_tp_orders`) borsada dinlenen bizim TP'yi ±%0.1 fiyat eşleşmesiyle
+> tanır → oid kaybolursa YENİ EMİR ATILMAZ (çift-TP yasağı).
 
 #### Uygulama
 
@@ -843,13 +849,14 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | Evre | Test | Sonuç |
 |---|---|---|
 | api | SDK 0.24 imza cross-check | r/s/v bayt-bayt aynı |
+| strategy | exit kanalı 4 + kesit rank-exit 2 + kelly gerçek veri 3 | 15/15 ✓ |
 | api | tüm info metotları + WS 4 kanal | ✓ |
 | api | CANLI EMİR (far-below limit, aç+iptal) | oid=561610126917, 561707937166 — maliyetsiz |
 | api/engine | hesap sorgusu | $117.13, 135 fill, master sync |
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 6 senaryo + alloc 4 + track 20 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 20 + live-weights 8 + recon 4 + tp-entry 3 | 115/115 ✓ |
+| engine | state machine 10 + alloc 4 + track 22 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 21 + live-weights 8 + recon 4 + tp-entry 3 + **tp-execution 8** + **exit kanalı 4** | 127/127 ✓ |
 | api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
 | data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
 | data | P1-D tek kaynaklı evren: exact/top-N, sessiz kırpma yok, katman doğrulama | 7/7 ✓ |
@@ -878,7 +885,12 @@ TEK PR ile girer.
   CRITICAL + operatör müdahalesi. Kalıcı parse-fail: restart→RECON→5 crit→flatten→dur.
 
 **B — Kalan Paket (bir sonraki planlı restart'ta TEK PR):**
-- ~~**P0-1**: TP dolum-fiyatı türetimi~~ — **KAPANDI (P1-E)**: `AllocationConfig::tp_from_entry(entry_eff = REST entryPx, risk_mesafesi = EntryAttr::risk_px)`, `EntryAttr::tp_px` üzerinden gerçek akışa bağlı. Kalan iş: TP-execution yolu (borsada limit TP + `exit_reason=TakeProfit`).
+- ~~**P0-1**: TP dolum-fiyatı türetimi~~ — **KAPANDI (P1-E)**: `AllocationConfig::tp_from_entry(entry_eff = REST entryPx, risk_mesafesi = EntryAttr::risk_px)`, `EntryAttr::tp_px` üzerinden gerçek akışa bağlı.
+- ~~TP-execution yolu~~ — **KAPANDI (P1-H)**: giriş dolumunda `pending_tp` → reduce-only TP trigger (`place_tp_grid`, cloid'li); TP fill oid eşleşmesi → `ExitReason::TakeProfit`; recon `restore_tp_orders` duplicate etmez.
+- ~~`Signal::Exit` ölü note~~ — **KAPANDI (P1-H)**: `ConsensusSignal.exit_requested` + `exit_contributors`; açık pozisyonda gerçek `ExitNow` (`PositionStateMachine::force_exit`), Flat'ta emir YOK, çoklu oy idempotent.
+- Kesit momentum rank kayması — **BAĞLANDI (P1-H)**: `rank_band`/`rank_shift_exit_long` tek kaynak; LONG pozisyon Top→(alt %40) → Exit (strateji pozisyon tarafını bilmez, engine yönlendirir).
+- Strateji durum raporu — **EKLENDİ (P1-H)**: `[STRAT]` ACTIVE/AUXILIARY/DATA-MISSING; `Kelly Sizing`/`Optimal Execution`/`Market Making` = AUXILIARY, `Vol Arbitraj (VRP)` IV yokken DATA-MISSING (sahte IV yok).
+- Kelly sabit %45 — **KALDIRILDI (P1-H)**: `MarketInput::portfolio_*` tracker kanıtından; kanıt yok → Skip (sabit değere sizing YOK).
 - **P0-2**: TID dedup ring buffer + `track_state.json` provenance (`origin + schema_version`).
 - **P1-2**: Restart exponential backoff (yukarıda A4).
 - **P1-3**: S5 periyodik recon 30 sn (cycle-sayacı yerine zaman).
@@ -893,7 +905,7 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 115, api 5, data 9, strategy 6).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 127, api 5, data 9, strategy 15).
 - **Risk-lock invariant**: `entries_allowed` ARAN DEĞİLDİR — `EntryGate` (`engine_loop.rs`) içinde `health_ok && !risk_locked` denkleminden **türetilir** (`Engine::entries_allowed()`). Hiçbir runtime yolu onu doğrudan yazamaz; `entries_allowed_alan_olarak_saklanmaz` testi kaynak taramasıyla bunu korur. Auto-unlock yalnız **gerçek `sync_positions_from`** ile doğrulanmış flat döngülerde ilerler (`rest_sync_verified`). Kilit açılsa bile `health_ok=false` ise giriş KAPALI kalır.
 - **Canlı ağırlık → ensemble**: `Engine::live_weights: HashMap<String, f64>` (kaydedilmiş canlı snapshot) ile `StrategyTracker` (canlı işlem kanıtı) **ayrı kavramlar**. `trained_weights: HashMap<String, TrainedInfo>` **kaldırıldı** (ölü state — hiç okunmuyordu; `TrainedInfo` de kaldırıldı). Doğrulama: `parse_live_weights()` (origin=live zorunlu, sayısal, finite, ≥0; üst sınır **uygulanmaz** → `1.75` birebir). Birleştirme: `merge_effective_weights()` — tracker kanıtı varsa tracker kazanır, kanıt yoksa canlı snapshot **korunur**. Dosya bozuksa **açılış başarısız** (sessiz cold-start yok); dump **atomik** (tmp+rename).
 - P1-E TP: tek formül `AllocationConfig::tp_from_entry()`; otoriter hedef `EntryAttr::tp_px` (**gerçek dolumdan**). `Candidate.tp_px` yalnız PLAN. `TRAIL_ATR_K`/`TRAIL_MIN_STEP` değiştirilmedi.
@@ -916,4 +928,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-04. Derleme: `cargo build --release --workspace` temiz, `cargo test --workspace`: engine 115, api 5, data 9, strategy 6 = **135**, hepsi yeşil (+1 ignored doc-test).*
+*Son güncelleme: 2026-10-05 (P1-H). Derleme: `cargo build --release --workspace` temiz, `cargo test --workspace`: engine 127, api 5, data 9, strategy 15 = **156**, hepsi yeşil (+1 ignored doc-test).*

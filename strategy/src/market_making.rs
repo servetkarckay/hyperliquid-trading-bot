@@ -17,7 +17,7 @@
 //! MM'nin gerçekten ALO emir göndermesi istenirse executor'a global bir TIF
 //! bayrağı değil, sinyal başına taşıyıcı alan (`prefer_alo`) eklenmelidir.
 //! GEREKLİ VERİ: defter bid/ask + >=50 mum.
-use crate::{closes, MarketInput, Signal, Strategy};
+use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
 pub struct MarketMaking;
@@ -58,6 +58,11 @@ impl Strategy for MarketMaking {
                 bid, ask, reservation, half_spread
             ),
         }
+    }
+
+    /// Kote/quote planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
+    fn status(&self, _input: &MarketInput) -> StratStatus {
+        StratStatus::Auxiliary
     }
 }
 

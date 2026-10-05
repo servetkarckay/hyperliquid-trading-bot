@@ -97,8 +97,11 @@ impl AllocationConfig {
     /// - Yan kapı: `tp_dist ≥ 2 × risk_mesafesi`. R:R oranı 1'den küçükse bile
     ///   TP asla girişin arkasına (zarar tarafına) düşmez.
     ///
-    /// ⚠️ `TakeProfit` **bugün gerçek bir kapanış kaynağı değil** (analytical
-    /// target). TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
+    /// ✅ `TakeProfit` **GERÇEK kapanış kaynağıdır** (P1-H): giriş dolumunda
+    /// `pending_tp` mesafesiyle reduce-only TP trigger borsaya asılır
+    /// (`Executor::ensure_tp`), TP fill oid eşleşmesiyle
+    /// `exit_reason=TakeProfit` atanır. Bu formül hem plan hem gerçek emrin
+    /// TEK kaynağıdır.
     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
         let risk = risk_mesafesi.abs();
         if !(entry_eff > 0.0) || !(risk > 0.0) {

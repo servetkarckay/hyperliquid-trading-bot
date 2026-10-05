@@ -399,6 +399,29 @@ impl StrategyTracker {
         q.into_iter().map(|(_, n)| n).collect()
     }
 
+    /// **PORTFÖY win-rate + k/z oranı** — tracker'daki TÜM canlı kanıttan.
+    ///
+    /// Kelly sizing'in sabit %45 yerine GERÇEK veri kullanabilmesi için
+    /// (`RiskKelly` → `MarketInput::portfolio_*`). Kanıt yoksa `None`:
+    /// sabit varsayım DÖNDÜRMEZ — çağıran (strateji) `Skip` üretir.
+    pub fn portfolio_stats(&self) -> Option<(f64, f64)> {
+        let wins: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).count() as f64).sum();
+        let losses: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r < 0.0).count() as f64).sum();
+        let n = wins + losses;
+        if n <= 0.0 {
+            return None;
+        }
+        let win_r: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).sum::<f64>()).sum();
+        let loss_r: f64 = self
+            .stats
+            .values()
+            .map(|x| x.rs.iter().filter(|r| **r < 0.0).sum::<f64>())
+            .sum::<f64>()
+            .abs();
+        let wl = if loss_r > 0.0 { (win_r / wins.max(1.0)) / (loss_r / losses.max(1.0)) } else { 0.0 };
+        Some((wins / n, wl))
+    }
+
     /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
     ///
     /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).

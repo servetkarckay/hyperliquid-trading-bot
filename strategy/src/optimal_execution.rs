@@ -10,7 +10,7 @@
 //! ağırlıkları U-trajektörüyle orantılı. Sinyal: Hold + plan notta
 //! (parça sayısı, USD/parça, önerilen TIF, ilk 5 parça).
 //! GEREKLİ VERİ: order_size_usd + >=50 mum.
-use crate::{closes, MarketInput, Signal, Strategy};
+use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
 pub struct OptimalExecution;
@@ -63,6 +63,11 @@ impl Strategy for OptimalExecution {
                 slices, slice_usd, plan.join(", ")
             ),
         }
+    }
+
+    /// Parent-emir planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
+    fn status(&self, _input: &MarketInput) -> StratStatus {
+        StratStatus::Auxiliary
     }
 }
 

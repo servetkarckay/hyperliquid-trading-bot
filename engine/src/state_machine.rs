@@ -176,6 +176,28 @@ impl PositionStateMachine {
         }
     }
 
+    /// **B — SIGNAL::EXIT KANALI**: ensemble exit_requested → gerçek ExitNow.
+    ///
+    /// Yalnız `InPosition` emir üretir; Flat/Pending/PendingExit → `Nothing`
+    /// (Flat pozisyonda Exit HİÇBİR emir üretmez; PendingExit → idempotent,
+    /// ikinci ExitNow yok).
+    pub fn force_exit(&mut self, bid: f64, ask: f64) -> Action {
+        match self.state.clone() {
+            PosState::InPosition { side, size, .. } => {
+                self.state = PosState::PendingExit { oid: 0, side };
+                Action::ExitNow(BotOrder {
+                    coin: self.coin.clone(),
+                    side: side.flip(),
+                    sz: size,
+                    px: if side == Side::Long { bid } else { ask },
+                    post_only: false,
+                    reduce_only: true,
+                })
+            }
+            _ => Action::Nothing,
+        }
+    }
+
     /// Emir açıldıktan sonra engine, dönen oid'i makineye bağlar.
     pub fn link_pending_oid(&mut self, oid: i64) {
         if let PosState::Pending { oid: o, .. } | PosState::PendingExit { oid: o, .. } = &mut self.state {

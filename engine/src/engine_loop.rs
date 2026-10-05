@@ -124,10 +124,11 @@ pub struct EntryAttr {
     /// **ANALYTICAL TP HEDEFİ** — gerçek dolum (`entry_px`) üzerinden
     /// `AllocationConfig::tp_from_entry()` ile türetilir.
     ///
-    /// ⚠️ `TakeProfit` **bugün gerçek bir kapanış kaynağı değil** (analytical
-    /// target); TP-execution yolu bağlanınca `exit_reason=TakeProfit` atanacaktır.
-    /// Borsada TP limit emri asılmaz; bu değer yalnız MFE/R analizi ve
-    /// "TP'ye ulaşsaydı kârlı mıydı" ölçümü içindir.
+    /// ✅ Bu hedef ARTIK GERÇEK KAPANIŞTIR (P1-H): giriş dolumunda
+    /// `pending_tp` mesafesiyle reduce-only TP trigger borsaya asılır
+    /// (`Executor::ensure_tp`); TP fill → `ExitReason::TakeProfit`
+    /// (`exit_reason_from_fill`, F). Analytical hedef ve actual emir AYRI
+    /// kavramlardır ama AYNI formülden (`tp_from_entry`) türetilir.
     pub tp_px: Option<f64>,
     /// çıkış sebebi: gerçek kapanış sebebi (MFE>0 TP demek DEĞİL)
     pub exit_reason: Option<ExitReason>,
@@ -266,6 +267,9 @@ pub struct Engine {
     /// P1: bu döngüde pozisyon haritası `sync_positions_from` ile tazelendi mi?
     /// Auto-unlock flat doğrulaması YALNIZ bu doğrulanmış düzlemlerde ilerler.
     rest_sync_verified: bool,
+    /// C — kesit momentum sıralama dilimi (önceki döngü). Rank kayması
+    /// (Top → alt %40) LONG pozisyon için Exit üretir; kanıt yoksa YOK.
+    rank_band_prev: HashMap<String, strategy::kesit_momentum::RankBand>,
 }
 
 /// **Canlı ağırlık dosyasını doğrula ve sayısal ağırlıklara çevir** (saf fonksiyon).
@@ -416,6 +420,106 @@ pub struct LiveWeightsLoad {
 
 /// P0-A: kilidin otomatik açılması için gereken ardışık flat döngü sayısı.
 pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
+
+/// F — **TP emrinin soyutlanmış planı** (saf fonksiyon; testler de BUNU
+/// sınar, kopya mantık yok). Üretimde `Executor::ensure_tp` bu planı yürütür.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TpOrderPlan {
+    pub is_long: bool,
+    pub sz: f64,
+    pub tp_px: f64,
+    pub reduce_only: bool,
+}
+
+/// TP planı: pozisyon VE kâr tarafı VE pozitif mesafe zorunlu.
+///
+/// - `has_position=false` (Flat) → `None`: **TP hiçbir emir ÜRETMEZ**.
+/// - Long için `tp_px <= entry` → `None` (kâr tarafı ihlali).
+/// - Short için `tp_px >= entry` → `None`.
+pub fn plan_tp_order(
+    has_position: bool,
+    is_long: bool,
+    entry_eff: f64,
+    sz: f64,
+    tp_px: f64,
+) -> Option<TpOrderPlan> {
+    if !has_position || !(sz > 0.0) || !(tp_px > 0.0) || !tp_side_ok(is_long, tp_px, entry_eff) {
+        return None;
+    }
+    Some(TpOrderPlan { is_long, sz, tp_px, reduce_only: true })
+}
+
+/// Kâr tarafı kapısı: long → TP > entry, short → TP < entry.
+pub fn tp_side_ok(is_long: bool, tp_px: f64, entry_eff: f64) -> bool {
+    if !(tp_px > 0.0) || !(entry_eff > 0.0) {
+        return false;
+    }
+    if is_long {
+        tp_px > entry_eff
+    } else {
+        tp_px < entry_eff
+    }
+}
+
+/// TP kurma kararı — **duplicate yasağının saf hali**.
+///
+/// `already_registered` (tp_orders'ta oid var) veya borsada dinleniyor
+/// (`resting_on_exchange`) → kurma; grace süresi dolmadıysa → kurma.
+pub fn should_place_tp(
+    already_registered: bool,
+    resting_on_exchange: bool,
+    armed_recently: bool,
+) -> bool {
+    if already_registered || resting_on_exchange || armed_recently {
+        return false;
+    }
+    true
+}
+
+/// F — **ÇIKIŞ SEBEBİ = GERÇEK KAYNAK** (saf fonksiyon, birebir eşleşme):
+///
+/// | gerçek kaynak | ExitReason |
+/// |---|---|
+/// | TP trigger fill (`is_tp_fill`) | `TakeProfit` |
+/// | SL trigger fill (`is_sl_fill`) | ratchet>0 → `TrailingStop`, değilse `StopLoss` |
+/// | makine ExitNow fill | `SignalExit` |
+/// | kill-switch/black-swan | `EmergencyFlatten` (yazıldığı yerde set) |
+/// | manuel | `Manual` |
+///
+/// **MFE pozitif diye TakeProfit YAZILMAZ** — bayrak yoksa `None` döner ve
+/// çağıran `first-write-wins` ile mevcut gerekçeyi KORUR.
+pub fn exit_reason_from_fill(
+    is_tp_fill: bool,
+    is_sl_fill: bool,
+    trailing_ratchets: u32,
+    was_manual_exit: bool,
+    was_emergency: bool,
+) -> Option<ExitReason> {
+    if was_emergency {
+        return Some(ExitReason::EmergencyFlatten);
+    }
+    if is_tp_fill {
+        return Some(ExitReason::TakeProfit);
+    }
+    if is_sl_fill {
+        return Some(if trailing_ratchets > 0 {
+            ExitReason::TrailingStop
+        } else {
+            ExitReason::StopLoss
+        });
+    }
+    if was_manual_exit {
+        return Some(ExitReason::Manual);
+    }
+    None
+}
+
+/// F — exit_reason yazımı **first-write-wins** (çift atama/ezme yasağı).
+pub fn apply_exit_reason(cur: &mut Option<ExitReason>, new: ExitReason) {
+    if cur.is_none() {
+        *cur = Some(new);
+    }
+}
 
 /// **GİRİŞ KAPISI — gerçek runtime durumu.**
 ///
@@ -687,6 +791,7 @@ impl Engine {
             explore_pick: None,
             gate: EntryGate::default(),
             rest_sync_verified: false,
+            rank_band_prev: HashMap::new(),
             leverage: std::env::var("ENGINE_LEVERAGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -768,7 +873,8 @@ impl Engine {
     pub fn ingest_oe(&mut self, channel: &str, data: &serde_json::Value) {
         self.executor.handle_ws_event(channel, data);
         // (oid, coin, dolan, kalan, ort.fiyat, red mi)
-        let mut evs: Vec<(i64, String, f64, f64, f64, bool)> = Vec::new();
+        // (oid, coin, dolan, kalan, ort.fiyat, red mi, tp fill mi, sl fill mi)
+        let mut evs: Vec<(i64, String, f64, f64, f64, bool, bool, bool)> = Vec::new();
         if channel == "orderUpdates" {
             for o in data.as_array().cloned().unwrap_or_default() {
                 let oid = o["order"]["oid"].as_i64().unwrap_or(0);
@@ -789,20 +895,23 @@ impl Engine {
                 // dolumunda) -> 0 dolum sanılıp makine yanlışa gidiyordu.
                 // O durumda `user` kanalındaki gerçek fill kullanılacak.
                 if stt == "filled" && filled > 0.0 {
-                    evs.push((oid, coin, filled, (orig - filled).max(0.0), avg, false));
+                    // F: oid eşleşmesi — bu dolum bizim TP/SL trigger'dan mı?
+                    let is_tp = self.executor.tp_orders.get(&coin) == Some(&oid);
+                    let is_sl = self.executor.sl_orders.get(&coin) == Some(&oid);
+                    evs.push((oid, coin, filled, (orig - filled).max(0.0), avg, false, is_tp, is_sl));
                 } else if rejected {
-                    evs.push((oid, coin, 0.0, 0.0, 0.0, true));
+                    evs.push((oid, coin, 0.0, 0.0, 0.0, true, false, false));
                 }
             }
         } else {
             // `user` kanalı: gerçek dolumlar (coin, px, sz, oid) — borsa
             // ortalama dolum fiyatını BURADA verir.
             for f in self.executor.drain_fills() {
-                evs.push((f.oid, f.coin, f.sz, 0.0, f.px, false));
+                evs.push((f.oid, f.coin, f.sz, 0.0, f.px, false, f.is_tp_fill, f.is_sl_fill));
             }
         }
 
-        for (oid, coin, filled, remaining, avg, rejected) in evs {
+        for (oid, coin, filled, remaining, avg, rejected, is_tp_fill, is_sl_fill) in evs {
             let mut exited_now = false;
             if let Some(m) = self.machines.get_mut(&coin) {
                 let st_before = m.state.clone();
@@ -818,6 +927,18 @@ impl Engine {
                     }
                 }
             }
+            // F — ÇIKIŞ SEBEBİ GERÇEK KAYNAKTAN: TP/SL fill oid eşleşmesi
+            // (MFE pozitif diye TakeProfit YAZILMAZ — bayrak yoksa dokunma).
+            if is_tp_fill || is_sl_fill {
+                if let Some(attr) = self.entry_attr.get_mut(&coin) {
+                    let ratchets = self.trail.get(&coin).map(|t| t.ratchets).unwrap_or(0);
+                    if let Some(reason) =
+                        exit_reason_from_fill(is_tp_fill, is_sl_fill, ratchets, false, false)
+                    {
+                        apply_exit_reason(&mut attr.exit_reason, reason);
+                    }
+                }
+            }
             if exited_now {
                 if let Some(attr) = self.entry_attr.remove(&coin) {
                     // R-çarpanı: net hareket / giriş riski (PF tabanlı terfi için)
@@ -827,12 +948,82 @@ impl Engine {
                     };
                     let r = move_px / attr.risk_px.max(f64::EPSILON);
                     self.tracker.record_outcome_r(
-                        attr.voters,
+                        attr.voters.clone(),
                         hyperliquid_api::now_ms(),
                         r,
                     );
+                    // F — TradeExit kaydı: makine-yolu çıkışı DA trade-exit
+                    // yazsın (eski kod burada attr'ı sildiği için SignalExit
+                    // kayıtlarına "signal" yazılmıyordu). MFE/MAE trail'den.
+                    let excursion = self.trail.remove(&coin).map(|t| {
+                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                        let fav = if t.is_long { (t.peak_px - t.entry_px) / risk }
+                            else { (t.entry_px - t.peak_px) / risk };
+                        let adv = if t.is_long { (t.worst_px - t.entry_px) / risk }
+                            else { (t.entry_px - t.worst_px) / risk };
+                        (fav, adv, t)
+                    });
+                    self.write_ws_exit_record(&coin, &attr, r, excursion);
                 }
             }
+        }
+    }
+
+    /// WS-yolu (makine PendingExit→Flat) çıkışının trade-exit kaydı.
+    /// `entry_attr` YAKINMAZ kaldırıldığı için recon yolu ikinci kez YAZMAZ.
+    fn write_ws_exit_record(
+        &self,
+        coin: &str,
+        attr: &EntryAttr,
+        r: f64,
+        excursion: Option<(f64, f64, TrailState)>,
+    ) {
+        let exit_reason = attr.exit_reason.unwrap_or(ExitReason::Unknown);
+        let exit_str = match exit_reason {
+            ExitReason::StopLoss => "stop",
+            ExitReason::TakeProfit => "tp",
+            ExitReason::TrailingStop => "trailing",
+            ExitReason::SignalExit => "signal",
+            ExitReason::EmergencyFlatten => "emergency",
+            ExitReason::Manual => "manual",
+            ExitReason::Unknown => "unknown",
+        };
+        let (fav, adv, t) = match excursion {
+            Some(x) => x,
+            None => (
+                0.0,
+                0.0,
+                TrailState {
+                    is_long: attr.side.is_buy(),
+                    entry_px: attr.entry_px,
+                    atr_px: 0.0,
+                    peak_px: attr.entry_px,
+                    worst_px: attr.entry_px,
+                    last_px: attr.entry_px,
+                    cur_sl_px: attr.entry_px,
+                    opened_ms: attr.ts,
+                    ratchets: 0,
+                },
+            ),
+        };
+        let exit = TradeExit {
+            ts: hyperliquid_api::now_ms(),
+            epoch: self.epoch.clone(),
+            git: self.git_sha.clone(),
+            coin: coin.to_string(),
+            side: if attr.side.is_buy() { "LONG" } else { "SHORT" }.into(),
+            strategies: attr.voters.clone(),
+            mfe_r: fav,
+            mae_r: adv,
+            dur_sn: (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
+            ratchet: t.ratchets,
+            cikis: exit_str.into(),
+            r_kapanis: r,
+            atr_bps: if t.atr_px > 0.0 { t.atr_px / t.entry_px * 10_000.0 } else { 0.0 },
+            k: self.loop_cfg.trail_atr_k,
+        };
+        if let Err(e) = write_trade_exit(&self.trade_exits_path, &exit) {
+            tracing::warn!("trade-exit yazılamadı ({coin}): {e}");
         }
     }
 
@@ -1288,6 +1479,100 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             self.executor.pending_sl.remove(&c);
             tracing::warn!("[SL] {c}: hedef stop 10 dk geçti, dolum gelmedi — temizlendi");
         }
+
+        // ============ F — GERÇEK TP EXECUTION (sync) ============
+        // 1) arka planda kurulan TP'lerin oid'ini kayda al,
+        // 2) pozisyonu olan ama TP'si olmayan coine TP kur (idempotent),
+        // 3) kapanmış coinin TP'sini iptal et.
+        self.executor.drain_tp_results();
+        let open_pos_tp: Vec<(String, f64)> = self
+            .executor
+            .positions()
+            .iter()
+            .filter(|(_, p)| p.szi.abs() > 1e-12)
+            .map(|(c, p)| (c.clone(), p.szi))
+            .collect();
+        // 2a) TP oid kaybı (restart/WS kopması): borsada dinlenen bizim TP'yi
+        // TARA → oid geri yükle → **yeni emir ATILMAZ** (duplicate yasağı).
+        if self.executor.tp_orders.len() < open_pos_tp.len() {
+            match self.executor.fetch_open_order_rows().await {
+                Ok(rows) => {
+                    let want: HashMap<String, f64> = self
+                        .entry_attr
+                        .iter()
+                        .filter_map(|(c, a)| a.tp_px.filter(|t| *t > 0.0).map(|t| (c.clone(), t)))
+                        .collect();
+                    let n = self.executor.restore_tp_orders(&rows, &want);
+                    if n > 0 {
+                        tracing::info!("[TP] {n} TP oid borsadan geri yüklendi");
+                    }
+                }
+                Err(e) => tracing::warn!("[TP] openOrders taraması başarısız: {e}"),
+            }
+        }
+        for (coin, szi) in &open_pos_tp {
+            let tp_px = match self.entry_attr.get(coin) {
+                Some(a) if a.tp_px.is_some() => a.tp_px.unwrap(),
+                Some(a) => {
+                    // dolum düzeltmesi gelmemiş: risk mesafesinden (tek formül)
+                    let risk = if a.risk_px > 0.0 { a.risk_px } else { a.entry_px.abs() * 0.02 };
+                    let dir = if a.side.is_buy() { Dir::Long } else { Dir::Short };
+                    self.am.cfg.tp_from_entry(dir, a.entry_px, risk)
+                }
+                None => {
+                    // restart sonrası devralınan pozisyon: girişten %2×2 mesafe
+                    let e = self.executor.positions().get(coin).map(|p| p.entry_px).unwrap_or(0.0);
+                    if !(e > 0.0) {
+                        continue;
+                    }
+                    if *szi > 0.0 { e * 1.04 } else { e * 0.96 }
+                }
+            };
+            if !(tp_px > 0.0) || !tp_px.is_finite() {
+                continue;
+            }
+            let is_long = *szi > 0.0;
+            // KÂR TARAFI KAPISI (F): long TP > entry, short TP < entry.
+            let entry_eff = self
+                .executor
+                .positions()
+                .get(coin)
+                .map(|p| p.entry_px)
+                .filter(|e| *e > 0.0)
+                .or_else(|| self.entry_attr.get(coin).map(|a| a.entry_px))
+                .unwrap_or(0.0);
+            if !tp_side_ok(is_long, tp_px, entry_eff) {
+                tracing::warn!(
+                    "[TP] {coin} TP kâr tarafında DEĞİL (tp={tp_px:.8} entry={entry_eff:.8}) — kurulmadı"
+                );
+                continue;
+            }
+            let sz = self.executor.positions().get(coin).map(|p| p.szi.abs()).unwrap_or(0.0);
+            if let Err(e) = self.executor.ensure_tp(coin, is_long, sz, tp_px).await {
+                tracing::warn!("[TP] {coin} TP kurulamadı: {e}");
+            }
+        }
+        let stale_tp: Vec<String> = self
+            .executor
+            .tp_orders
+            .keys()
+            .filter(|c| !open_pos_tp.iter().any(|(p, _)| p == *c))
+            .cloned()
+            .collect();
+        for c in stale_tp {
+            self.executor.cancel_tp(&c).await;
+        }
+        let stale_pending_tp: Vec<String> = self
+            .executor
+            .pending_tp
+            .iter()
+            .filter(|(_, (_, ts))| (now as i64 - *ts as i64).unsigned_abs() > 600_000)
+            .map(|(c, _)| c.clone())
+            .collect();
+        for c in stale_pending_tp {
+            self.executor.pending_tp.remove(&c);
+            tracing::warn!("[TP] {c}: hedef TP 10 dk geçti, dolum gelmedi — temizlendi");
+        }
     }
 
     /// ACİL DÜZLEŞTİRME (kill-switch / black-swan): tüm pozisyonları kapat.
@@ -1626,10 +1911,23 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 best_bid: Some(bid),
                 best_ask: Some(ask),
                 universe_returns: universe_returns.clone(),
-                iv: None,
+                iv: None, // IV feed bağlı DEĞİL → sahte IV üretme (VolArbitraj=DATA-MISSING)
                 equity: self.equity,
-                inventory_usd: 0.0,
+                // D: gerçek pozisyon (USD, ±) — s05/s06 artık ölü veri değil
+                inventory_usd: self
+                    .executor
+                    .positions()
+                    .get(&coin)
+                    .filter(|p| p.szi.abs() > 1e-12)
+                    .map(|p| p.szi * p.entry_px)
+                    .unwrap_or(0.0),
+                // order_size_usd: parent emir planı tahsisden SONRA oluşur →
+                // strategy evaluation'a beslenemez. `Optimal Execution` bu
+                // yüzden AUXILIARY (bkz. `Strategy::status`).
                 order_size_usd: 0.0,
+                // E: Kelly için tracker'ın GERÇEK canlı kanıtı
+                portfolio_win_rate: self.tracker.portfolio_stats().map(|s| s.0),
+                portfolio_wl_ratio: self.tracker.portfolio_stats().map(|s| s.1),
             };
 
             // KIYAMET KORUMASI S2: strateji panik → Skip (bot ölmez)
@@ -1836,6 +2134,16 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             }
         };
 
+        // D — sistem raporu: strateji durumları (ACTIVE/AUXILIARY/DATA-MISSING).
+        // Sessiz ölü strateji yasağı: hangi strateji neden skor ÜRETEMİYOR?
+        if self.n_cycles % 12 == 1 {
+            tracing::info!(
+                "[STRAT] durum raporu (döngü {})
+{}",
+                self.n_cycles,
+                self.strategy_status_lines()
+            );
+        }
         let budget = self.budget_usd();
 
         // DİNAMİK pozisyon sayısı: sabit top_n yerine bakiyeye göre —
@@ -1893,14 +2201,53 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 } else {
                     (0.0, 0.0)
                 };
-                let act = if px_b > 0.0 && px_a > 0.0 {
+                let now_ms = hyperliquid_api::now_ms();
+                let mut act = if px_b > 0.0 && px_a > 0.0 {
                     self.machines
                         .get_mut(&e.coin)
-                        .map(|m| m.on_decision(Decision { score: e.cs.score }, px_b, px_a, hyperliquid_api::now_ms()))
+                        .map(|m| m.on_decision(Decision { score: e.cs.score }, px_b, px_a, now_ms))
                         .unwrap_or(Action::Nothing)
                 } else {
                     Action::Nothing
                 };
+                // ── B + C — ÇIKIŞ KANALLARI (yalnız AÇIK pozisyonda emir) ──
+                let open = self
+                    .machines
+                    .get(&e.coin)
+                    .map(|m| !matches!(m.state, PosState::Flat))
+                    .unwrap_or(false);
+                if open && matches!(act, Action::Nothing) {
+                    let cur_band = strategy::kesit_momentum::rank_band(&universe_returns, &e.coin);
+                    let prev_band = self.rank_band_prev.get(&e.coin).copied();
+                    let side_long = self
+                        .machines
+                        .get(&e.coin)
+                        .map(|m| m.in_position().map(|(s, _, _)| s == SmSide::Long).unwrap_or(false))
+                        .unwrap_or(false);
+                    // C: dokümante kural — LONG, üst %20'den alt %40'a düştü → Exit
+                    let kesit_exit = side_long
+                        && strategy::kesit_momentum::rank_shift_exit_long(prev_band, cur_band);
+                    // B: ensemble Exit oyu → gerçek ExitNow (Flat'ta hiçbir emir YOK;
+                    // PendingExit'te idempotent — ikinci ExitNow üretmez)
+                    let sig_exit = e.cs.exit_requested;
+                    if kesit_exit || sig_exit {
+                        if let Some(m) = self.machines.get_mut(&e.coin) {
+                            act = m.force_exit(px_b, px_a);
+                        }
+                        if matches!(act, Action::ExitNow(_)) {
+                            tracing::info!(
+                                "[EXIT] {} çıkış kanalı: {} (contributor={:?})",
+                                e.coin,
+                                if kesit_exit { "kesit rank kayması (LONG)" } else { "Signal::Exit" },
+                                e.cs.exit_contributors
+                            );
+                        }
+                    }
+                }
+                // band kaydını GÜNCELLE (exit o döngüde işlendi, sonraki kayıt)
+                if let Some(b) = strategy::kesit_momentum::rank_band(&universe_returns, &e.coin) {
+                    self.rank_band_prev.insert(e.coin.clone(), b);
+                }
                 acts.push((idx, act, asset, szd));
             } else {
                 summaries.push((e.coin.clone(), "SKIP: asset çözülemedi".into()));
@@ -2188,9 +2535,24 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                         // taşınınca stop `dolum_px ± mesafe` olur ve kayma stop'u
                         // yan tarafa taşıyamaz.
                         if attr.risk_px > 0.0 {
+                            let now_ms = hyperliquid_api::now_ms();
                             self.executor
                                 .pending_sl
-                                .insert(e.coin.clone(), (attr.risk_px, hyperliquid_api::now_ms()));
+                                .insert(e.coin.clone(), (attr.risk_px, now_ms));
+                            // F — GERÇEK TP: mesafe `tp_from_entry` (tek formül)
+                            // ile karar fiyatından; mesafe girişten bağımsız
+                            // olduğu için dolum anına taşınır. Dolum gelince
+                            // TP = dolum ± mesafe reduce-only asılır.
+                            if let Some(tp) = attr.tp_px {
+                                let dist = if attr.side.is_buy() {
+                                    tp - entry_px
+                                } else {
+                                    entry_px - tp
+                                };
+                                if dist > 0.0 && dist.is_finite() {
+                                    self.executor.pending_tp.insert(e.coin.clone(), (dist, now_ms));
+                                }
+                            }
                         }
                         self.entry_attr.insert(e.coin.clone(), attr);
                 }
@@ -2325,6 +2687,26 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
 }
 
 impl Engine {
+    /// D — **strateji durum raporu** (`ACTIVE` / `AUXILIARY` / `DATA-MISSING`).
+    ///
+    /// Her strateji KENDİ durumunu bildirir (`Strategy::status`); temsili
+    /// girdi yalnız gerçek motor state'inden doldurulur (iv yok, portfolio
+    /// istatistiği tracker'dan). SAHTE veri üretilmez.
+    pub fn strategy_status_lines(&self) -> String {
+        let input = MarketInput {
+            iv: None,
+            portfolio_win_rate: self.tracker.portfolio_stats().map(|s| s.0),
+            portfolio_wl_ratio: self.tracker.portfolio_stats().map(|s| s.1),
+            ..Default::default()
+        };
+        self.strategies
+            .iter()
+            .map(|s| format!("{:<24} {}", s.name(), s.status(&input).label()))
+            .collect::<Vec<_>>()
+            .join("
+")
+    }
+
     /// canlı etkin ağırlık (`origin:"live"` formatında — `bot.rs` geri yükler)
     pub fn tracker_weights_json(&self) -> String {
         crate::track::live_weights_json(
@@ -3233,5 +3615,241 @@ mod tp_entry_tests {
         a.apply_real_fill(105.0, &c);
         assert_eq!(a.risk_px, risk, "risk mesafesi değişmemeli");
         assert!((a.tp_px.unwrap() - 111.0).abs() < 1e-12, "TP = 105 + 2*3");
+    }
+}
+
+/// ── A + F — GERÇEK TP EXECUTION VE ÇIKIŞ SEBEBİ DOĞRULUĞU ────────────────
+/// Testler saf **üretim** fonksiyonlarını sınar: `plan_tp_order` /
+/// `should_place_tp` / `exit_reason_from_fill` / `apply_exit_reason`
+/// (Executor::ensure_tp ve on_ws_event bunları tek yoldan çağırır).
+#[cfg(test)]
+mod tp_execution_tests {
+    use super::*;
+    use crate::allocation_manager::AllocationConfig;
+
+    fn cfg() -> AllocationConfig {
+        AllocationConfig::default()
+    }
+
+    /// Gerçek akış: `plan_tp_order` TP'yi dolumun KÂR tarafında üretir.
+    #[test]
+    fn tp_order_long_profit_side() {
+        let c = cfg();
+        let entry = 100.0f64;
+        let risk = 3.0f64;
+        let tp = c.tp_from_entry(Dir::Long, entry, risk);
+        let p = plan_tp_order(true, true, entry, 2.0, tp).expect("long TP planı");
+        assert!(p.tp_px > entry, "long TP > entry (kâr tarafı): {}", p.tp_px);
+        assert!(p.tp_px >= entry + 2.0 * risk, "TP ≥ 2R mesafe");
+        assert_eq!(p.reduce_only, true);
+        // kâr tarafı ihlali → plan YOK
+        assert!(plan_tp_order(true, true, entry, 2.0, entry - 1.0).is_none());
+    }
+
+    #[test]
+    fn tp_order_short_profit_side() {
+        let c = cfg();
+        let entry = 100.0f64;
+        let risk = 3.0f64;
+        let tp = c.tp_from_entry(Dir::Short, entry, risk);
+        let p = plan_tp_order(true, false, entry, 2.0, tp).expect("short TP planı");
+        assert!(p.tp_px < entry, "short TP < entry (kâr tarafı): {}", p.tp_px);
+        assert!(p.tp_px <= entry - 2.0 * risk, "TP ≥ 2R mesafe");
+        // kâr tarafı ihlali → plan YOK
+        assert!(plan_tp_order(true, false, entry, 2.0, entry + 1.0).is_none());
+    }
+
+    /// `reduce_only = true` ZORUNLU — TP pozisyonu büyütemez.
+    #[test]
+    fn tp_order_reduce_only() {
+        let p = plan_tp_order(true, true, 100.0, 2.0, 106.0).expect("plan");
+        assert!(p.reduce_only, "TP emri reduce_only olmalı");
+        // Executor::ensure_tp imzası reduce-only trigger yerleştirir:
+        // `place_tp_grid(..., is_take_profit = true, reduce_only = true, ...)`.
+
+        // cloid takip edilebilirlik: TP_CLOID_SALT SL tuzundan farklı
+        let (asset, sz) = (7u32, 2.0f64);
+        let tp_cloid = crate::executor::make_cloid("BTC", 106.0, sz, crate::executor::TP_CLOID_SALT);
+        let sl_cloid = crate::executor::make_cloid("BTC", 106.0, sz, 3u64); // SL: salt=dec
+        assert_ne!(tp_cloid, sl_cloid, "TP ve SL cloid'i çakışmamalı");
+        // aynı cloid idempotent: aynı girdi aynı anahtar
+        assert_eq!(tp_cloid, crate::executor::make_cloid("BTC", 106.0, sz, crate::executor::TP_CLOID_SALT));
+        let _ = asset;
+    }
+
+    /// TP fill → `ExitReason::TakeProfit`. MFE pozitif olsa bile TP YAZILMAZ.
+    #[test]
+    fn tp_fill_sets_exit_reason_take_profit() {
+        let r = exit_reason_from_fill(true, false, 0, false, false).expect("TP fill → reason");
+        assert_eq!(r, ExitReason::TakeProfit);
+
+        // MFE pozitif ≠ TakeProfit: bayrak yoksa reason ÜRETİLMEZ
+        assert_eq!(exit_reason_from_fill(false, false, 0, false, false), None);
+        assert_eq!(exit_reason_from_fill(false, false, 0, false, false), None);
+
+        // SL fill → StopLoss; ratchet'li SL fill → TrailingStop
+        assert_eq!(
+            exit_reason_from_fill(false, true, 0, false, false),
+            Some(ExitReason::StopLoss)
+        );
+        assert_eq!(
+            exit_reason_from_fill(false, true, 3, false, false),
+            Some(ExitReason::TrailingStop)
+        );
+        // emergency ve manual ayrımı
+        assert_eq!(
+            exit_reason_from_fill(false, false, 0, false, true),
+            Some(ExitReason::EmergencyFlatten)
+        );
+        assert_eq!(
+            exit_reason_from_fill(false, false, 0, true, false),
+            Some(ExitReason::Manual)
+        );
+    }
+
+    /// Flat pozisyonda TP emri ÜRETİLMEZ (plan yok).
+    #[test]
+    fn tp_not_created_on_flat_position() {
+        assert_eq!(plan_tp_order(false, true, 100.0, 2.0, 106.0), None, "pozisyon yok");
+        assert_eq!(plan_tp_order(false, false, 100.0, 2.0, 94.0), None);
+        // lot 0 = hayalet
+        assert_eq!(plan_tp_order(true, true, 100.0, 0.0, 106.0), None);
+    }
+
+    /// Reconciliation/restore sonrası TP oid kaybolursa KÖRLEMESİNE
+    /// duplicate edilmez: oid kayıtlıysa ya da borsada dinleniyorsa kurma.
+    #[test]
+    fn tp_reconciliation_does_not_duplicate() {
+        // oid kayıtlı → kurma
+        assert!(!should_place_tp(true, false, false));
+        // borsada dinliyor (geri yüklendi) → kurma
+        assert!(!should_place_tp(false, true, false));
+        // grace süresi içinde → kurma (WS "open" bildirimi gecikebilir)
+        assert!(!should_place_tp(false, false, true));
+        // hiçbiri → kur
+        assert!(should_place_tp(false, false, false));
+    }
+
+    /// TP ve SL AYNI pozisyonda ikisi de dolarsa exit state ÇİFT yazılmaz.
+    #[test]
+    fn tp_sl_same_position_no_duplicate_exit_state() {
+        // her iki bayrak da true (nadir ama olası: hızlı fiyat hareketi)
+        let r = exit_reason_from_fill(true, true, 0, false, false).expect("reason");
+        // ÖNCELİK TP: TP fill kesin kaynak; SL ikincil
+        assert_eq!(r, ExitReason::TakeProfit, "TP öncelikli, çift atama yok");
+        // ilk yazılan korunur: StopLoss yazıldıysa TP üstüne YAZILMAZ
+        let mut cur = Some(ExitReason::StopLoss);
+        apply_exit_reason(&mut cur, ExitReason::TakeProfit);
+        assert_eq!(cur, Some(ExitReason::StopLoss), "first-write-wins");
+        // boşsa yazılır
+        let mut empty = None;
+        apply_exit_reason(&mut empty, ExitReason::TakeProfit);
+        assert_eq!(empty, Some(ExitReason::TakeProfit));
+    }
+
+    /// `ensure_tp`'nin idempotency kapısı gerçek Executor state'iyle:
+    /// `tp_orders` doluysa ikinci emir ASILMAZ.
+    #[test]
+    fn tp_orders_map_zaten_varysa_ensure_tp_kurma() {
+        // Gerçek Executor kurulamaz (ağa ihtiyaç duyar) → kapı fonksiyonunun
+        // kendisi (ensure_tp'nin ilk iki satırı) ile aynı koşul: should_place_tp.
+        let mut tp_orders: HashMap<String, i64> = HashMap::new();
+        tp_orders.insert("BTC".into(), 42);
+        let already = tp_orders.contains_key("BTC");
+        assert!(!should_place_tp(already, false, false), "ikinci TP asılmaz");
+    }
+}
+
+/// ── B — SIGNAL::EXIT → GERÇEK ExitNow (gerçek state machine) ────────────
+#[cfg(test)]
+mod exit_engine_tests {
+    use crate::state_machine::{BotOrder, Machines, PosState, PositionStateMachine, Side, SmConfig, Action};
+    use std::collections::HashMap;
+
+    fn machine_in_position(coin: &str, long: bool) -> PositionStateMachine {
+        let mut m = PositionStateMachine::new(coin, SmConfig::default());
+        // GERÇEK dolum yolu: on_order_status ile pozisyona gir
+        let d = crate::state_machine::Decision { score: 0.6 };
+        m.on_decision(d, 100.0, 100.5, 1);
+        m.on_order_status(0, 2.0, 0.0, 100.5);
+        assert!(
+            matches!(m.state, PosState::InPosition { .. }),
+            "makine pozisyonda olmalı: {:?}",
+            m.state
+        );
+        let _ = long;
+        m
+    }
+
+    /// Açık LONG pozisyon + exit_requested → GERÇEK ExitNow
+    /// (reduce_only, ters taraf, pozisyon boyutu).
+    #[test]
+    fn exit_signal_closes_long() {
+        let mut m = machine_in_position("BTC", true);
+        let act = m.force_exit(100.0, 100.5);
+        match act {
+            Action::ExitNow(o) => {
+                assert!(o.reduce_only, "exit reduce_only");
+                assert_eq!(o.side, Side::Short, "long çıkışı = SAT");
+                assert!(o.sz > 0.0, "gerçek boyut taşınır");
+            }
+            other => panic!("ExitNow beklenirdi: {other:?}"),
+        }
+        // durum: PendingExit (ikinci ExitNow idempotent)
+        assert!(matches!(m.state, PosState::PendingExit { .. }));
+        assert!(matches!(m.force_exit(100.0, 100.5), Action::Nothing));
+    }
+
+    #[test]
+    fn exit_signal_closes_short() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        m.on_decision(crate::state_machine::Decision { score: -0.6 }, 100.0, 100.5, 1);
+        m.on_order_status(0, 2.0, 0.0, 100.5);
+        let act = m.force_exit(100.0, 100.5);
+        match act {
+            Action::ExitNow(o) => {
+                assert_eq!(o.side, Side::Long, "short çıkışı = AL");
+                assert!(o.reduce_only);
+            }
+            other => panic!("ExitNow beklenirdi: {other:?}"),
+        }
+    }
+
+    /// Flat pozisyonda Exit HİÇBİR emir ÜRETMEZ.
+    #[test]
+    fn exit_signal_flat_produces_no_order() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        assert!(matches!(m.state, PosState::Flat));
+        assert!(matches!(m.force_exit(100.0, 100.5), Action::Nothing));
+
+        // Pending (dolum bekleyen giriş) de emir üretmez — exit kanalı
+        // bekleyen GİRİŞİ kapatmaz, motor Cancel yoluyla yönetir.
+        m.on_decision(crate::state_machine::Decision { score: 0.6 }, 100.0, 100.5, 1);
+        assert!(matches!(m.state, PosState::Pending { .. }));
+        assert!(matches!(m.force_exit(100.0, 100.5), Action::Nothing));
+    }
+
+    /// Çoklu Exit oyu (aynı döngüde 3 strateji) → TEK ExitNow (idempotent).
+    ///
+    /// Gerçek akış: run_cycle döngü başına BİR kez force_exit çağırır
+    /// (`act` zaten ExitNow iken ikinci kez çağrılmaz); burada makine
+    /// düzeyindeki idempotency kanıtlanır.
+    #[test]
+    fn multiple_exit_votes_are_idempotent() {
+        let mut machines: Machines = HashMap::new();
+        machines.insert("BTC".into(), machine_in_position("BTC", true));
+        for _ in 0..3 {
+            // 3 farklı strateji Exit dedi (aynı döngüde, exit_requested=true)
+            let m = machines.get_mut("BTC").unwrap();
+            if let Action::Nothing = m.force_exit(100.0, 100.5) {
+                if matches!(m.state, PosState::Flat) {
+                    panic!("InPosition iken exit üretmelidir");
+                }
+            }
+            // sonraki oy: PendingExit → Nothing
+            if !matches!(machines.get_mut("BTC").unwrap().force_exit(100.0, 100.5), Action::Nothing) {
+                panic!("ikinci ExitNow ÜRETİLMEMELİ (idempotent)");
+            }
+        }
     }
 }

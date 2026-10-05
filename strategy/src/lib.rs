@@ -66,6 +66,12 @@ pub struct MarketInput {
     pub inventory_usd: f64,
     /// yürütülecek parent emir büyüklüğü (USD) — s06
     pub order_size_usd: f64,
+    /// **PORTFÖY win-rate** — tracker'ın TOPLAM canlı kanıtından (engine
+    /// doldurur). `None` = kanıt yok. Kelly sizing bunun dışındaki hiçbir
+    /// kaynaktan win-rate ALMAZ (sabit %45 yasağı).
+    pub portfolio_win_rate: Option<f64>,
+    /// **PORTFÖY k/z oranı** (ortalama kâr R / ortalama zarar |R|) — `None` = kanıt yok.
+    pub portfolio_wl_ratio: Option<f64>,
 }
 
 impl Default for MarketInput {
@@ -84,6 +90,8 @@ impl Default for MarketInput {
             equity: 0.0,
             inventory_usd: 0.0,
             order_size_usd: 0.0,
+            portfolio_win_rate: None,
+            portfolio_wl_ratio: None,
         }
     }
 }
@@ -104,6 +112,43 @@ pub trait Strategy: Send + Sync {
     fn name(&self) -> &'static str;
     /// Hangi dokümanı uyguladığı
     fn evaluate(&self, input: &MarketInput) -> Signal;
+
+    /// Sistem raporu için durum (sistem raporu `ACTIVE / AUXILIARY /
+    /// DATA-MISSING` ayrımı yapabilmeli).
+    ///
+    /// Varsayılan: girdisi tam gelen yönlü strateji (`ACTIVE`).
+    /// Geçersiz kılanlar (kendisini en iyi bilen stratejinin kendisidir):
+    /// - `Kelly Sizing`, `Market Making`, `Optimal Execution` → `AUXILIARY`
+    ///   (yön üretmez / parent-emir planı, gerçek parayla giriş sinyali DEĞİL),
+    /// - `Vol Arbitraj (VRP)` → IV feed yoksa `DATA-MISSING` (SAHTE IV ÜRETMEZ).
+    fn status(&self, input: &MarketInput) -> StratStatus {
+        let _ = input;
+        StratStatus::Active
+    }
+}
+
+/// Stratejinin bu döngüdeki **rapor durumu** (sessiz ölü strateji yasağı):
+///
+/// | Durum | Anlamı |
+/// |-------|--------|
+/// | `Active`      | girdisi tam, yönlü sinyal üretebilir |
+/// | `Auxiliary`   | giriş stratejisi DEĞİL (boyut/kote/plan önerisi) |
+/// | `DataMissing` | girdisi bağlı değil → `Skip` (SAHTE veri üretmez) |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StratStatus {
+    Active,
+    Auxiliary,
+    DataMissing,
+}
+
+impl StratStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            StratStatus::Active => "ACTIVE",
+            StratStatus::Auxiliary => "AUXILIARY",
+            StratStatus::DataMissing => "DATA-MISSING",
+        }
+    }
 }
 
 /// 00-strateji-katalogu.md — tüm stratejilerin kayıt defteri
