@@ -1,22 +1,18 @@
-//! # strategy
+//! STRATEGY — sinyal sözleşmesi ve 18-strateji registry.
 //!
-//! Sinyal üretim katmanı: 19 canlı strateji + kayıt defteri (registry).
-//!
-//! MİMARİ KURAL: stratejiler pozisyon AÇMAZ, SİNYAL üretir. Her strateji
-//! `MarketInput` snapshot'ını alır, `Signal` döndürür:
-//!   Long/Short { strength: -1..1 } — yön + kayıtsız güç
-//!   Hold { note } — sinyal yok, karar gerekçesi notta
-//!   Exit { note } — pozisyon kapatma/değişim önerisi
-//!   Skip { reason } — veri yetersizliği (SAHTE sinyal üretmek yasak)
-//! Emir dönüştürme Executor + RiskManager kapısından geçer; burada yok.
-//!
-//! VERİ AKIŞI: snapshot şunları taşır — 1h mumlar (kronolojik), canlı bağlam
-//! (funding/OI/mark: data::MarketCtx), OI değişimi, taker buy oranı, defter
-//! dengesi + en iyi bid/ask, evren geneli 1g getiri sıralaması, opsiyonel
-//! harici IV, equity, mevcut envanter ve parent emir boyutu.
-//!
-//! `registry()`: tüm stratejileri döner; 19 strateji + 1 meta (sistem
-//! testi) + 1 proxy (değer yatırım).
+//! Sözleşme:
+//! 1. `Strategy::evaluate(&MarketInput) -> Signal` — SAFTIR: pozisyon
+//!    açamaz, ağ erişemez; panik motorca izole edilir (Skip).
+//! 2. `Signal`: Long/Short { strength ∈ [0,1] } / Hold / Exit (kapanış
+//!    önerisi — engine exit kanalına gider) / Skip (veri yok — SAHTE
+//!    sinyal üretilmez; `unwrap_or(0.5)` fallback'leri yasak).
+//! 3. `Strategy::status(input)`: ACTIVE / AUXILIARY (yönsüz yardımcı:
+//!    Kelly/MM/OptExec) / DATA-MISSING (VRP IV'süz) — sessiz ölü
+//!    strateji raporlanmak zorunda.
+//! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
+//!    (funding/OI/taker/imbalance/universe_returns).
+//! 5. `registry()`: 18 strateji; `strat_test_helpers` yalnız-test
+//!    deterministik mum üreteci.
 pub mod wyckoff;
 pub mod kesit_momentum;
 pub mod lob_emir_akisi;
@@ -66,6 +62,12 @@ pub struct MarketInput {
     pub inventory_usd: f64,
     /// yürütülecek parent emir büyüklüğü (USD) — s06
     pub order_size_usd: f64,
+    /// **PORTFÖY win-rate** — tracker'ın TOPLAM canlı kanıtından (engine
+    /// doldurur). `None` = kanıt yok. Kelly sizing bunun dışındaki hiçbir
+    /// kaynaktan win-rate ALMAZ (sabit %45 yasağı).
+    pub portfolio_win_rate: Option<f64>,
+    /// **PORTFÖY k/z oranı** (ortalama kâr R / ortalama zarar |R|) — `None` = kanıt yok.
+    pub portfolio_wl_ratio: Option<f64>,
 }
 
 impl Default for MarketInput {
@@ -84,6 +86,8 @@ impl Default for MarketInput {
             equity: 0.0,
             inventory_usd: 0.0,
             order_size_usd: 0.0,
+            portfolio_win_rate: None,
+            portfolio_wl_ratio: None,
         }
     }
 }
@@ -104,6 +108,43 @@ pub trait Strategy: Send + Sync {
     fn name(&self) -> &'static str;
     /// Hangi dokümanı uyguladığı
     fn evaluate(&self, input: &MarketInput) -> Signal;
+
+    /// Sistem raporu için durum (sistem raporu `ACTIVE / AUXILIARY /
+    /// DATA-MISSING` ayrımı yapabilmeli).
+    ///
+    /// Varsayılan: girdisi tam gelen yönlü strateji (`ACTIVE`).
+    /// Geçersiz kılanlar (kendisini en iyi bilen stratejinin kendisidir):
+    /// - `Kelly Sizing`, `Market Making`, `Optimal Execution` → `AUXILIARY`
+    ///   (yön üretmez / parent-emir planı, gerçek parayla giriş sinyali DEĞİL),
+    /// - `Vol Arbitraj (VRP)` → IV feed yoksa `DATA-MISSING` (SAHTE IV ÜRETMEZ).
+    fn status(&self, input: &MarketInput) -> StratStatus {
+        let _ = input;
+        StratStatus::Active
+    }
+}
+
+/// Stratejinin bu döngüdeki **rapor durumu** (sessiz ölü strateji yasağı):
+///
+/// | Durum | Anlamı |
+/// |-------|--------|
+/// | `Active`      | girdisi tam, yönlü sinyal üretebilir |
+/// | `Auxiliary`   | giriş stratejisi DEĞİL (boyut/kote/plan önerisi) |
+/// | `DataMissing` | girdisi bağlı değil → `Skip` (SAHTE veri üretmez) |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StratStatus {
+    Active,
+    Auxiliary,
+    DataMissing,
+}
+
+impl StratStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            StratStatus::Active => "ACTIVE",
+            StratStatus::Auxiliary => "AUXILIARY",
+            StratStatus::DataMissing => "DATA-MISSING",
+        }
+    }
 }
 
 /// 00-strateji-katalogu.md — tüm stratejilerin kayıt defteri
@@ -152,3 +193,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
 pub const STRATEGY_COUNT: usize = 18;
+
+#[cfg(test)]
+#[path = "strat_test_helpers.rs"]
+pub mod strat_test_helpers;

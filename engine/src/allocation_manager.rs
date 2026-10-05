@@ -1,14 +1,15 @@
-//! SERMAYE TAHSİS MOTORU — "sinyal geldiyse gir" değil, "evreni tara,
-//! sırala, birbirine benzeyenleri ele, en iyi ve en ÇEŞİTLİ N coine gir,
-//! en güçlü olana en çok para ver".
+//! ALLOCATION MANAGER — sermaye tahsisi ve TEK maliyet modeli.
 //!
-//!wall Street portföy optimizasyonu katmanı:
-//!   1. İNANÇ SKORU (conviction):
-//!      oy yoğunluğu × dinamik-Kelly ağırlığı ÷ ATR risk marjı
-//!   2. KORELASYON FİLTRESİ (çeşitlendirme zorunluluğu):
-//!      seçilmiş adaylar arasındaki korelasyon > %70 ise aday düşer
-//!      (mega bahis denetimi — borsa çöküşü koruması)
-//!   3. TAHSİS: conviction-temelli oranlı tahsis (fractional Kelly dilimleri)
+//! Görevler:
+//! 1. `conviction`: ağırlık-payı × genişlik × güç / volatilite → aday
+//!    conviction'ı; `allocate`: min_conviction + korelasyon (>%70 LOOSE
+//!    üstü çakışan düşürülür) + keşif indirimi → `Candidate`.
+//! 2. `sl_tp`: SL = mid ± sl_atr_mult×ATR; TP `tp_from_entry` (P1-E TEK
+//!    formül: max((tp/sl)×risk, 2×risk), gerçek dolumdan).
+//! 3. `CostModel` (F): EV kapısı ile yürütme bandı TEK modelden —
+//!    `expected_slippage(spread) = base + 0.5×spread`,
+//!    `execution_cost = fee + slip + spread`, taban = max(EV_MIN_DIST, 3×rt).
+//! 4. MIN_NOTIONAL_USD=$10 altı tahsis → emir üretme.
 
 use std::collections::HashMap;
 
@@ -43,8 +44,15 @@ pub struct Candidate {
     pub allocated_usd: f64,
     /// katkı veren stratejiler (attribution)
     pub voters: Vec<String>,
-    /// ATR tabanlı SL/TP (mid'e göre; long: −sl/+tp)
+    /// ATR tabanlı SL (karar anı `mid`'e göre; long: −, short: +).
     pub sl_px: f64,
+    /// **PLANLANAN** TP hedefi — tahsis anındaki karar `mid`'ine göre
+    /// (`tp_from_entry(mid, risk)`). Otoriter analytical hedef DEĞİL: gerçek
+    /// dolum sonrası `EntryAttr::tp_px` üzerinden **yeniden türetilir**
+    /// (`Engine::apply_real_fill` → `EntryAttr::set_analytical_tp`).
+    ///
+    /// ⚠️ Bugün TP bir kapanış kaynağı değil (analytical target); borsada TP
+    /// limit emri asılmaz, `exit_reason=TakeProfit` hiçbir yolda atanmaz.
     pub tp_px: f64,
     /// oy veren keşif stratejilerinin payı (0..1); >0 ise keşif riski sınırlıdır
     pub explorer_share: f64,
@@ -70,6 +78,46 @@ pub struct AllocationConfig {
     pub explore_cap_frac: f64,
     /// keşif oyununun conviction indirimi (karıştırıcılık cezası)
     pub explore_discount: f64,
+    /// F — TEK MALİYET MODELİ (EV + yürütme bandı ortak)
+    pub cost: CostModel,
+}
+
+impl AllocationConfig {
+    /// **TEK TP FORMÜLÜ** — her yer bu çağırır (P1-E).
+    ///
+    /// ```text
+    /// tp_dist  = (tp_atr_mult / sl_atr_mult) × risk_mesafesi
+    /// tp_dist  = max(tp_dist, 2 × risk_mesafesi)   // yan kapı
+    /// TP(LONG) = entry_eff + tp_dist
+    /// TP(SHORT)= entry_eff - tp_dist
+    /// ```
+    ///
+    /// - `entry_eff` = **gerçek dolum** fiyatı (REST `entryPx`), karar anı
+    ///   defter fiyatı DEĞİL. Kayma TP'yi de kaydırır → TP daima dolumun
+    ///   kâr tarafında kalır.
+    /// - `risk_mesafesi` = |entry_eff − gerçek SL| = `EntryAttr::risk_px`
+    ///   (stop mesafesi entry'ye göre taşınır, bu yüzden kayma riski değiştirmez).
+    /// - Yan kapı: `tp_dist ≥ 2 × risk_mesafesi`. R:R oranı 1'den küçükse bile
+    ///   TP asla girişin arkasına (zarar tarafına) düşmez.
+    ///
+    /// ✅ `TakeProfit` **GERÇEK kapanış kaynağıdır** (P1-H): giriş dolumunda
+    /// `pending_tp` mesafesiyle reduce-only TP trigger borsaya asılır
+    /// (`Executor::ensure_tp`), TP fill oid eşleşmesiyle
+    /// `exit_reason=TakeProfit` atanır. Bu formül hem plan hem gerçek emrin
+    /// TEK kaynağıdır.
+    pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+        let risk = risk_mesafesi.abs();
+        if !(entry_eff > 0.0) || !(risk > 0.0) {
+            return entry_eff;
+        }
+        let min_tp_dist = risk * 2.0;
+        let tp_dist = ((self.tp_atr_mult / self.sl_atr_mult) * risk).max(min_tp_dist);
+        match dir {
+            Dir::Long => entry_eff + tp_dist,
+            Dir::Short => entry_eff - tp_dist,
+            Dir::Neutral => entry_eff,
+        }
+    }
 }
 
 impl Default for AllocationConfig {
@@ -90,6 +138,7 @@ impl Default for AllocationConfig {
             explore_max_usd: 150.0,
             explore_cap_frac: 0.05,
             explore_discount: 0.7,
+            cost: CostModel::from_env(),
         }
     }
 }
@@ -139,37 +188,28 @@ impl AllocationManager {
         (share * breadth * strength / risk).clamp(0.0, 1.0)
     }
 
-    /// SL/TP fiyatları: long → mid−slA·ATR / mid+tpA·ATR (ayna short)
-    /// NOT: TP mutlak hesaplanıyor (tahsis anındaki mid'e göre).
-    /// Gerçek TP hedefi (analytical) pozisyon açıldığında `tp_from_entry()`
-    /// ile `entry_eff ± tp_atr_mult × risk_mesafesi` olarak türetilir.
+    /// SL fiyatı: long → mid−slA·ATR / short → mid+slA·ATR.
+    ///
+    /// TP **ayrı formülle hesaplanmaz**; `tp_from_entry()` çağrılır, yani
+    /// tahsis anındaki `mid` üzerinden **planlanan** (henüz dolum olmamış)
+    /// hedef verilir. Gerçek dolum sonrası TP yeniden türetilir
+    /// (`EntryAttr::set_analytical_tp`). `sl_atr_mult·ATR` risk mesafesi
+    /// verildiği için iki yol **matematiksel olarak aynı** sonucu üretir —
+    /// fark yalnız `entry` kaymasında görünür, ki o zaten ikinci yolda
+    /// düzeltilir.
     pub fn sl_tp(&self, dir: Dir, mid: f64, atr_usd: f64) -> (f64, f64) {
-        match dir {
-            Dir::Long => (
-                mid - self.cfg.sl_atr_mult * atr_usd,
-                mid + self.cfg.tp_atr_mult * atr_usd,
-            ),
-            Dir::Short => (
-                mid + self.cfg.sl_atr_mult * atr_usd,
-                mid - self.cfg.tp_atr_mult * atr_usd,
-            ),
-            Dir::Neutral => (mid, mid),
-        }
+        let risk = self.cfg.sl_atr_mult * atr_usd;
+        let sl = match dir {
+            Dir::Long => mid - risk,
+            Dir::Short => mid + risk,
+            Dir::Neutral => mid,
+        };
+        (sl, self.tp_from_entry(dir, mid, risk))
     }
 
-    /// Gerçek TP hedefi: entry_eff ± tp_atr_mult × risk_mesafesi.
-    /// `entry_eff` = gerçek dolum fiyatı (REST entryPx düzeltmesi).
-    /// `risk_mesafesi` = |entry_eff - SL| = `entry_attr.risk_px`.
-    /// Yan kapısı: TP daima dolumun kâr tarafında; min TP mesafesi = 2 × min_risk_dist.
+    /// Gerçek TP hedefi: `AllocationConfig::tp_from_entry` (tek formül).
     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
-        let min_tp_dist = risk_mesafesi * 2.0;
-        let tp_dist = (self.cfg.tp_atr_mult / self.cfg.sl_atr_mult) * risk_mesafesi;
-        let tp_dist = tp_dist.max(min_tp_dist);
-        match dir {
-            Dir::Long => entry_eff + tp_dist,
-            Dir::Short => entry_eff - tp_dist,
-            Dir::Neutral => entry_eff,
-        }
+        self.cfg.tp_from_entry(dir, entry_eff, risk_mesafesi)
     }
 
     /// TAM KANAT: sırala → korelasyonla ele → tahsis.
@@ -617,36 +657,97 @@ mod tests {
 // volatilite = yüksek likidite + düşük spread = aslında en iyi coinler; ama
 // 1.5×ATR orada %0.25'e düşüyor. Doğru yanıt pozisyon almamak.
 
-/// Round-trip maliyet (bps): 2 × (taker fee + slippage).
+/// ── F — TEK MALİYET MODELİ ─────────────────────────────────────────────
+/// EV kapısı ve yürütme fiyat bandı **aynı** modelden beslenir; ikinci bir
+/// maliyet gerçekliği (koddaki ±%0.5 ad-hoc bandı gibi) yasaktır.
+///
+/// ```text
+/// expected_slippage(spread) = base_slip + 0.5 × spread      (IOC yarı-spread öder)
+/// execution_cost(spread)    = fee + expected_slippage + spread
+/// round_trip(spread)        = 2 × execution_cost
+/// EV tabanı                 = max(ev_min_dist, 3 × round_trip)
+/// yürütme bandı             = max(execution_cost, BAND_FLOOR=50 bps)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CostModel {
+    /// taker fee (bps) — Hyperliquid taker %0.045 = 4.5 bps
+    pub fee_bps: f64,
+    /// taban slippage (bps) — ölçülen: ince testnet defteri ~5 bps
+    pub base_slip_bps: f64,
+    /// EV tabanı (bps)
+    pub ev_min_dist_bps: f64,
+}
+
+/// Yürütme fiyat bandının operasyonel tabanı (bps): ince testnet defterinde
+/// model maliyeti bu değerden KÜÇÜKSE bile IOC "could not immediately match"
+/// ile reddediliyordu (ölçülen). Model maliyeti daha büyükse band modelden gelir.
+pub const EXECUTION_BAND_FLOOR_BPS: f64 = 50.0;
+
+impl Default for CostModel {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}
+
+impl CostModel {
+    pub fn from_env() -> Self {
+        Self {
+            fee_bps: env_f64("EV_TAKER_FEE_BPS", DEFAULT_TAKER_FEE_BPS),
+            base_slip_bps: env_f64("EV_SLIPPAGE_BPS", DEFAULT_SLIPPAGE_BPS),
+            ev_min_dist_bps: env_f64("EV_MIN_DIST_BPS", 75.0),
+        }
+    }
+
+    /// Testler için deterministik kurucu (ENV'e bakmaz).
+    pub fn new(fee_bps: f64, base_slip_bps: f64, ev_min_dist_bps: f64) -> Self {
+        Self { fee_bps, base_slip_bps, ev_min_dist_bps }
+    }
+
+    /// **BEKLENEN KAYMA** — IOC emri dinlenen defterin yarım spread'ini de
+    /// öder. `spread_bps` ≤ 0 (defter yok) → taban kayma.
+    pub fn expected_slippage_bps(&self, spread_bps: f64) -> f64 {
+        self.base_slip_bps + 0.5 * spread_bps.max(0.0)
+    }
+
+    /// **TEK YÖN maliyet** (bps): fee + beklenen kayma + spread.
+    pub fn execution_cost_bps(&self, spread_bps: f64) -> f64 {
+        self.fee_bps + self.expected_slippage_bps(spread_bps) + spread_bps.max(0.0)
+    }
+
+    /// Round-trip maliyet (bps): 2 × tek yön.
+    pub fn round_trip_cost_bps(&self, spread_bps: f64) -> f64 {
+        2.0 * self.execution_cost_bps(spread_bps)
+    }
+
+    /// Asgari risk mesafesi (bps): `max(EV_MIN_DIST, 3 × round_trip)`.
+    pub fn min_risk_dist_bps(&self, spread_bps: f64) -> f64 {
+        self.ev_min_dist_bps.max(3.0 * self.round_trip_cost_bps(spread_bps))
+    }
+
+    /// EV kapısı: `sl_mult × ATR_bps < taban` → SKIP.
+    ///
+    /// `atr_pct` = ATR/mid (ondalık). Dönüş: (geçti, risk_bps, taban_bps).
+    pub fn ev_ok(&self, atr_pct: f64, sl_mult: f64, spread_bps: f64) -> (bool, f64, f64) {
+        let atr_bps = atr_pct * 10_000.0;
+        let risk_bps = sl_mult * atr_bps;
+        let floor = self.min_risk_dist_bps(spread_bps);
+        (risk_bps >= floor, risk_bps, floor)
+    }
+
+    /// **YÜRÜTME FİYAT BANDI** (bps, tek yön) — EV ile AYNI model:
+    /// IOC limit fiyatı = referans × (1 ± band/1e4). Model maliyeti
+    /// `EXECUTION_BAND_FLOOR_BPS` altındaysa operasyonel taban uygulanır
+    /// (ince testnet defterinde model maliyetinin altına band daraltmak,
+    /// dolum kaçışı üretirdi — ölçüldü).
+    pub fn execution_band_bps(&self, spread_bps: f64) -> f64 {
+        self.execution_cost_bps(spread_bps).max(EXECUTION_BAND_FLOOR_BPS)
+    }
+}
+
 /// Varsayılanlar **ölçülen** değerler: Hyperliquid taker 4.5 bps, ince
 /// testnet defterinde gözlenen slippage ~5.0 bps.
 pub const DEFAULT_TAKER_FEE_BPS: f64 = 4.5;
 pub const DEFAULT_SLIPPAGE_BPS: f64 = 5.0;
-
-pub fn round_trip_cost_bps() -> f64 {
-    let fee = env_f64("EV_TAKER_FEE_BPS", DEFAULT_TAKER_FEE_BPS);
-    let slip = env_f64("EV_SLIPPAGE_BPS", DEFAULT_SLIPPAGE_BPS);
-    2.0 * (fee + slip)
-}
-
-/// Asgari risk mesafesi (bps): `max(EV_MIN_DIST_BPS, 3 × round_trip)`
-pub fn min_risk_dist_bps() -> f64 {
-    let floor = env_f64("EV_MIN_DIST_BPS", 75.0);
-    floor.max(3.0 * round_trip_cost_bps())
-}
-
-/// EV kapısı: `1.5 × ATR_bps < min_risk_dist_bps` → SKIP
-///
-/// `atr_pct` = ATR/mid (ondalık). `sl_mult` = stop mesafesi çarpanı (1.5).
-#[allow(clippy::too_many_arguments)]
-pub fn ev_ok(atr_pct: f64, sl_mult: f64, spread_bps: f64) -> (bool, f64, f64) {
-    let atr_bps = atr_pct * 10_000.0;
-    let risk_bps = sl_mult * atr_bps;
-    // Opsiyonel: spread tabanı (defter inceyse spread yüksek, gerçek maliyet
-    // daha fazla). `max(floor, 3×round_trip, spread×3)`.
-    let floor = min_risk_dist_bps().max(spread_bps * 3.0);
-    (risk_bps >= floor, risk_bps, floor)
-}
 
 fn env_f64(k: &str, d: f64) -> f64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
@@ -656,12 +757,17 @@ fn env_f64(k: &str, d: f64) -> f64 {
 mod ev_tests {
     use super::*;
 
+    /// F — deterministik model (ENV'e BAKMAZ; paralel test güvenli)
+    fn m() -> CostModel {
+        CostModel::new(4.5, 5.0, 75.0)
+    }
+
     #[test]
     fn dusuk_volatilite_skip_uretiyor() {
         // ÖLÇÜLEN: tüm kayıp örnekleri 1.5×ATR ≈ %0.25'te stop'landı.
         // Round-trip 19 bps → 25 bps stop = R 1.3 → 2:1'de başabaş WR %59.
         let atr_pct = 0.0025 / 1.5; // ATR = %0.1667 → 1.5×ATR = %0.25
-        let (ok, risk_bps, floor) = ev_ok(atr_pct, 1.5, 0.0);
+        let (ok, risk_bps, floor) = m().ev_ok(atr_pct, 1.5, 0.0);
         assert!(!ok, "maliyet tabanı altında → SKIP");
         assert!((risk_bps - 25.0).abs() < 1e-6, "risk {} bps", risk_bps);
         assert!((floor - 75.0).abs() < 1e-6, "taban max(75, 3×19=57) = 75 bps");
@@ -670,30 +776,69 @@ mod ev_tests {
     #[test]
     fn yuksek_volatilite_gecer() {
         // ATR %1.5 → 1.5×ATR = %2.25 = 225 bps > 75 → işlem alınır
-        let (ok, risk_bps, _) = ev_ok(0.015, 1.5, 0.0);
+        let (ok, risk_bps, _) = m().ev_ok(0.015, 1.5, 0.0);
         assert!(ok, "225 bps > 75 bps → geçmeli");
         assert!((risk_bps - 225.0).abs() < 1e-6);
     }
 
     #[test]
     fn taban_maliyetin_ucun_kati() {
-        // 3× round-trip = 57 < 75 → taban 75. Maliyet 30 bps olsaydı
-        // (3×30=90 > 75) taban 90 olurdu. Yani **maliyet arttıkça taban artar**.
-        assert!((round_trip_cost_bps() - 19.0).abs() < 1e-9, "2×(4.5+5.0)");
-        assert!((min_risk_dist_bps() - 75.0).abs() < 1e-9);
+        // spread=0 → taban slippage 5 bps → tek yön 9.5 → rt 19 (eski ile AYNI)
+        assert!((m().round_trip_cost_bps(0.0) - 19.0).abs() < 1e-9, "2×(4.5+5.0)");
+        assert!((m().min_risk_dist_bps(0.0) - 75.0).abs() < 1e-9);
     }
 
     #[test]
-    fn spread_yarisi_ek_floor_ekleyebilir() {
-        // ince defter: spread 30 bps → 3×30 = 90 > 75 → taban 90
-        let (ok, risk_bps, floor) = ev_ok(0.0025 / 1.5, 1.5, 30.0);
-        assert!((floor - 90.0).abs() < 1e-6, "floor {floor}");
+    fn spread_tek_modelden_floor_buyur() {
+        // F: spread ARTIK maliyetin İÇİNDE (iki model yok):
+        // slip = 5 + 0.5×30 = 20 → tek yön = 4.5+20+30 = 54.5 → rt = 109
+        let cm = m();
+        assert!((cm.expected_slippage_bps(30.0) - 20.0).abs() < 1e-9);
+        assert!((cm.execution_cost_bps(30.0) - 54.5).abs() < 1e-9);
+        assert!((cm.round_trip_cost_bps(30.0) - 109.0).abs() < 1e-9);
+        let (ok, _, floor) = cm.ev_ok(0.0025 / 1.5, 1.5, 30.0);
+        assert!((floor - 327.0).abs() < 1e-6, "floor = 3×109 = {floor}");
         assert!(!ok);
-        // spread 100 bps → taban 300 bps; 1.5×ATR %2.25 (225) < 300 → SKIP
-        let (ok2, r2, f2) = ev_ok(0.015, 1.5, 100.0);
-        assert!((f2 - 300.0).abs() < 1e-6);
+        // geniş spread yüksek vol'da bile işlemi kestirebilir:
+        // rt = 2×(4.5+105+200) = 619 → taban 1857 → 225 bps yetmez
+        let (ok2, r2, f2) = cm.ev_ok(0.015, 1.5, 200.0);
+        assert!((f2 - 1857.0).abs() < 1e-6, "floor {f2}");
         assert!((r2 - 225.0).abs() < 1e-6);
         assert!(!ok2, "yayılma maliyeti yüzünden 225 bps yetmez");
+    }
+
+    /// F — EV ile yürütme bandı AYNI modelden: band = max(cost, 50 bps)
+    #[test]
+    fn ev_and_execution_use_same_cost_model() {
+        let cm = m();
+        // dar defter: operasyonel taban devrede
+        assert!((cm.execution_band_bps(0.0) - 50.0).abs() < 1e-9);
+        // geniş defter: band = model çıktısının BİREBİRİ (ikinci model yok)
+        assert!((cm.execution_band_bps(300.0) - cm.execution_cost_bps(300.0)).abs() < 1e-9);
+        assert!((cm.execution_band_bps(300.0) - 459.5).abs() < 1e-9, "4.5+155+300");
+        // monotonluk: spread arttıkça hem taban hem band artar
+        assert!(cm.execution_band_bps(10.0) <= cm.execution_band_bps(100.0));
+        assert!(cm.min_risk_dist_bps(10.0) <= cm.min_risk_dist_bps(100.0));
+        // beklenen kayma spread'siz tabana döner
+        assert!((cm.expected_slippage_bps(-5.0) - 5.0).abs() < 1e-9);
+    }
+
+    /// F — yüksek beklenen kayma EV kapısını KESTİRMELİ
+    #[test]
+    fn high_expected_slippage_skips_trade() {
+        let cm = CostModel::new(4.5, 60.0, 75.0); // kayma tabanı 60 bps
+        // rt = 2×(4.5+60) = 129 → taban = 387 → 225 bps risk yetmez
+        let (ok, _, floor) = cm.ev_ok(0.015, 1.5, 0.0);
+        assert!((floor - 387.0).abs() < 1e-6);
+        assert!(!ok, "yüksek kayma → SKIP");
+    }
+
+    /// F — yüksek spread işlemi kestirmeli
+    #[test]
+    fn high_spread_skips_trade() {
+        let cm = m();
+        let (ok, _, _) = cm.ev_ok(0.015, 1.5, 200.0);
+        assert!(!ok, "spread 200 bps → taban 3×619 = 1857 → SKIP");
     }
 
     #[test]
@@ -719,7 +864,7 @@ mod ev_tests {
     fn ev_kapisi_clamp_degil_skip() {
         // Kanıt: kapı stop'u DARALTMAZ, işlemi hiç açmaz.
         // (clamp olsaydı 25 bps stop daha da yakınlaştırılır ve EV kötüleşirdi)
-        let (ok, risk_bps, floor) = ev_ok(0.001, 1.5, 0.0); // risk 15 bps
+        let (ok, risk_bps, floor) = m().ev_ok(0.001, 1.5, 0.0); // risk 15 bps
         assert!(!ok);
         assert!((risk_bps - 15.0).abs() < 1e-6, "ölçülen risk DEĞİŞMEDİ");
         assert!(risk_bps < floor, "sadece karşılaştırma yapıldı");

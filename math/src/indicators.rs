@@ -1,14 +1,11 @@
-//! Klasik indikatörler ve volatilite modelleri.
+//! INDICATORS — klasik göstergeler + volatilite modelleri (saf).
 //!
-//! KONVANSİYONLAR (Python referansıyla birebir, sıfıra yakın sapma):
-//! - EMA: alpha=2/(n+1), seed=ilk değer (adjust=False)
-//! - Wilder düzeltmesi (RSI/ATR/±DI/ADX): alpha=1/n, seed=ilk n değer SMA'sı
-//! - Pencere dolmadan None döner (NaN bölgesi)
-//! - RSI: 100 - 100/(1+RS); MACD: ema12-ema26, signal=ema9(macd)
-//! - Bollinger: sma ± k·std (popülasyon, ddof=0)
-//! Vol modelleri: realized (std·√ann), EWMA (RiskMetrics λ=0.94),
-//! Parkinson (hl2), Garman-Klass (hl2+co2), GARCH(1,1) recursion +
-//! varyans hedeflemeli deterministik fit. Yıllıklaştırma: 365×24 (kripto).
+//! Trend/ momentum: `sma, ema, rsi, macd, adx, obv, stochastic`;
+//! bantlar/kanallar: `bollinger, donchian, fib_levels`; fiyat: `atr,
+//! rolling_vwap, twap`; volatilite: `realized_vol, ewma_vol, parkinson,
+//! garman_klass, garch11_variance / garch11_fit` (deterministik fit),
+//! `annualization_factor`. Dönüşler `Option` taşır — yetersiz pencere
+//! None; stratejiler None'ı Skip'e çevirmek ZORUNDADIR (sahte yön yasağı).
 pub fn sma(data: &[f64], n: usize) -> Vec<Option<f64>> {
     let mut out = vec![None; data.len()];
     if n == 0 {

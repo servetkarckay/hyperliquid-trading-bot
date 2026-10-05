@@ -1,11 +1,10 @@
-//! Portföy matematiği ve performans metrikleri — strateji 11 (Kelly/risk)
-//! ve 12 (portföy teorisi).
+//! PORTFOLIO — performans metrikleri ve boyutlama (saf).
 //!
-//! simple_returns; Sharpe (excess mean/std ·√ann), Sortino (downside std),
-//! max_drawdown (peak-trough/peak), Calmar (CAGR/MDD), expectancy,
-//! Kelly binary (p-(1-p)/b) ve sürekli (μ/σ²).
-//! covariance_matrix (örneklem, ddof=1), correlation_matrix,
-//! min_variance_weights (w=Σ⁻¹1/1'Σ⁻¹1), portfolio_vol (√(w'Σw)).
+//! `sharpe, sortino, max_drawdown, calmar, expectancy`; Kelly:
+//! `kelly_binary (p − (1−p)/b), kelly_continuous (μ/σ²)`; kovaryans/
+//! korelasyon matrisleri + `min_variance_weights, portfolio_vol`.
+//! Boyut KANITLI veriden gelir — sabit win-rate ile sizing yasağı
+//! (RiskKelly bkz.).
 use crate::linalg;
 
 /// Basit getiriler

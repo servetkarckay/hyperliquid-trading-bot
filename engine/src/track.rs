@@ -1,34 +1,16 @@
-//! CANLI İSTATİSTİK İZLEYİCİ — dinamik Kelly geri beslemesi.
+//! TRACK — canlı öğrenme: R kaydı, etkin ağırlıklar, Kelly kanıtı, metrikler.
 //!
-//! AMAÇ: "son 1 yılda %60 idi ama son 20 işlemde %30'a düştü" durumunda
-//! sistem kendi kendini düzeltsin:
-//!   - her kapanan pozisyon → katkı veren stratejilere (win/loss) işlenir
-//!   - ROLLING WINDOW: son 100 işlem (eski kayıt: pencere dışına düşer)
-//!   - f* = p − (1−p)/b pencereden; b = 1.8 (win/loss payı, sabit başlangıç)
-//!   - win-rate <%35 → ensemble ağırlığı 0; f*>0 → pay
-//!
-//! Attribution: emir açılışında katkı veren stratejiler kaydedilir
-//! (allocation_manager::Vote.voters).
-//!
-//! # NÖTR COLD-START (P0-B)
-//!
-//! Backtest motoru **kaldırıldı** (look-ahead bias kaynağı — S19). Eğitim
-//! tamamen canlıya taşındı: 18 strateji **eşit ağırlıkla (w=1.0)** başlar ve
-//! gerçek dolumlarla tracker üzerinden yavaşça öğrenir.
-//!
-//! | pencere n | davranış |
-//! |---|---|
-//! | `n < LEARN_MIN_N` (10) | **w = 1.0 sabit** — 2-3 rastgele işlem ağırlığı öldürmesin |
-//! | `10 ≤ n < LEARN_FULL_N` (30) | dinamik formül, clamp `[0.1, 2.0]` |
-//! | `n ≥ LEARN_FULL_N` (30) | tam kurallar (`win < %35` → 0) |
-//!
-//! ENV: `LEARN_MIN_N`, `LEARN_FULL_N`.
-//!
-//! # VERİ TOPLAMA DÖNEMİ (A2) — trade_exits.jsonl
-//!
-//! Her işlem kapanışında append-only JSONL yazılır (config/trade_exits.jsonl).
-//! Şema: epoch, git_sha, coin, side, strategies, mfe_r, mae_r, dur_sn, ratchet,
-//! cikis, r_kapanis, atr_bps, k. Log rotasyonu/restart veriyi yok etmez.
+//! Görevler:
+//! 1. `StrategyTracker::record_outcome_r`: kapanan işlemin R-çarpanını
+//!    GERÇEK fill verisinden pencereye (TRACK_WINDOW=100) yazar.
+//! 2. `effective_weights`: n<min_n → donmuş 1.0 (cold-start); min_n..full_n
+//!    → dinamik Kelly formülü clamp [0.1,2.0]; n≥full_n → win<%35 → 0.
+//! 3. `PerformanceMetrics`: win_rate / pf / E[R] / avg±R / maxDD_R /
+//!    ardışık kayıp / MFE/MAE — uydurma sayı yok (kanıt yoksa None).
+//! 4. Persistence: `save_state/load_state` (atomik tmp+rename; origin="live"
+//!    doğrulaması — backtest çıkışı RED).
+//! 5. `Health`: hata taksonomisi (transient/kritik) + ExitsOnly kipi +
+//!    kill-switch (karar-kritik seri).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
@@ -143,35 +125,14 @@ pub const DEFAULT_LEARN_FULL_N: usize = 30;
 pub const WEIGHT_CLAMP_LO: f64 = 0.1;
 pub const WEIGHT_CLAMP_HI: f64 = 2.0;
 
-/// Bir stratejinin **canlı** öğrenme durumu (persistence ile diske yazılır).
-///
-/// Eski `TrainedInfo` backtestten gelen önseldi (`trades` = backtest işlem
-/// sayısı). Backtest kaldırıldığı için bu yapı yeniden tanımlandı: artık
-/// **yalnız canlı dolum** sayacı tutar ve nötr cold-start'tan başlar.
-///
-/// Provenans: `origin` = "live" (backtest çıkışı değil), `schema_version` = 1.
-/// Sürüm uyuşmazsa load_state WARN + nötr sıfırla. Sessiz yükleme yok.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct TrainedInfo {
-    /// pencere içi canlı işlem sayısı (n)
-    pub trades: u64,
-    /// toplam R (ΣR) — özet tabloda gösterilir
-    pub sum_r: f64,
-    /// son işlem zaman damgası (ms)
-    pub last_ts: u64,
-    /// köken işareti — backtestten gelirse "live" DEĞİL, yükleme reddedilir
-    pub origin: String,
-    /// şema sürümü — gelecekteki migrate için
-    pub schema_version: u32,
-}
-
-impl TrainedInfo {
-    /// KALDIRILDI: keşif sınıfı artık **isimle değil**, **veri açlığıyla**
-    /// (`n < LEARN_FULL_N`) belirlenir. Bkz. `StrategyTracker::explore_queue`.
-    pub fn is_explorer(&self) -> bool {
-        false
-    }
-}
+// KALDIRILDI (bu görev): `TrainedInfo` — `Engine.trained_weights` alanı
+// **hiç okunmuyordu** (ölü state): `load_live_weights()` canlı dosyanın
+// `weights: {name: number}` haritasını bu yapı gibi okumaya çalışıyor,
+// sonuç `trades=0 / sum_r=0` ve ensemble'a hiç girmiyordu. Yerine:
+//   • `Engine::live_weights: HashMap<String, f64>`  — kaydedilmiş canlı
+//     snapshot (asıl ağırlık)
+//   • `StrategyTracker`                            — canlı işlem KANITI
+// İkisi de `parse_live_weights` / `merge_effective_weights` ile ayrılır.
 
 /// Öğrenme politikası: `n` eşikleri (ENV `LEARN_MIN_N` / `LEARN_FULL_N`).
 #[derive(Debug, Clone, Copy)]
@@ -288,6 +249,86 @@ pub struct StrategyTracker {
     stats: HashMap<String, StratStats>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PerformanceMetrics {
+    pub trades: usize,
+    pub win_rate: Option<f64>,
+    pub profit_factor: Option<f64>,
+    pub expectancy_r: Option<f64>,
+    pub avg_win_r: Option<f64>,
+    pub avg_loss_r: Option<f64>,
+    pub max_drawdown_r: Option<f64>,
+    pub max_consecutive_losses: Option<usize>,
+    pub mfe_r: Option<f64>,
+    pub mae_r: Option<f64>,
+}
+
+impl PerformanceMetrics {
+    /// R dizisinden (GERÇEK fill kayıtları) metrikler.
+    ///
+    /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
+    /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
+    pub fn from_rs(rs: &[f64], mfe_r: Option<f64>, mae_r: Option<f64>) -> Self {
+        if rs.is_empty() {
+            return Self { trades: 0, mfe_r, mae_r, ..Default::default() };
+        }
+        let wins: Vec<f64> = rs.iter().copied().filter(|r| *r > 0.0).collect();
+        let losses: Vec<f64> = rs.iter().copied().filter(|r| *r < 0.0).collect();
+        let win_sum: f64 = wins.iter().sum();
+        let loss_sum: f64 = losses.iter().copied().map(|r| r.abs()).sum();
+
+        // max drawdown: kümülatif R eğrisi
+        let mut cum = 0.0f64;
+        let mut peak = 0.0f64;
+        let mut mdd = 0.0f64;
+        for r in rs {
+            cum += *r;
+            peak = peak.max(cum);
+            mdd = mdd.max(peak - cum);
+        }
+        // ardışık kayıp serisi
+        let mut streak = 0usize;
+        let mut worst = 0usize;
+        for r in rs {
+            if *r <= 0.0 {
+                streak += 1;
+                worst = worst.max(streak);
+            } else {
+                streak = 0;
+            }
+        }
+        Self {
+            trades: rs.len(),
+            win_rate: Some(wins.len() as f64 / rs.len() as f64),
+            profit_factor: Some(if loss_sum > 0.0 { win_sum / loss_sum } else if win_sum > 0.0 { 10.0 } else { 0.0 }),
+            expectancy_r: Some(rs.iter().sum::<f64>() / rs.len() as f64),
+            avg_win_r: if wins.is_empty() { None } else { Some(win_sum / wins.len() as f64) },
+            avg_loss_r: if losses.is_empty() { None } else { Some(-loss_sum / losses.len() as f64) },
+            max_drawdown_r: Some(mdd),
+            max_consecutive_losses: Some(worst),
+            mfe_r,
+            mae_r,
+        }
+    }
+
+    /// Rapor satırı — iddia değil ölçüm.
+    pub fn line(&self) -> String {
+        let f = |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
+        format!(
+            "trades={} win_rate={} pf={} E[R]={} avg_win_R={} avg_loss_R={} maxDD_R={} ardışık_kayıp={} MFE_R={} MAE_R={}",
+            self.trades,
+            f(self.win_rate, 3),
+            f(self.profit_factor, 2),
+            f(self.expectancy_r, 3),
+            f(self.avg_win_r, 2),
+            f(self.avg_loss_r, 2),
+            f(self.max_drawdown_r, 2),
+            self.max_consecutive_losses.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+            f(self.mfe_r, 2),
+            f(self.mae_r, 2),
+        )
+    }
+}
 impl StrategyTracker {
     pub fn record_outcomes(&mut self, strategy_names: Vec<String>, ts: u64, win: bool) {
         self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
@@ -298,6 +339,16 @@ impl StrategyTracker {
         for name in strategy_names {
             self.stats.entry(name).or_default().record_r(ts, r);
         }
+    }
+
+
+    /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
+    ///
+    /// `effective_weights`'in `pol.frozen(n)` kararıyla **aynı** girdiyi
+    /// verir; canlı ağırlık snapshot'ının hangi stratejilerde korunacağı
+    /// (tracker kanıtı varsa tracker kazanır) buradan belirlenir.
+    pub fn evidence_n(&self, name: &str) -> usize {
+        self.stats.get(name).map(|x| x.rs.len()).unwrap_or(0)
     }
 
     /// ETKİLİ AĞIRLIK — **nötr cold-start + canlı öğrenme** (P0-B).
@@ -409,6 +460,50 @@ impl StrategyTracker {
         }
         q.sort();
         q.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// I — stratejinin **ölçülebilir metrikleri** (gerçek fill R penceresi).
+    /// Kanıt yok → `trades=0` ve `None`'lar (uydurma sayı yok).
+    pub fn metrics(&self, name: &str) -> PerformanceMetrics {
+        let rs: Vec<f64> = self.stats.get(name).map(|x| x.rs.clone()).unwrap_or_default();
+        PerformanceMetrics::from_rs(&rs, None, None)
+    }
+
+    /// I — portföy geneli (tüm stratejilerin birleşik R penceresi).
+    pub fn portfolio_metrics(&self) -> PerformanceMetrics {
+        let mut all: Vec<(u64, f64)> = Vec::new();
+        for st in self.stats.values() {
+            for (i, r) in st.rs.iter().enumerate() {
+                let ts = st.outcomes.get(i).map(|(t, _)| *t).unwrap_or(0);
+                all.push((ts, *r));
+            }
+        }
+        all.sort_by_key(|(t, _)| *t);
+        let rs: Vec<f64> = all.into_iter().map(|(_, r)| r).collect();
+        PerformanceMetrics::from_rs(&rs, None, None)
+    }
+
+    /// **PORTFÖY win-rate + k/z oranı** — tracker'daki TÜM canlı kanıttan.
+    ///
+    /// Kelly sizing'in sabit %45 yerine GERÇEK veri kullanabilmesi için
+    /// (`RiskKelly` → `MarketInput::portfolio_*`). Kanıt yoksa `None`:
+    /// sabit varsayım DÖNDÜRMEZ — çağıran (strateji) `Skip` üretir.
+    pub fn portfolio_stats(&self) -> Option<(f64, f64)> {
+        let wins: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).count() as f64).sum();
+        let losses: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r < 0.0).count() as f64).sum();
+        let n = wins + losses;
+        if n <= 0.0 {
+            return None;
+        }
+        let win_r: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).sum::<f64>()).sum();
+        let loss_r: f64 = self
+            .stats
+            .values()
+            .map(|x| x.rs.iter().filter(|r| **r < 0.0).sum::<f64>())
+            .sum::<f64>()
+            .abs();
+        let wl = if loss_r > 0.0 { (win_r / wins.max(1.0)) / (loss_r / losses.max(1.0)) } else { 0.0 };
+        Some((wins / n, wl))
     }
 
     /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.

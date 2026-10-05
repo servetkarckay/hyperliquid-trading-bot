@@ -1,11 +1,8 @@
-//! İstatistik testleri — strateji 02 (mean reversion), 10 (rejim).
+//! STATS — istatistik testleri (saf).
 //!
-//! z_score / zscore_last: spread sinyali (mean reversion girişi).
-//! ADF birim kök testi: Δy=α+βy_{t-1} regresyonunda β'nın t-istatistiği;
-//! MacKinnon kritik değerleri %1/%5/%10 (-3.43/-2.86/-2.57); t < kritik
-//! -> durağan (mean reversion uygun).
-//! ou_half_life: Δs=α+βs regresyonundan -ln2/β (pozisyon tutma süresi).
-//! hurst: R/S analizi; H<0.5 mean-revert, H>0.5 trend (rejim seçimi).
+//! `z_score, zscore_last`; `adf_tstat / adf_is_stationary` (kritik
+//! değerler sabit tablodan); `ou_half_life` (Ornstein-Uhlenbeck);
+//! `hurst` (R/S göznümü). None-safe: yetersiz pencere → None.
 use crate::linalg;
 
 /// Z-score: (x - mean) / std (ddof=1)

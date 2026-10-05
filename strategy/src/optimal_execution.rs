@@ -1,16 +1,11 @@
-//! OPTİMAL YÜRÜTME — parent emir parçalama planı.
+//! OPTIMAL EXECUTION — parent emir parçalama planı (AUXILIARY).
 //!
-//! AMAÇ: piyasa etkisi ile zamanlama arasındaki denge.
-//! KURALLAR:
-//!   - "vol yüksekse hızlı yürüt, emir büyükse yavaş yürüt"
-//!   - parça boyutu defter ilk seviye derinliğine bağlı
-//!   - U-şekilli trajectory: başta/sonda hızlı, ortada yavaş
-//! HESAPLAMA: parça sayısı = sqrt(parent/derinlik), kısıt [3,20];
-//! aciliyet = bar volatilitesi (Ioc/Alo seçimi ~2.5 eşiği); parça
-//! ağırlıkları U-trajektörüyle orantılı. Sinyal: Hold + plan notta
-//! (parça sayısı, USD/parça, önerilen TIF, ilk 5 parça).
-//! GEREKLİ VERİ: order_size_usd + >=50 mum.
-use crate::{closes, MarketInput, Signal, Strategy};
+//! Görev: U-şekilli trajectory — parça sayısı = sqrt(parent/derinlik),
+//! kısıt [3,20]; aciliyet (bar volu) → Ioc/Alo önerisi; parça ağırlıkları
+//! notta. `order_size_usd ≤ 0` → Skip (engine tahsis sonrası planladığı
+//! için evaluation'a beslenemez — strateji AUXILIARY işaretli, sessiz
+//! ölü değil).
+use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
 pub struct OptimalExecution;
@@ -64,10 +59,43 @@ impl Strategy for OptimalExecution {
             ),
         }
     }
+
+    /// Parent-emir planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
+    fn status(&self, _input: &MarketInput) -> StratStatus {
+        StratStatus::Auxiliary
+    }
 }
 
 fn realized_sigma(returns: &[f64], n: usize) -> f64 {
     let w = &returns[returns.len() - n..];
     let m = w.iter().sum::<f64>() / n as f64;
     (w.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt()
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// A — parent emir planı: plan notu üretilir (parça sayısı/USD).
+    #[test]
+    fn optexec_plan_uretir() {
+        let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 50_000.0, ..Default::default() };
+        match OptimalExecution.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("parça") || note.contains('#'), "{note}"),
+            other => panic!("plan Hold beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — order_size_usd yoksa Skip (ölü strateji yasağı: engine bu alanı
+    /// besleyemez → strateji AUXILIARY işaretli, sessiz ölü değil).
+    #[test]
+    fn optexec_parent_yoksa_skip() {
+        let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 0.0, ..Default::default() };
+        match OptimalExecution.evaluate(&input) {
+            Signal::Skip { reason } => assert!(reason.contains("order_size") || reason.contains("emir"), "{reason}"),
+            other => panic!("Skip beklenirdi: {other:?}"),
+        }
+        assert_eq!(OptimalExecution.status(&input), StratStatus::Auxiliary, "auxiliary işaretli");
+    }
 }

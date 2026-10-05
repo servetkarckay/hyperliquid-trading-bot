@@ -1,11 +1,13 @@
-//! Yapılandırma: .env yükleme + doğrulama.
+//! KONFİG — .env yükleme ve doğrulama.
 //!
-//! .env anahtarları: NETWORK (mainnet), HYPERLIQUID_API_URL,
-//! HYPERLIQUID_WS_URL, HYPERLIQUID_PRIVATE_KEY (API wallet/agent key,
-//! 0x'li veya 0x'siz 32B hex), API_WALLET_ADDRESS (agent adresi),
-//! USER_ADDRESS (GERÇEK master hesap — kullanıcı sorguları için ŞART),
-//! LOG_LEVEL, CLICKHOUSE_URL, REDIS_URL.
-//! Doğrulama: private key 32 byte, api https, ws wss.
+//! Görevler:
+//! 1. `dotenvy` ile .env'i süreç ENV'ine yükler (secret export gereksinimi yok).
+//! 2. `Config::from_env()`: NETWORK / API_URL / WS_URL / PRIVATE_KEY /
+//!    API_WALLET_ADDRESS zorunlu; https/wss ön ekleri ve 32 bayt hex-anahtar
+//!    DOĞRULANIR — hatalı konfig süreci anında düşürür.
+//! 3. `pk_hex()`: imza anahtarını ham bayt olarak döner.
+//! Not: bot'un diğer ENV'leri (ENGINE_*, TRAIL_*, LEARN_*) burada DEĞİL,
+//! kendi modüllerinde okunur.
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 

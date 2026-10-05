@@ -1,3 +1,9 @@
+//! HATA TİPLERİ — crate'in tek hata taksonomisi.
+//!
+//! `ApiError`: Http / Api (borsa red metni) / Json / Sign / Hex / Ws / Other.
+//! Kural: "emin olunamayan" her hata (borsa UNKNOWN, bilinmeyen metin)
+//! **kritik** sayılır (`track::classify` buradan beslenir) — sessiz
+//! yutma yok.
 use thiserror::Error;
 
 #[derive(Debug, Error)]

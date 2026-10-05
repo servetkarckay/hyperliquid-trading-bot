@@ -1,10 +1,8 @@
-//! Lineer cebir: küçük-yoğun matris operasyonları (portföy/regresyon boyutu).
+//! LINALG — küçük yoğun matris işlemleri + OLS (saf, Option döner).
 //!
-//! mat_mul, transpose, mat_vec; kısmi pivotlu Gauss eliminasyonu ile
-//! solve(); Gauss-Jordan inverse(); Cholesky (SPD); OLS regresyon:
-//! beta=(X'X)⁻¹X'y, SE=sqrt(σ²·diag((X'X)⁻¹)), t=β/SE, R²=1-RSS/TSS;
-//! linreg: iki değişkenli kapalı form. Strateji 02 (beta hedge), 12
-//! (portföy), stats.rs ADF regresyonu buradan beslenir.
+//! `mat_mul, transpose, solve (Gauss eliminasyonu), inverse, cholesky,
+//! ols (beta/t/R²), linreg`. Tekil/negatif yarı-tanımlı durumda None —
+//! çağıran None'ı veri-yoksunluğu gibi ele alır (panik yok).
 #[derive(Debug, Clone)]
 pub struct OlsResult {
     pub beta: Vec<f64>,

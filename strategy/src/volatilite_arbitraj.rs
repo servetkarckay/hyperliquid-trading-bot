@@ -1,14 +1,11 @@
-//! VOLATİLİTE ARBİTRAJI — VRP (vol risk premium) çarpan katmanı.
+//! VOLATİLİTE ARBİTRAJI — VRP (vol risk premium) katmanı.
 //!
-//! GERÇEK VRP (IV feed bağlı): VRP = IV - RV30;
-//!   VRP>0 -> vol satışı lehine; VRP<0 -> vol alışı lehine
-//! YEREL PROXY (IV yok): RV terim yapısı — 10-bar vs 100-bar realized vol:
-//!   <0.6 — vol sıkışması (genişleme riski); >1.6 — gerileme beklentisi
-//!   arada nötr
-//! NOT: HL'de opsiyon yok; çıktı pozisyon değil — risk katmanı +
-//! komşu stratejiler için vol-rejim bilgisi.
-//! GEREKLİ VERİ: (IV mod) >=60 mum; (proxy) >=120 mum.
-use crate::{closes, MarketInput, Signal, Strategy};
+//! 1. IV feed bağlıyken GERÇEK VRP = IV − RV30: VRP>0 → Short (vol
+//!    satışı lehine), VRP<0 → Long; güç (|VRP|/(IV·0.5)).min(0.7).
+//! 2. IV yok: yerel RV terim yapısı proxy (10-bar/100-bar) — yalnız
+//!    Hold NOTU, yön üretmez; **SAHTE IV ÜRETİLMEZ**.
+//! 3. Durum: IV'süz → DATA-MISSING (raporda ayrışır); IV'li → ACTIVE.
+use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
 pub struct VolatiliteArbitraj;
@@ -56,5 +53,69 @@ impl Strategy for VolatiliteArbitraj {
         } else {
             Signal::Hold { note: format!("RV terim yapısı nötr: {ratio:.2}") }
         }
+    }
+
+    /// IV feed bağlı değilken GERÇEK VRP üretilemez → `DATA-MISSING`.
+    /// (SAHTE IV ÜRETMEZ: yerel RV proxy yalnız bilgi notudur, skor üretmez.)
+    fn status(&self, input: &MarketInput) -> StratStatus {
+        if input.iv.is_none() {
+            StratStatus::DataMissing
+        } else {
+            StratStatus::Active
+        }
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// Salınımlı seri (RV > 0 gerçekçi)
+    fn osc(n: usize, a: f64) -> Vec<data::Candle> {
+        (0..n)
+            .map(|i| {
+                let px = 100.0 + a * (if i % 2 == 0 { 1.0 } else { -1.0 });
+                H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, 100.0)
+            })
+            .collect()
+    }
+
+    /// A — VRP: IV > RV30 → vol satışı lehine → Short; IV < RV → Long.
+    #[test]
+    fn vrp_iv_varken_yon_dogru() {
+        // RV ~%70 yıllık (a=0.7, 1h barlar), IV %65 → VRP<0 → Long
+        let iv = MarketInput { coin: "T".into(), candles: osc(70, 0.7), iv: Some(0.65), ..Default::default() };
+        match VolatiliteArbitraj.evaluate(&iv) {
+            Signal::Long { strength, note } => {
+                assert!(strength > 0.0 && strength <= 0.7);
+                assert!(note.contains("VRP"), "{note}");
+            }
+            other => panic!("IV< RV → Long beklenirdi: {other:?}"),
+        }
+        // IV %300 > RV %70 → VRP>0 → Short (vol satışı lehine)
+        let iv2 = MarketInput { coin: "T".into(), candles: osc(70, 0.7), iv: Some(3.0), ..Default::default() };
+        match VolatiliteArbitraj.evaluate(&iv2) {
+            Signal::Short { strength, note } => {
+                assert!(strength > 0.0 && strength <= 0.7);
+                assert!(note.contains("vol satışı lehine"), "{note}");
+            }
+            other => panic!("VRP>0 → Short beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — IV yok → yönlü VRP ÜRETİLMEZ (yerel proxy yalnız Hold notu;
+    /// SAHTE IV ÜRETİLMEZ) + durum DATA-MISSING.
+    #[test]
+    fn vrp_iv_yokken_sahte_vrp_uretmez() {
+        let c = osc(130, 0.7);
+        let input = MarketInput { coin: "T".into(), candles: c.clone(), iv: None, ..Default::default() };
+        match VolatiliteArbitraj.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("RV") || note.contains("proxy") || note.contains("vol"), "{note}"),
+            other => panic!("IV'sız proxy yönsüz olmalı: {other:?}"),
+        }
+        assert_eq!(VolatiliteArbitraj.status(&input), StratStatus::DataMissing);
+        let with_iv = MarketInput { coin: "T".into(), candles: c, iv: Some(0.5), ..Default::default() };
+        assert_eq!(VolatiliteArbitraj.status(&with_iv), StratStatus::Active);
     }
 }

@@ -1,14 +1,12 @@
 //! ELLIOTT DALGA — pivot tabanlı dalga sayımı + Fibonacci teyidi.
 //!
-//! HESAPLAMA:
-//! 1. Pivotlar: ±12 bar
-//! 2. 5 dalga yukarı şablonu: artan üç zirve (W1,W3,W5)
-//! 3. Düzeltme dipleri yükseliyor mu (W2/W4)
-//! 4. Fibonacci: son geri çekilme W1'in %30-65 bandında mı
-//! 5. Likidite teyidi (hacim > 0)
-//! Güç zayıf [0.45] — sayım belirsizliği yüksek; onaysız sayım
-//! sinyal değildir (doküman kuralı).
-//! GEREKLİ VERİ: >=150 mum.
+//! 1. Pivotlar ±12 bar merkezli; <3 pivot → Hold (sayım belirsiz).
+//! 2. Şablon: artan zirveler (W1,W3,W5) + artan dipler (W2,W4) + son
+//!    geri çekilme fib bandında (%30-65) + hacim > 0 → Long [0.45]
+//!    (zayıf sinyal — sayım belirsizliği bilinçli).
+//! 3. **SINIR (dürüst)**: SHORT kolu yazılmamış — sahte Short ÜRETİLMEZ
+//!    (testle kanıtlandı; icat edilmedi).
+//! 4. <150 mum → Skip; pivot penceresi onay gecikmesi sızıntısız.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
@@ -76,4 +74,96 @@ fn pivots(c: &[f64], k: usize) -> (Vec<f64>, Vec<f64>) {
 fn _ref() {
     let _ = indicators::ema;
     
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// Deterministik zigzag: pivotlar arasında lineer interpolasyon.
+    fn zz(pivots: &[(usize, f64)], n: usize, up_v: f64, down_v: f64) -> Vec<data::Candle> {
+        let mut candles = Vec::new();
+        for i in 0..n {
+            let mut seg = 0usize;
+            for (j, (b, _)) in pivots.iter().enumerate() {
+                if *b <= i { seg = j; }
+            }
+            let (b0, p0) = pivots[seg];
+            let (b1, p1) = pivots[(seg + 1).min(pivots.len() - 1)];
+            let px = if b1 > b0 { p0 + (p1 - p0) * (i - b0) as f64 / (b1 - b0) as f64 } else { p0 };
+            let v = if p1 >= p0 { up_v } else { down_v };
+            candles.push(H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, v));
+        }
+        candles
+    }
+
+    /// A — 5-dalga yukarı şablonu → Long [0.45].
+    /// pvh = [130, 150, 152] (artan), pvl = [110, 128] (artan),
+    /// retr = (150−128)/(152−96) = 0.39 ∈ [0.30, 0.65] ✓
+    #[test]
+    fn elliott_bes_dalga_yukari_long_uretir() {
+        let pivs = [
+            (0usize, 96.0), (20, 130.0), (40, 110.0), (70, 150.0),
+            (95, 128.0), (119, 152.0), (150, 135.0), (199, 148.0),
+        ];
+        let candles = zz(&pivs, 200, 250.0, 50.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        match ElliottDalga.evaluate(&input) {
+            Signal::Long { strength, note } => {
+                assert!((strength - 0.45).abs() < 1e-9);
+                assert!(note.contains("5 dalga"), "{note}");
+            }
+            other => panic!("Long beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — sayım belirsizse Hold (SAHTE yön yok).
+    #[test]
+    fn elliott_pivot_yoksa_hold() {
+        let candles = zz(&[(0usize, 100.0), (199, 100.2)], 200, 100.0, 100.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        match ElliottDalga.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("sayım belirsiz"), "{note}"),
+            other => panic!("Hold beklenirdi: {other:?}"),
+        }
+    }
+
+    /// B — FUTURE LEAKAGE: pivot ±12 bar pencereyle onaylanır; W5 zirvesi
+    /// (bar 119, pencere 107..131) onaylanmadan Long ÜRETİLMEZ — erken
+    /// sinyal = sızıntı. Gelecek barlar prefix kararını değiştirmez.
+    #[test]
+    fn elliott_future_leak_pivot_onayindan_once_long_yok() {
+        let pivs = [
+            (0usize, 96.0), (20, 130.0), (40, 110.0), (70, 150.0),
+            (95, 128.0), (140, 160.0), (165, 134.0), (199, 140.0),
+        ];
+        let full = zz(&pivs, 200, 250.0, 50.0);
+        // A = bar 0..=176 (177 mum ≥ 150): son dip (bar 165, pencere
+        // 153..177) onaylanmamış → piv_l = [110,128] (3. dip yok) → Long YOK
+        let a = full[..177].to_vec();
+        let ia = MarketInput { coin: "T".into(), candles: a.clone(), ..Default::default() };
+        let sa = ElliottDalga.evaluate(&ia);
+        assert!(!matches!(sa, Signal::Long { .. }), "dip onayı tamamlanmadan Long üretilmez: {sa:?}");
+        // t = onay barı 177 → dips_rising (134>128) + retr=(150−134)/(160−110)=0.32 ✓
+        let it = MarketInput { coin: "T".into(), candles: full[..178].to_vec(), ..Default::default() };
+        assert!(matches!(ElliottDalga.evaluate(&it), Signal::Long { .. }), "onayda Long");
+        // prefix sabit (gelecek barlar etkisi yok)
+        assert_eq!(sa, ElliottDalga.evaluate(&ia));
+    }
+
+    /// Dokümante sınır: SHORT kolu Elliott'ta YAZILMAMIŞ — SAHTE Short
+    /// ÜRETİLMEZ (düşüş serisi Hold döner; icat edilmedi, raporda belgeli).
+    #[test]
+    fn elliott_short_kolu_yazilmamis_sahte_short_uretmez() {
+        let pivs = [
+            (0usize, 152.0), (20, 100.0), (40, 128.0), (70, 90.0), (95, 118.0), (119, 88.0), (199, 92.0),
+        ];
+        let candles = zz(&pivs, 200, 50.0, 250.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        assert!(
+            !matches!(ElliottDalga.evaluate(&input), Signal::Short { .. }),
+            "Elliott Short kolu yok → Short ÜRETİLMEZ"
+        );
+    }
 }

@@ -18,23 +18,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
+      # Tek test adımı. İş emri komutu BİREBİR bu: `cargo test --workspace`
+      # (--release yok). Test sayısı bu çıktının logundan raporlanır; ikinci
+      # bir `cargo test` çalıştırılmaz.
       - name: Run tests
-        run: cargo test --release --workspace
-
-      - name: Check test counts
-        run: |
-          echo "=== Test Results Summary ==="
-          cargo test --release --workspace 2>&1 | grep -E "^test result:" | while read line; do
-            echo "$line"
-          done
+        run: cargo test --workspace

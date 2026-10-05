@@ -1,15 +1,13 @@
-//! Piyasa bağlamı serileri — stratejiler 08 (carry/basis), 09 (OI/likidasyon),
-//! 10 (rejim) için canlı funding/OI/mark/oracle/premium/dayNtlVlm takibi.
+//! MARKET CTX — canlı bağlam: funding / OI / mark / oracle serileri.
 //!
-//! İki kaynak: WS activeAssetCtx (anlık, saniye hassasiyetinde) ve REST
-//! metaAndAssetCtxs tam taraması (periyodik; WS drift düzeltme + evren geneli).
-//!
-//! Sunulan türetilmiş veriler:
-//! - get(coin)                : son bağlam durumu
-//! - delta_oi(coin)           : son iki ölçüm arası OI değişimi (likidasyon sinyali)
-//! - oi_series / funding_series: zaman serileri (grafik/backtest)
-//! - basis(coin, spot_mids)   : spot-perp basis = (mark - spot)/spot (carry 08)
-//! Tüm coinler için çalışır (universe geneli).
+//! Görevler:
+//! 1. `apply_event / apply_stream / apply_rest_snapshot`: WS + REST
+//!    verisini tek `CtxState` haritasında birleştirir.
+//! 2. Türetilen seriler: `delta_oi` (OI değişimi — likidasyon kadransı
+//!    girdisi), `oi_series`, `funding_series`, `basis` (perp-spot sapması).
+//! Ölçek notu: HL API `funding` alanı **saatlik** orandır (fundingHistory
+//! 1h aralıklı; yıllıklaştırma ×24×365) — burada dönüşüm YAPILMAZ, ham
+//! değer taşınır (dönüşüm strateji katmanındadır).
 use std::collections::{HashMap, VecDeque};
 
 

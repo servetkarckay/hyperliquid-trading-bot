@@ -1,10 +1,19 @@
-//! Emir gönderme, iptal, doldurma takibi.
+//! EXECUTOR — api::Exchange ince katmanı: emir durumu takibi + koruma.
 //!
-//! api::Exchange üstüne ince katman: tick/lot doğrulama + min $10 notional
-//! garantisi, açık emir defteri (oid -> OrderInfo), pozisyon önbelleği
-//! (clearinghouseState.assetPositions), WS orderUpdates/user event'lerinden
-//! anlık dolum takibi (realizedPnl dahil), kopma sonrası refresh_orders/
-//! refresh_positions ile toparlama. USER_ADDRESS (master) .env'den alınır.
+//! Görevler:
+//! 1. `place_limit / place_ioc / cancel / cancel_all`: lot/fiyat yuvarlama,
+//!    $10 minimum, hayalet emir koruması.
+//! 2. BORSA STOP/TP: `ensure_sl / replace_sl (trailing) / cancel_sl` ve
+//!    `ensure_tp / cancel_tp` — reduce-only trigger (`tpsl="tp"/"sl"`),
+//!    idempotent (`sl_orders`/`tp_orders` + TS_GRACE_MS grace kapısı —
+//!    çift emir yasağı).
+//! 3. DOLUM: `handle_ws_event` (orderUpdates + user fills) → pozisyon
+//!    haritası + `FillEvent` (is_tp_fill/is_sl_fill oid eşleşmesiyle).
+//! 4. RECONCILIATION (P1-C): `parse_open_orders` cloid eşleşmesi —
+//!    UNKNOWN emir borsada bulunursa oid bağlanır, bulunamazsa yalnız
+//!    oid==0 pending'de Flat revert.
+//! 5. `make_cloid`: deterministik 16-hane hex (retry idempotency).
+//! 6. `save/load_px_dec`: öğrenilen tick hassasiyeti kalıcılığı.
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, bail, Result};
@@ -59,6 +68,25 @@ pub struct FillEvent {
     pub sz: f64,
     pub closed_pnl: f64,
     pub is_buy: bool,
+    /// Bu dolum **bizim TP trigger**'ımızdan mı geldi (oid eşleşmesi)?
+    /// F: `ExitReason::TakeProfit` yalnız bundan atanır (MFE/analizden değil).
+    pub is_tp_fill: bool,
+    /// Bu dolum **bizim SL trigger**'ımızdan mı geldi? (SL/trailing ayrımı
+    /// ratchet sayısıyla engine'de yapılır — borsa tarafı tek oid'i paylaşır.)
+    pub is_sl_fill: bool,
+}
+
+/// BLOCKER-2 DÜZELTMESİ: dolumun açılış/kapanış ayrımı `closedPnl`'den
+/// YAPILMAZ. Hyperliquid fill şeması `dir` alanını ayrıca verir:
+/// "Open Long"/"Open Short" (açılış), "Close Long"/"Close Short"
+/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — eski tarafı
+/// kapatıp yeniyi açar → yeni taraf için açılış).
+///
+/// `closedPnl == 0` kesinlikle "açılış" demek değildir: break-even
+/// kapanışta 0'dır ve eski kod tam bunu açılış sanıp giriş korumasını
+/// TEKRAR kuruyordu.
+pub fn is_open_fill(dir_field: &str) -> bool {
+    dir_field.starts_with("Open") || dir_field.contains('>')
 }
 
 /// BORSA STOP grid denemesi: fiyat tick'i coin'e özel ve meta'da YOK
@@ -100,6 +128,47 @@ async fn place_sl_grid(
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     }
     bail!("SL reddi (hane={dec}): {last}")
+}
+
+/// **REDUCE-ONLY TP TRIGGER** — `tpsl="tp"`, `is_market=false` (dinlenen
+/// limit). TP artık gerçek kapanış kaynağı: fill geldiğinde `oid` eşleşmesi
+/// ile `ExitReason::TakeProfit` atanır.
+///
+/// SL ile AYNI ızgara mantığı: borsa fiyat ızgarasını reddederse hane
+/// azaltılarak denenir; her deneme AYRI cloid tuzu (`TP_CLOID_SALT`) alır.
+async fn place_tp_grid(
+    ex: &Exchange,
+    asset: u32,
+    exit_is_buy: bool,
+    qty: f64,
+    tp: f64,
+    mut dec: u32,
+    coin: &str,
+) -> Result<i64> {
+    let mut last = String::new();
+    while dec >= 1 {
+        let px = hyperliquid_api::round_px_for(tp, dec);
+        let cloid = make_cloid(coin, px, qty, TP_CLOID_SALT);
+        match ex
+            .place_trigger(asset, exit_is_buy, qty, px, false, true, true, Some(&cloid))
+            .await
+        {
+            Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
+            Ok(st) => {
+                last = st.error(0).unwrap_or("bilinmeyen").to_string();
+                if !last.contains("invalid price") {
+                    break;
+                }
+                dec -= 1;
+            }
+            Err(e) => {
+                last = e.to_string();
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    }
+    bail!("TP reddi (hane={dec}): {last}")
 }
 
 #[derive(Debug, Clone)]
@@ -190,7 +259,31 @@ pub struct Executor {
     /// stop'u yanlış tarafa **taşıyamaz** (kayma olsa da stop dolumun
     /// lehine kalır).
     pub pending_sl: HashMap<String, (f64, u64)>,
+    /// GİRİŞ EMİRİ ATILDI, henüz dolmadı: coin -> (TP MESAFESİ px, ts_ms).
+    /// Dolum anında TP = dolum ± mesafe olarak reduce-only TP trigger
+    /// kurulur. Mesafe `AllocationConfig::tp_from_entry`'ten gelir (P1-E
+    /// tek formül; mesafe girişten bağımsız olduğu için karar-anı değeri
+    /// dolum-anına taşınabilir).
+    pub pending_tp: HashMap<String, (f64, u64)>,
+    /// BORSA TARAFI TP: coin -> reduce-only TP trigger oid'i (`tpsl="tp"`).
+    /// TP artık **gerçek kapanış kaynağıdır** (F: TP fill → TakeProfit).
+    pub tp_orders: HashMap<String, i64>,
+    /// coin -> TP'nin KONULDUĞU zaman (ms) — `ensure_tp` idempotency
+    /// kapısı (`sl_armed_at` ile aynı şema; çift TP yasağı).
+    pub tp_armed_at: HashMap<String, u64>,
+    /// coin -> borsada DURAN TP'nin fiyatı (restart kurtarması +
+    /// `openOrders` taramasından oid geri yükleme eşleşmesi).
+    pub tp_last_px: HashMap<String, f64>,
+    /// Arka plandaki TP kurulumlarının oid'ini taşıyan kanal (`sl_tx` şeması).
+    pub tp_tx: tokio::sync::mpsc::UnboundedSender<(String, i64)>,
+    pub tp_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64)>,
+    /// Son dolumun TP/SL oid eşleşme bayrağı (apply_fill → FillEvent taşıma).
+    tp_fill_flags: HashMap<String, (bool, bool)>,
 }
+
+/// TP cloid tuzu — SL tuzundan (`dec`) AYRI; aynı coin+px+sz'de SL ve TP
+/// cloid çakışmasın. Sabit sihirli değer, kaynak kodda belgeli.
+pub const TP_CLOID_SALT: u64 = 0x7050_0000_0000_0001;
 
 impl Executor {
     pub async fn new(cfg: Config) -> Result<Self> {
@@ -210,6 +303,7 @@ impl Executor {
         // `unbounded_channel` runtime'a bağlı değildir, `new()` async olsa da
         // burada güvenle kurulabilir.
         let (sl_tx, sl_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tp_tx, tp_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             ex: Exchange::new(cfg)?,
             info,
@@ -227,6 +321,13 @@ impl Executor {
             sl_rx,
             sl_orders: HashMap::new(),
             pending_sl: HashMap::new(),
+            pending_tp: HashMap::new(),
+            tp_orders: HashMap::new(),
+            tp_armed_at: HashMap::new(),
+            tp_last_px: HashMap::new(),
+            tp_tx,
+            tp_rx,
+            tp_fill_flags: HashMap::new(),
             realized_pnl: 0.0,
             closed_pnl: HashMap::new(),
             fill_count: 0,
@@ -635,6 +736,102 @@ impl Executor {
         }
     }
 
+    /// **REDUCE-ONLY TP TRIGGER KUR** (`tpsl="tp"`, `is_market=false`).
+    ///
+    /// Idempotency (çift TP yasağı — SL ile aynı şema):
+    /// 1. `tp_orders`'da oid var → kur, tekrar ASMA,
+    /// 2. kısa süre önce kurulduysa (`tp_armed_at` + grace) → tekrar deneme,
+    /// 3. lot 0 / fiyat 0 → hayalet koruması, emir ATILMAZ.
+    ///
+    /// `reduce_only = true` ZORUNLU (pozisyon büyütemez). Long TP > entry,
+    /// short TP < entry — kontrol `tp_from_entry`'te (tek formül).
+    pub async fn ensure_tp(&mut self, coin: &str, is_long: bool, sz: f64, tp_px: f64) -> Result<bool> {
+        if self.tp_orders.contains_key(coin) {
+            return Ok(false); // zaten var — körlemesine duplicate YOK
+        }
+        if let Some(&ts) = self.tp_armed_at.get(coin) {
+            let age = (hyperliquid_api::now_ms() as i64 - ts as i64).unsigned_abs();
+            if age < TS_GRACE_MS {
+                return Ok(false);
+            }
+        }
+        let Some((asset, szd)) = self.cached_asset(coin) else {
+            bail!("{coin}: asset cache'te yok");
+        };
+        let qty = hyperliquid_api::round_sz_up(sz.abs(), szd);
+        if !(qty > 0.0) || !(tp_px > 0.0) {
+            return Ok(false); // hayalet koruması: 0-lot TP KONULMAZ
+        }
+        let exit_is_buy = !is_long; // long → TP = SAT (kâr tarafında)
+        let dec = self.px_dec.get(&asset).copied().unwrap_or(6);
+        let ex = self.ex.clone();
+        match place_tp_grid(&ex, asset, exit_is_buy, qty, tp_px, dec, coin).await {
+            Ok(oid) => {
+                self.tp_orders.insert(coin.to_string(), oid);
+                self.tp_armed_at.insert(coin.to_string(), hyperliquid_api::now_ms());
+                self.tp_last_px.insert(coin.to_string(), tp_px);
+                tracing::info!(
+                    "[TP] {coin} borsa TP kuruldu oid={oid} px={tp_px:.6} sz={qty} reduce_only=true (hane={dec})"
+                );
+                Ok(true)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// TP trigger'ı iptal et (pozisyon kapanınca / SL dolduğunda).
+    pub async fn cancel_tp(&mut self, coin: &str) {
+        self.tp_armed_at.remove(coin);
+        if let Some(oid) = self.tp_orders.remove(coin) {
+            let _ = self.cancel(coin, oid).await;
+            tracing::info!("[TP] {coin} borsa TP iptal edildi oid={oid}");
+        }
+    }
+
+    /// **TP OID GERİ YÜKLEME** (restart / WS kopması sonrası).
+    ///
+    /// Kural (körlemesine duplicate etme yasağı): `openOrders` taramasında
+    /// AYNI coin için reduce-only + fiyatı `tp_px` ile ±%0.1 eşleşen emir
+    /// varsa → **bizim TP'mizdir**, oid kaydedilir, YENİ EMİR ATILMAZ.
+    /// Eşleşmeyen reduce-only emirlere dokunulmaz (SL taraması onları
+    /// ele alır).
+    pub fn restore_tp_orders(
+        &mut self,
+        rows: &[OpenOrderRow],
+        tp_px_by_coin: &HashMap<String, f64>,
+    ) -> usize {
+        let mut n = 0usize;
+        for row in rows {
+            if !row.reduce_only || self.tp_orders.contains_key(&row.coin) {
+                continue;
+            }
+            let Some(&want) = tp_px_by_coin.get(&row.coin) else { continue };
+            if want > 0.0 && (row.px - want).abs() / want <= 0.001 {
+                self.tp_orders.insert(row.coin.clone(), row.oid);
+                self.tp_last_px.insert(row.coin.clone(), want);
+                n += 1;
+                tracing::info!(
+                    "[TP] {coin} TP oid GERİ YÜKLENDİ (oid={oid} px={px:.6}) — yeni emir atılmadı",
+                    coin = row.coin, oid = row.oid, px = row.px
+                );
+            }
+        }
+        n
+    }
+
+    /// Arka planda kurulan TP'lerin oid'ini kayda al (`drain_sl_results` şeması).
+    pub fn drain_tp_results(&mut self) -> usize {
+        let mut n = 0usize;
+        while let Ok((coin, oid)) = self.tp_rx.try_recv() {
+            self.tp_orders.insert(coin, oid);
+            n += 1;
+        }
+        if n > 0 {
+            tracing::info!("[TP] {n} arka-plan TP kaydı tamamlandı (tp_orders)");
+        }
+        n
+    }
+
     /// **TRAILING STOP YENİLEME — KURALLI SIRA: ÖNCE YENİ STOP, SONRA ESKİYİ İPTAL.**
     ///
     /// Neden bu sira zorunlu: ters sırada (`iptal → yerleştir`) yerleştirme
@@ -782,6 +979,23 @@ impl Executor {
         Ok(())
     }
 
+    /// P1-K — hesaptaki TÜM açık emirleri iptal et (fresh-start temizliği).
+    ///
+    /// `cancel_all(coin)` coin bazlıdır; fresh start HER coinin emirlerini
+    /// temizlemelidir. Kaynak: `openOrders` taraması (bot'un kendi
+    /// emirleri + trigger'lar) — her oid için tek POST, hata loglanır.
+    pub async fn cancel_all_open_orders(&mut self) -> anyhow::Result<usize> {
+        let rows = self.fetch_open_order_rows().await?;
+        let mut n = 0usize;
+        for row in &rows {
+            match self.cancel(&row.coin, row.oid).await {
+                Ok(()) => n += 1,
+                Err(e) => tracing::warn!("[RECON] iptal hatası coin={} oid={}: {e}", row.coin, row.oid),
+            }
+        }
+        Ok(n)
+    }
+
     /// Coin'deki tüm açık emirleri iptal et -> iptal edilen sayı
     pub async fn cancel_all(&mut self, coin: &str) -> Result<usize> {
         self.refresh_orders().await?;
@@ -802,12 +1016,11 @@ impl Executor {
     }
 
     /// REST'ten açık emirleri yenile (ws kopması sonrası toparlama).
-    /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
-    /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
-    pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
-        let v = self.info.open_orders(&self.user).await?;
-        let arr = v.as_array().cloned().unwrap_or_default();
-        let mut candidates: Vec<(String, i64)> = Vec::new();
+    /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.
+    /// `refresh_orders` (stop adayları) ve `refresh_open_orders_all`
+    /// (reconciliation) aynı parser'ı kullanır — yeniden yazım yok.
+    fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Vec<OpenOrderRow> {
+        let mut rows = Vec::new();
         self.open_orders.clear();
         for o in arr {
             let oid = match o["oid"].as_i64() {
@@ -816,17 +1029,61 @@ impl Executor {
             };
             let cn = o["coin"].as_str().unwrap_or("").to_string();
             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
-            self.open_orders.insert(oid, OrderInfo {
+            let is_buy = o["side"] == "B";
+            let px = o["limitPx"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+            // P1-C: reconciliation EMIR cloid'i üzerinden eşleşir. REST
+            // `openOrders` cloid'i `cloid` alanında döner.
+            let cloid = o["cloid"].as_str().map(|s| s.to_string());
+            self.open_orders.insert(
                 oid,
-                asset: asset_id,
-                coin: cn,
-                is_buy: o["side"] == "B",
-                sz: o["origSz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                px: o["limitPx"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                tif: Tif::Gtc,
-                reduce_only: o["reduceOnly"].as_bool().unwrap_or(false),
-                ts: o["timestamp"].as_u64().unwrap_or(0),
-            });
+                OrderInfo {
+                    oid,
+                    asset: asset_id,
+                    coin: cn.clone(),
+                    is_buy,
+                    sz: o["origSz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                    px,
+                    tif: Tif::Gtc,
+                    reduce_only,
+                    ts: o["timestamp"].as_u64().unwrap_or(0),
+                },
+            );
+            rows.push(OpenOrderRow { coin: cn, oid, cloid, is_buy, sz: 0.0, px, reduce_only });
+        }
+        rows
+    }
+
+    /// P1-C: TÜM dinlenen açık emirleri `(coin, oid, cloid, reduce_only, ...)`
+    /// olarak döndürür.
+    ///
+    /// Neden ayrı API: [`Self::refresh_orders`] YALNIZ reduce-only (stop)
+    /// emirleri döndürür. UNKNOWN olan **giriş** emirleri `reduce_only=false`
+    /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
+    /// giriş emrini bulamazdı.
+    pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
+        let v = self.info.open_orders(&self.user).await?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        Ok(self.parse_open_orders(&arr))
+    }
+
+    /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
+    /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
+    /// Ham satırlar — TP oid geri yükleme (`restore_tp_orders`) bu satırları
+    /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
+    pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
+        let v = self.info.open_orders(&self.user).await?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        Ok(self.parse_open_orders(&arr))
+    }
+
+    pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
+        let v = self.info.open_orders(&self.user).await?;
+        let arr = v.as_array().cloned().unwrap_or_default();
+        let mut candidates: Vec<(String, i64)> = Vec::new();
+        let rows = self.parse_open_orders(&arr);
+        for row in rows {
+            let (cn, oid) = (row.coin.clone(), row.oid);
             // BORSA STOP'LARINI YENİDEN TANI — ÖLÇÜLMÜŞ HATA BURADA:
             //
             // Önceki tespit `isTrigger || triggerPx` alanlarına bakıyordu ve
@@ -846,9 +1103,11 @@ impl Executor {
             // dinlenmez → `openOrders`'a girmez. Giriş emirleri de
             // `reduce_only: false`'dur. Yani defterde kalan tek reduce-only
             // emir sınıfı stop'tur.
-            let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+            let reduce_only = row.reduce_only;
+            let is_buy = row.is_buy;
+            let px = row.px;
+            let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
             if reduce_only {
-                let cn = o["coin"].as_str().unwrap_or("").to_string();
                 let has_pos = self
                     .positions
                     .get(&cn)
@@ -870,7 +1129,7 @@ impl Executor {
                     if known > 0.0 {
                         let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
                         let trig = hyperliquid_api::round_px_for(
-                            if o["side"] == "B" { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 1.05 } else { o["limitPx"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) / 0.95 },
+                            if is_buy { px / 1.05 } else { px / 0.95 },
                             d,
                         );
                         let dev = if trig > 0.0 { (trig - known).abs() / known } else { 1.0 };
@@ -1093,6 +1352,7 @@ impl Executor {
         let sz: f64 = f["sz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let oid = f["oid"].as_u64().unwrap_or(0) as i64;
         let closed: f64 = f["closedPnl"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let dir_field: &str = f["dir"].as_str().unwrap_or("");
         // P0-4: TID DEDUP — aynı transaction ID iki kez işlenmesin
         let tid = f["tid"].as_str().unwrap_or("");
         if !tid.is_empty() && crate::track::tid_seen(tid) {
@@ -1137,22 +1397,46 @@ impl Executor {
                         );
                     }
                 }
-                // pozisyon kapanırsa (stop/exit) haritadan düşsün
-                if self.positions.get(&coin).map(|e| e.szi.abs() < 1e-12) == Some(true) {
-                    self.positions.remove(&coin);
-                }
                 // STOP TETİKLENDİ (bu dolumun oid'i borsa stop'ununkiyle aynıysa):
                 // stop artık yerinde değil, `sl_orders`'ta kalırsa döngü sonundaki
                 // senkron "pozisyon hâlâ açık" görüp aynı stop'u YENİDEN
                 // kurar, sonra iptal eder — ölçüldü: oid=...584 kuruldu,
                 // 3 dk sonra oid=...641 tekrar kuruldu ve o da iptal edildi.
                 // Borsa stop'u kendisi kapanmışsa `oid` eşleşir.
+                let mut is_sl_fill = false;
                 if self.sl_orders.get(&coin) == Some(&oid) {
+                    is_sl_fill = true;
                     self.sl_orders.remove(&coin);
-                self.sl_armed_at.remove(&coin);
+                    self.sl_armed_at.remove(&coin);
                     tracing::info!("[SL] {coin} borsa stop TETİKLENDİ (oid={oid}) — kayıt düşürüldü");
                 }
+                // F: TP FİLL — gerçek kapanış kaynağı. oid eşleşmesi MFE'den
+                // KESİN daha güvenilirdir (MFE>0 ≠ TakeProfit).
+                let is_tp_fill = if self.tp_orders.get(&coin) == Some(&oid) {
+                    self.tp_orders.remove(&coin);
+                    self.tp_armed_at.remove(&coin);
+                    tracing::info!("[TP] {coin} TP TETİKLENDİ (oid={oid}) → ExitReason=TakeProfit");
+                    true
+                } else {
+                    false
+                };
+                self.tp_fill_flags.insert(coin.clone(), (is_tp_fill, is_sl_fill));
+                // pozisyon kapanırsa (stop/exit) haritadan düşsün
+                if self.positions.get(&coin).map(|e| e.szi.abs() < 1e-12) == Some(true) {
+                    self.positions.remove(&coin);
+                    // Pozisyon kapandı → TP/SL durumu temizle (borsa reduce-only
+                    // trigger'ları otomatik iptal eder; bize kalan kayıt
+                    // temizliğidir — bayat oid ile çift emir yasağı).
+                    self.pending_sl.remove(&coin);
+                    self.pending_tp.remove(&coin);
+                    self.tp_orders.remove(&coin);
+                    self.tp_armed_at.remove(&coin);
+                }
             }
+            // TP/SL fill bayrakları yalnız pozisyon haritası güncellenebildiyde
+            // bilinir (oid eşleşmesi orada yapılır); kalan durumda false.
+            let (is_tp_fill, is_sl_fill) =
+                self.tp_fill_flags.remove(&coin).unwrap_or((false, false));
             self.fills_q.push(FillEvent {
                 oid,
                 coin: coin.clone(),
@@ -1160,12 +1444,24 @@ impl Executor {
                 sz,
                 closed_pnl: closed,
                 is_buy,
+                is_tp_fill,
+                is_sl_fill,
             });
             // GEÇİKMESİZ BORSA STOP: giriş dolumu geldiği anda SL kurulur.
             // (Döngü 1 saatte bir -> "sonraki döngüde" koymak pozisyonu
             // 1 saat korumasız bırakıyordu.) WS yolu senkron olduğu için
             // emir arka plan görevinde atılır; başarısızsa 3 kez denenir.
-            if closed == 0.0 {
+            // NOT: is_open_fill(dir) — "open" fill ise koruma kur.
+            // `dir` boş geliyorsa (beklenmeyen şema) koruma KURULMAZ ve
+            // uyarı loglanır (fail-safe: bayat koruma > illüzyon koruma);
+            // pozisyon sonraki döngüde executor recon'undan korunur.
+            let open_fill = is_open_fill(dir_field);
+            if dir_field.is_empty() {
+                tracing::warn!(
+                    "fill'te dir alanı yok (oid={oid} coin={coin}) — giriş koruması ARMILMADI (fail-safe)"
+                );
+            }
+            if open_fill {
                 if let Some((risk, _ts)) = self.pending_sl.remove(&coin) {
                     // STOP GERÇEK DOLUM FİYATINDAN. `px` = dolum fiyatı.
                     // (Ölçülen hata: karar anındaki defter fiyatı + IOC kayması
@@ -1204,6 +1500,51 @@ impl Executor {
                         // çağrısını grace'e takar; gerçek oid kanal ile döner.
                         self.sl_armed_at
                             .insert(coin.clone(), hyperliquid_api::now_ms());
+                        // F — GERÇEK TP EXECUTION: TP artık borsada asılı.
+                        // Mesafe `pending_tp`'den (karar anında
+                        // `AllocationConfig::tp_from_entry` ile türetildi;
+                        // mesafe girişten bağımsız → doluma taşınabilir).
+                        // Long: TP > dolum, Short: TP < dolum (kâr tarafı).
+                        if let Some((dist, _ts)) = self.pending_tp.remove(&coin) {
+                            let tp = if is_buy { px + dist } else { px - dist };
+                            let min_tp = px * 0.0025;
+                            let tp_ok_side = if is_buy { tp - px } else { px - tp };
+                            if tp > 0.0 && tp_ok_side >= min_tp {
+                                let ex2 = self.ex.clone();
+                                let asset2 = asset;
+                                let c2 = coin.clone();
+                                let qty2 = qty;
+                                let dec2 = dec;
+                                let is_long_tp = is_buy;
+                                let tx2 = self.tp_tx.clone();
+                                self.tp_armed_at.insert(coin.clone(), hyperliquid_api::now_ms());
+                                tokio::spawn(async move {
+                                    if !(qty2 > 0.0) || !(tp > 0.0) {
+                                        return; // hayalet koruması
+                                    }
+                                    match place_tp_grid(&ex2, asset2, !is_long_tp, qty2, tp, dec2, &c2).await {
+                                        Ok(oid) => {
+                                            tracing::info!(
+                                                "[TP] {c2} borsa TP kuruldu oid={oid} px={tp:.6} \
+                                                 (hane={dec2}) sz={qty2} dolum={px} dist={dist:.6} \
+                                                 ({}, +{:+.3}% dolumdan)",
+                                                if is_long_tp { "LONG" } else { "SHORT" },
+                                                (tp - px) / px * 100.0
+                                            );
+                                            let _ = tx2.send((c2, oid));
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("[TP] {c2} TP kurulamadı (döngüde yeniden denenir): {e}");
+                                            let _ = tx2;
+                                        }
+                                    }
+                                });
+                            } else {
+                                tracing::warn!(
+                                    "[TP] {coin} TP mesafesi dolumun kâr tarafında değil (dist={dist:.6}) — TP kurulmadı, döngüde yeniden türetilecek"
+                                );
+                            }
+                        }
                         tokio::spawn(async move {
                             if !(qty > 0.0) || !(sl > 0.0) {
                                 return; // hayalet koruması
@@ -1278,12 +1619,45 @@ impl Executor {
     }
 }
 
+/// P1-C: `openOrders` REST taramasından bir satır. UNKNOWN reconciliation
+/// `cloid` üzerinden eşleşir — `coin` tek başına YETMEZ (aynı coin için
+/// birden fazla giriş emri olabilir).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenOrderRow {
+    pub coin: String,
+    pub oid: i64,
+    pub cloid: Option<String>,
+    pub is_buy: bool,
+    pub sz: f64,
+    pub px: f64,
+    pub reduce_only: bool,
+}
+
 /// Batch sonucu (order/cancel index bazlı)
 #[derive(Debug, Clone)]
 pub struct BatchOut {
     pub oid: Option<i64>,
     pub filled_avg: Option<f64>,
     pub error: Option<String>,
+    /// P1-C: borsa sonucu BİLİNMİYOR (5xx/timeout). `error` string'ine
+    /// bakmak yerine BU bayrak okunur — string parsing ile kontrol yapılmaz.
+    pub unknown: bool,
+    /// P1-C: gönderilen emir cloid'i. UNKNOWN reconciliation'ı bununla
+    /// eşleşir (coin tek başına YETMEZ).
+    pub cloid: Option<String>,
+    /// P1-C: gönderilen emrin coin'i (executor asset→coin eşlemesini zaten
+    /// yapıyor; çağıranın tekrar çözmesine gerek kalmaz).
+    pub coin: Option<String>,
+}
+
+impl BatchOut {
+    fn known(oid: Option<i64>, filled_avg: Option<f64>, error: Option<String>) -> Self {
+        Self { oid, filled_avg, error, unknown: false, cloid: None, coin: None }
+    }
+    /// P1-C: sonuç bilinmiyor — reconciliation gerekir.
+    fn unresolved(cloid: Option<String>, coin: Option<String>) -> Self {
+        Self { oid: None, filled_avg: None, error: None, unknown: true, cloid, coin }
+    }
 }
 
 impl Executor {
@@ -1329,10 +1703,30 @@ impl Executor {
                     }
                 })
                 .collect();
-            let status = match self.ex.batch_place(&wires).await? {
-                OrderStatuses { raw } => raw,
+            let place_call = self.ex.batch_place_full(&wires).await;
+            let status = match place_call {
+                hyperliquid_api::exchange_endpoint::BatchPlace::Known(s) => Some(s),
+                // P1-C: UNKNOWN -> BILGI KAYBOLMAZ. Her place için ayrı
+                // `unknown:true` BatchOut üretilir; çağıran reconciliation
+                // yapar. ÖNCE: `?` ile tüm fonksiyon hata dönüyordu ve
+                // `BatchOut` hiç üretilemiyordu -> engine_loop'taki recon
+                // bloğu ÖLÜ koddu.
+                hyperliquid_api::exchange_endpoint::BatchPlace::Unknown => None,
+                hyperliquid_api::exchange_endpoint::BatchPlace::Error(e) => return Err(e.into()),
             };
+            let Some(status) = status else {
+                // UNKNOWN: her place için coin+cloid taşıyan satır üret
+                for w in places {
+                    out.push(BatchOut::unresolved(
+                        w.cloid.clone(),
+                        Some(self.coin_of(w.asset)),
+                    ));
+                }
+                return Ok(out);
+            };
+            let status = status.raw;
             for i in 0..places.len() {
+                let mut unknown = false;
                 let mut oid = status.pointer(&format!("/response/data/statuses/{}/resting/oid", i))
                     .and_then(|v| v.as_i64());
                 let mut avg = status.pointer(&format!("/response/data/statuses/{}/filled", i))
@@ -1385,13 +1779,20 @@ impl Executor {
                         px = cand,
                         "fiyat tick'i geçersiz — yeni ızgarayla yeniden deneniyor"
                     );
-                    match self.ex.batch_place(std::slice::from_ref(&fixed)).await {
-                        Ok(st2) => {
+                    match self.ex.batch_place_full(std::slice::from_ref(&fixed)).await {
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Known(st2) => {
                             oid = st2.resting_oid(0);
                             avg = st2.filled(0).map(|(_, px, _)| px);
                             err = st2.error(0).map(|s| s.to_string());
                         }
-                        Err(e) => {
+                        // P1-C: tick keşfi sırasında UNKNOWN -> bu emir de
+                        // belirsiz; sessizce "başarısız" sayıp geçilmez.
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Unknown => {
+                            unknown = true;
+                            err = None;
+                            break;
+                        }
+                        hyperliquid_api::exchange_endpoint::BatchPlace::Error(e) => {
                             err = Some(e.to_string());
                             break;
                         }
@@ -1401,16 +1802,24 @@ impl Executor {
                         break;
                     }
                 }
-                out.push(BatchOut { oid, filled_avg: avg, error: err });
+                if unknown {
+                    out.push(BatchOut::unresolved(
+                        places[i].cloid.clone(),
+                        Some(self.coin_of(places[i].asset)),
+                    ));
+                } else {
+                    out.push(BatchOut::known(oid, avg, err));
+                }
             }
         }
         if !cancels.is_empty() {
             let status = self.ex.batch_cancel(cancels).await?;
             for i in 0..cancels.len() {
-                out.push(BatchOut {
-                    oid: None, filled_avg: None,
-                    error: status.error(i).map(|s| s.to_string()),
-                });
+                let _ = i;
+                out.push(BatchOut::known(
+                    None, None,
+                    status.error(i).map(|s| s.to_string()),
+                ));
             }
         }
         Ok(out)
@@ -1421,6 +1830,15 @@ impl Executor {
     /// coin -> (asset id, szDecimals) — cache'li, ağ çağrısı yapmaz (None: yok)
     pub fn cached_asset(&self, coin: &str) -> Option<(u32, u32)> {
         self.assets.get(coin).map(|(a, d, _)| (*a, *d))
+    }
+
+    /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+    pub fn coin_of(&self, asset: u32) -> String {
+        self.assets
+            .iter()
+            .find(|(_, (a, _, _))| *a == asset)
+            .map(|(c, _)| c.clone())
+            .unwrap_or_else(|| format!("#{asset}"))
     }
 
 }
@@ -1656,5 +2074,116 @@ mod sl_side_tests {
             let sl_l = sl_from_fill(true, 100.0, risk);
             assert!(sl_l < 100.0, "long: risk={risk} → stop lehli");
         }
+    }
+}
+
+/// P1-C: UNKNOWN → gerçek cloid reconciliation kabul testleri.
+#[cfg(test)]
+mod recon_tests {
+    use super::*;
+    use crate::engine_loop::find_by_cloid;
+    use crate::state_machine::{Action, Decision, PositionStateMachine, PosState, SmConfig};
+
+    fn row(coin: &str, oid: i64, cloid: Option<&str>, reduce_only: bool) -> OpenOrderRow {
+        OpenOrderRow {
+            coin: coin.into(),
+            oid,
+            cloid: cloid.map(|s| s.to_string()),
+            is_buy: true,
+            sz: 1.0,
+            px: 100.0,
+            reduce_only,
+        }
+    }
+
+    fn machine_pending() -> PositionStateMachine {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        let a = m.on_decision(Decision { score: 0.9 }, 99.0, 101.0, 1000);
+        assert!(matches!(a, Action::Place(_)), "giriş emri bekleniyordu");
+        // oid HENÜZ bilinmiyor -> Pending { oid: 0 }
+        assert!(m.oid_zero_pending(), "machine oid=0 pending olmali");
+        m
+    }
+
+    /// UNKNOWN sonrası cloid borsada varsa oid BAĞLANIR, pending çözülür.
+    #[test]
+    fn unknown_cloid_borsada_varsa_baglanir() {
+        let cloid = "abcd1234";
+        let rows = vec![
+            row("ETH", 111, Some("ffff0000"), true),  // başka coin
+            row("BTC", 222, Some("ffff1111"), false), // aynı coin, BAŞKA cloid
+            row("BTC", 333, Some(cloid), false),     // aynı coin, AYNI cloid
+            row("BTC", 444, None, true),             // cloid'siz stop
+        ];
+        let oid = find_by_cloid(&rows, "BTC", cloid).expect("cloid eslesmeli");
+        assert_eq!(oid, 333, "cloid borsada varsa oid BAĞLANMALI");
+
+        let mut m = machine_pending();
+        assert!(m.oid_zero_pending());
+        m.link_pending_oid(oid);
+        assert!(
+            matches!(m.state, PosState::Pending { oid: 333, .. }),
+            "link sonrasi oid 333 olmali, got {:?}",
+            m.state
+        );
+        assert!(!m.oid_zero_pending(), "pending cozulmus olmali");
+        // log formatı: "[RECON] cloid=… coin=… oid=… ile bağlandı"
+        let log = format!("[RECON] cloid={cloid} coin=BTC oid={oid} ile bağlandı");
+        assert!(log.contains(&format!("cloid={cloid}")));
+        assert!(log.contains("coin=BTC"));
+        assert!(log.contains("oid=333"));
+        assert!(log.ends_with("ile bağlandı"));
+    }
+
+    /// UNKNOWN sonrası cloid borsada YOKSA pending -> Flat revert.
+    #[test]
+    fn unknown_cloid_yoksa_flat_revert() {
+        let cloid = "deadbeef";
+        // Aynı coin'de duran BAŞKA cloid'li emir var — YANLIŞ eşleşme olmamalı
+        let rows = vec![
+            row("BTC", 222, Some("ffff1111"), false),
+            row("BTC", 444, None, true),
+        ];
+        assert!(
+            find_by_cloid(&rows, "BTC", cloid).is_none(),
+            "cloid yoksa ESLESME olmamali (coin tek basina yeterli DEGIL)"
+        );
+
+        let mut m = machine_pending();
+        assert!(m.oid_zero_pending());
+        if m.oid_zero_pending() {
+            m.state = PosState::Flat;
+        }
+        assert!(
+            matches!(m.state, PosState::Flat),
+            "cloid yoksa pending Flat revert etmeli, got {:?}",
+            m.state
+        );
+        let log = format!("[RECON] cloid={cloid} coin=BTC borsada YOK -> machine Flat revert");
+        assert!(log.contains("borsada YOK"));
+        assert!(log.ends_with("machine Flat revert"));
+    }
+
+    /// Coin ESLESSE bile cloid farklıysa bağlanmaz — çakışma koruması.
+    #[test]
+    fn ayni_coin_farkli_cloid_eslesmez() {
+        let rows = vec![row("BTC", 555, Some("bir"), false), row("BTC", 666, Some("iki"), false)];
+        assert_eq!(find_by_cloid(&rows, "BTC", "bir"), Some(555));
+        assert_eq!(find_by_cloid(&rows, "BTC", "iki"), Some(666));
+        assert_eq!(find_by_cloid(&rows, "BTC", "üç"), None);
+        // farklı coin, aynı cloid -> eşleşmez
+        assert_eq!(find_by_cloid(&rows, "ETH", "bir"), None);
+    }
+
+    /// ENTRY emri (reduce_only=false) refresh_orders() listesinde YOKTUR.
+    /// Reconciliation onu `refresh_open_orders_all()` ile bulmalı.
+    #[test]
+    fn refresh_orders_entry_emrini_gormez_hepsi_gorur() {
+        let entry = row("BTC", 777, Some("c777"), false);
+        let stop = row("BTC", 888, Some("c888"), true);
+        // parse_open_orders her ikisini de döner
+        assert_eq!(entry.cloid.as_deref(), Some("c777"));
+        assert!(!entry.reduce_only, "giris emri reduce_only=false");
+        assert!(stop.reduce_only);
     }
 }

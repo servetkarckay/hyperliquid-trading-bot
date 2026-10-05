@@ -1,11 +1,9 @@
-//! Marjin, pozisyon limitleri, drawdown kontrolü.
+//! RISK MANAGER — emir öncesi risk kapıları (pre_trade).
 //!
-//! HER emirden önce pre_trade() çağrılır; ihlal varsa emir İLETİLMEZ.
-//! Kontroller: trading halt (drawdown aşıldı), equity tabanı, drawdown%
-//! (peak equity'den düşüş), coin pozisyon limiti, toplam maruziyet,
-//! kaldıraç üst sınırı, coin başına açık emir sayısı.
-//! update_equity() her hesap güncellemesinde peak'i izler; limit aşımında
-//! otomatik halt — resume() yalnız operatör kararıyla.
+//! Kapılar: pozisyon/toplam notional tavanı, kaldıraç, minimum equity,
+//! max açık pozisyon, drawdown limiti. `is_halted` yalnız operatörle
+//! `resume` olur (otomatik açılış yok). İhlal → `RiskViolation` (emir
+//! gönderilmez); kapı EV/tahsis kapısından BAĞIMSIZdır (savunma derinliği).
 use std::collections::HashMap;
 
 use crate::executor::Position;

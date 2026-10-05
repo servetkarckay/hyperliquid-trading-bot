@@ -1,24 +1,20 @@
-//! Yüksek hacimli veri akışı yönetimi — tüm aktif coinler için.
+//! INGESTOR — shard'lı Hyperliquid WS bağlantıları ve olay çevirisi.
 //!
-//! load_universe(): metaAndAssetCtxs tek çağrıyla 234 coinden delist edilmişleri
-//! ve hacim eşiği altındakileri eler, günlük hacme göre sıralar.
-//!
-//! Ingestor::start(): coinleri N adet WS bağlantısına (shard) böler; her shard
-//! kendi coinleri için trades + activeAssetCtx (+ ilk N coine l2Book)
-//! aboneliği açar; shard 0 tüm evreni tek abonelikten getiren allMids'i ekler.
-//! Kopan shard otomatik yeniden bağlanıp abonelikleri tazeler.
-//!
-//! StreamEvent (birleşik akış):
-//! - Trade  : {coin, px, sz, ts, is_buy}      -> Aggregator
-//! - Book   : {coin, bids, asks, ts}          -> yerel defter takibi
-//! - Mids   : tüm evren mid haritası          -> tarama/rejim
-//! - Ctx    : {funding, OI, mark, oracle, premium, dayVlm} -> MarketCtx
-//! translate(): ham WsEvent'i StreamEvent'e çevirir; trades dizisi tek tek
-//! iletilir (HİÇ tick kaybolmaz — canlı testte 77->438 tick yakalandı).
+//! Görevler:
+//! 1. Evreni abonelik listelerine böler (shard başına ~160 kanal) ve
+//!    her shard için ayrı WS bağlantısı açar.
+//! 2. Ham WS kanallarını (trades / l2Book / activeAssetCtx / orderUpdates /
+//!    userEvents) `StreamEvent`'e çevirir (`translate`).
+//! 3. `IngestorConfig`: shard_count, min_day_volume_usd (düşük hacimli
+//!    coin filtresi), l2book_top_n, ctx_enabled.
+//! P1-D: evren DIŞARIDAN verilir (`with_universe`) — sessiz kırpma yok;
+//! abonelik listesi `TradingUniverse`'den üretilir.
 use std::collections::HashMap;
 
 use anyhow::Result;
-use serde_json::{json, Value};
+
+use crate::universe::TradingUniverse;
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use hyperliquid_api::{Config, Info, WsClient};
@@ -35,8 +31,6 @@ pub struct IngestorConfig {
     pub ctx_enabled: bool,
     pub include_trades: bool,
     pub include_all_mids: bool,
-    /// Test/limit için coin sayısı tavanı
-    pub max_coins: Option<usize>,
 }
 
 impl Default for IngestorConfig {
@@ -48,7 +42,6 @@ impl Default for IngestorConfig {
             ctx_enabled: true,
             include_trades: true,
             include_all_mids: true,
-            max_coins: None,
         }
     }
 }
@@ -110,25 +103,33 @@ pub async fn load_universe(info: &Info, cfg: &IngestorConfig) -> Result<Universe
             day_volume_usd: vol,
         });
     }
+    // P1-D: burada KIRPMA YAPILMAZ. Evren bir kez `TradingUniverse::build`
+    // içinde çözülür; ingestor `max_coins` ile kendi TOP-N'ini seçerse
+    // engine listesiyle AYRIŞIR (ayni sayi, farkli set).
     coins.sort_by(|a, b| b.day_volume_usd.total_cmp(&a.day_volume_usd));
-    if let Some(max) = cfg.max_coins {
-        coins.truncate(max);
-    }
     Ok(Universe { coins })
 }
 
 pub struct Ingestor {
     pub cfg: IngestorConfig,
-    pub universe: Universe,
+    /// P1-D: evren tek kaynaktan gelir (`TradingUniverse`), `Universe` DEĞİL.
+    pub universe: TradingUniverse,
 }
 
 impl Ingestor {
-    pub async fn new(cfg: Config, icfg: IngestorConfig) -> Result<Self> {
-        let info = Info::new(cfg)?;
-        let universe = load_universe(&info, &icfg).await?;
+    /// P1-D: evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
+    /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
+    pub async fn with_universe(
+        _cfg: Config,
+        icfg: IngestorConfig,
+        universe: TradingUniverse,
+    ) -> Result<Self> {
+        // Katman doğrulaması: engine listesi ile abonelik listesi birebir aynı
+        // olmalı. Uyuşmazlıkta burada hata verir -> bot başlamaz.
+        universe.verify_layers(&icfg)?;
         tracing::info!(
-            "evren: {} aktif coin (min hacim ${:.0}, l2book ilk {})",
-            universe.coins.len(), icfg.min_day_volume_usd, icfg.l2book_top_n
+            "evren: {} coin (min hacim ${:.0}, l2book ilk {})",
+            universe.len(), icfg.min_day_volume_usd, icfg.l2book_top_n
         );
         Ok(Self { cfg: icfg, universe })
     }
@@ -140,28 +141,27 @@ impl Ingestor {
         let (tx_out, rx) = mpsc::channel(8192);
         let (tx_raw, mut rx_raw) = mpsc::channel(8192);
         let shards = self.cfg.shard_count.max(1);
-        let top_n = self.cfg.l2book_top_n;
-
+        // P1-D: abonelik listesi TEK KAYNAKTAN (`TradingUniverse`) üretilir.
+        let all_subs = self.universe.subscription_list(&self.cfg);
+        let mut per_shard: Vec<Vec<Value>> = vec![Vec::new(); shards];
+        for v in all_subs {
+            match v["type"].as_str() {
+                // allMids coin-bağımsız: ilk shard'a konur
+                Some("allMids") => per_shard[0].push(v),
+                _ => {
+                    // coin'e göre shard dağıtımı — evren sırasından türetilir
+                    let i = self
+                        .universe
+                        .names()
+                        .iter()
+                        .position(|c| Some(c.as_str()) == v["coin"].as_str())
+                        .unwrap_or(0);
+                    per_shard[i % shards].push(v);
+                }
+            }
+        }
         for shard in 0..shards {
-            let mut subs: Vec<Value> = Vec::new();
-            if shard == 0 && self.cfg.include_all_mids {
-                subs.push(json!({ "type": "allMids" }));
-            }
-            for (i, coin) in self.universe.coins.iter().enumerate() {
-                if i % shards != shard {
-                    continue;
-                }
-                if self.cfg.include_trades {
-                    subs.push(json!({ "type": "trades", "coin": coin.name }));
-                }
-                if self.cfg.ctx_enabled {
-                    // canlı funding/OI/mark/oracle/premium (stratejiler 08, 09, 10)
-                    subs.push(json!({ "type": "activeAssetCtx", "coin": coin.name }));
-                }
-                if top_n > 0 && i < top_n {
-                    subs.push(json!({ "type": "l2Book", "coin": coin.name }));
-                }
-            }
+            let subs = std::mem::take(&mut per_shard[shard]);
             let tx_raw = tx_raw.clone();
             let cfg = api_cfg.clone();
             tracing::info!("shard {shard}: {} abonelik", subs.len());

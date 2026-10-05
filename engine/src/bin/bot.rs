@@ -1,54 +1,18 @@
-//! BOT — ana binary: NTP → ingestor WS → engine döngüsü.
-//! ENV:
-//!   ENGINE_COINS=BTC,ETH,SOL   (döngüde koşacak coinler; boş/"all" = tam evren)
-//!   ENGINE_INTERVAL=3600       (MUM aralığı, sn — döngü periyodu DEĞİL)
-//!   ENGINE_CYCLE_SECS=5        (motor döngü periyodu, sn)
-//!   ENGINE_MIN_SCORE=0.30      (ensemble eşiği)
-//!   ENGINE_TOP_N=3             (pozisyon tavanı)
-//!   ENGINE_BUDGET_USD=300      (döngü bütçesi; tahsis ayrıca $50/coin ile sınırlı)
-//!   ENGINE_HIST_BARS=4400      (indikatör ısınma penceresi)
-//!   ENGINE_FLATTEN=1           (açılışta tüm pozisyonları kapat)
-//!   ENGINE_TICK_CACHE=…        (öğrenilen tick hassasiyeti dosyası)
-//!   ENGINE_EXPLORE=1           (veri-açlığı keşif kuyruğu açık)
-//!   ENGINE_CRIT_THRESHOLD=5    (kill-switch: **karar-kritik** hata eşiği)
-//!   TRAIL_ON=1 TRAIL_ATR_K=1.5 TRAIL_MIN_STEP=0.25   (trailing stop, §8.3.15)
+//! BOT — üretim binary'si: NTP → ingestor WS → engine döngüsü.
 //!
-//! CANLI ÖĞRENME (§8.4 — backtest kaldırıldı):
-//!   LEARN_MIN_N=10             (bu n altında ağırlık DONMUŞ 1.0)
-//!   LEARN_FULL_N=30            (bu n üstü: tam kurallar + keşif kuyruğu dışı)
-//!   TRACK_STATE_PATH=…         (tracker persistence, atomik 5 dk dump)
-//!   ENSEMBLE_WEIGHTS_IN=…      (yalnız origin:"live" kabul edilir)
-//!   ENSEMBLE_LIVE_WEIGHTS_OUT=…
-//!   EV_TAKER_FEE_BPS=4.5 EV_SLIPPAGE_BPS=5.0 EV_MIN_DIST_BPS=75  (P0-D EV kapısı)
-//!
-//! Çalıştırma süresi yok — Ctrl+C ile kes.
+//! Sorumluluklar:
+//! 1. Tüm konfig ENV'den (ENGINE_* / TRAIL_* / LEARN_*); secret .env'den
+//!    (dotenvy) — restart'ta export gereksinimi yok.
+//! 2. Canlı ağırlık dosyası doğrulaması: `origin:"live"` zorunlu; bozuk
+//!    dosya → AÇILIŞ BAŞARISIZ (sessiz cold-start = öğrenme kaybı);
+//!    dosya yok → nötr cold-start.
+//! 3. WS fırtınası (>10 kopma/5dk) → ExitsOnly (kill YOK); health → engine.
+//! 4. Periyodik dump (300 sn): etkin ağırlıklar (ATOMİK tmp+rename),
+//!    tick cache, tracker state.
+//! 5. Restart exponential backoff (30..300 sn).
 
 use engine::engine_loop::{Engine, LoopConfig};
-use engine::track::TradeExit;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use utils::{logger, time};
-
-// S4: WS kuyruk izleme için basit sarmalayıcı
-struct MonitoredRx {
-    rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>,
-    pending: Arc<AtomicUsize>,
-}
-impl MonitoredRx {
-    fn new(rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>, pending: Arc<AtomicUsize>) -> Self {
-        Self { rx, pending }
-    }
-    async fn recv(&mut self) -> Option<hyperliquid_api::websocket::WsEvent> {
-        let event = self.rx.recv().await;
-        if event.is_some() {
-            self.pending.fetch_sub(1, Ordering::Relaxed);
-        }
-        event
-    }
-    fn pending(&self) -> usize {
-        self.pending.load(Ordering::Relaxed)
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -58,32 +22,100 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = hyperliquid_api::Config::from_env()?;
-    // ENGINE_COINS verilmez/boş/"all" → TÜM AKTİF EVREN
-    let mut ing_cfg = data::IngestorConfig {
+
+    // ================= P1-K — TESTNET ÖĞRENME DÖNEMİ (bootstrap) =================
+    // "Sıfırdan başlamak" = testin başlangıcında temizlemek; her restart'ta
+    // state silmek DEĞİL. Sayaç/epoch/öğrenme kalıcıdır.
+    let fresh_env = std::env::var("TESTNET_FRESH_START").ok().is_some_and(|v| v == "1");
+    let epoch_path = std::env::var("LEARNING_EPOCH_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
+    let tracker_path = std::env::var("TRACK_STATE_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into());
+    let trade_exits_path = std::env::var("TRADE_EXITS_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into());
+    let weights_path = std::env::var("ENSEMBLE_WEIGHTS_IN")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
+    let is_testnet = cfg.network == "testnet";
+    // YAPISAL KORUMA (her başlangıç yolunda): TESTNET epoch canlı endpoint'e
+    // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
+    engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
+
+    let decision = engine::epoch::fresh_start_decision(fresh_env, std::path::Path::new(&epoch_path).exists(), is_testnet);
+    match decision {
+        engine::epoch::FreshDecision::Invalid => {
+            anyhow::bail!("[TESTNET] TESTNET_FRESH_START yalnız testnet endpoint üzerinde çalışabilir — canlı anahtarlarla flatten/reset İSTENEMEZ");
+        }
+        engine::epoch::FreshDecision::Wipe => {
+            tracing::warn!("[TESTNET] FRESH_START: temiz deney başlatılıyor");
+            // 1) eski tracker state (öğrenme) — silinir → nötr w=1.0
+            match std::fs::remove_file(&tracker_path) {
+                Ok(()) => tracing::info!("[TESTNET] eski tracker state temizlendi: {tracker_path}"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => anyhow::bail!("[TESTNET] tracker state silinemedi: {e}"),
+            }
+            // 2) eski canlı ağırlık snapshot — silinir (look-ahead'den temiz)
+            match std::fs::remove_file(&weights_path) {
+                Ok(()) => tracing::info!("[TESTNET] eski canlı ağırlık snapshot temizlendi: {weights_path}"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => anyhow::bail!("[TESTNET] ağırlık snapshot silinemedi: {e}"),
+            }
+            // 3) eski trade_exits — ARŞİVLE (kayıp yok, yeni döneme karışmaz)
+            if std::path::Path::new(&trade_exits_path).exists() {
+                let ts = hyperliquid_api::now_ms();
+                let archive = format!("{trade_exits_path}.{ts}.prev");
+                std::fs::rename(&trade_exits_path, &archive)
+                    .map_err(|e| anyhow::anyhow!("[TESTNET] trade_exits arşivlenemedi: {e}"))?;
+                tracing::info!("[TESTNET] eski trade_exits arşivlendi: {archive}");
+            }
+            // 4) yeni epoch dosyası (Engine::new yükler; burada yazılırsa
+            //    "ilk çalıştırma" mührü atılmış olur → sonraki restart KORUR)
+            let epoch = engine::epoch::LearningEpoch::new_testnet(
+                hyperliquid_api::now_ms().to_string(),
+                hyperliquid_api::now_ms(),
+            );
+            epoch.save(&epoch_path)
+                .map_err(|e| anyhow::anyhow!("[TESTNET] yeni epoch yazılamadı: {e}"))?;
+            tracing::info!("[TESTNET] yeni öğrenme dönemi: {} (hedef {} GERÇEK kapanmış işlem)", epoch.epoch_id, engine::epoch::LEARNING_TRADES_TARGET);
+        }
+        engine::epoch::FreshDecision::KeepExisting => {
+            if fresh_env {
+                tracing::info!(
+                    "[TESTNET] FRESH_START istendi ama öğrenme dönemi zaten aktif → state KORUNDU                      (reset yalnız ilk çalıştırmada olur)"
+                );
+            }
+        }
+    }
+
+    // P1-D — TEK KAYNAKLI EVREN. Sıralama ÖNEMLİ:
+    //   1. `ENGINE_COINS` spec'i çözülür (tam sayı → TopByVolume, liste → Exact)
+    //   2. aktif evren çekilir (delist + hacim filtresi) — `max_coins` ARTIK YOK
+    //   3. `TradingUniverse::build` evreni BİR KEZ çözer (sessiz kırpma yok)
+    //   4. engine listesi, ingestor aboneliği, risk ve WS hepsi AYNI nesneden
+    //
+    // ÖNCE: `max_coins = Some(n)` ingestor kendi TOP-N'ini seçiyordu, engine
+    // config listesini kullanıyordu. Sayılar eşit, SET'ler farklıydı.
+    let ing_cfg = data::IngestorConfig {
         shard_count: 2,
         min_day_volume_usd: 0.0,
         l2book_top_n: 5,
-        max_coins: None,
         ..Default::default()
     };
-    let coins: Vec<String> = match std::env::var("ENGINE_COINS") {
-        Ok(v) if !v.trim().is_empty() && !v.trim().eq_ignore_ascii_case("all") => {
-            let c: Vec<String> = v
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            ing_cfg.max_coins = Some(c.len());
-            c
-        }
-        _ => {
-            // Önce ingestor'dan universe al, sonra engine coins'a ata
-            let ing = data::Ingestor::new(cfg.clone(), ing_cfg.clone()).await?;
-            let names = ing.universe.names();
-            tracing::info!("ENGINE_COINS boş → tam evren: {} coin (ingestor da aynı sete abone)", names.len());
-            names
-        }
-    };
+    let spec = data::UniverseSpec::parse(std::env::var("ENGINE_COINS").ok().as_deref())?;
+    let active = data::ingestor::load_universe(
+        &hyperliquid_api::Info::new(cfg.clone())?,
+        &ing_cfg,
+    )
+    .await?;
+    let universe = data::TradingUniverse::build(&active, spec)?;
+    let coins: Vec<String> = universe.names();
+    // Katman doğrulaması: engine listesi ile ingestor aboneliği birebir aynı
+    // olmalı; değilse CONFIG ERROR logu + bot başlamaz (sessiz kırpma yasak).
+    universe.verify_layers(&ing_cfg)?;
+    tracing::info!(
+        "[UNIVERSE] {} coin evren çözüldü (spec={}) — engine/ingestor/risk/WS aynı kaynaktan",
+        coins.len(),
+        universe.spec().describe()
+    );
     let interval: u64 = std::env::var("ENGINE_INTERVAL")
         .ok().and_then(|v| v.parse().ok()).unwrap_or(60);
     let min_score: f64 = std::env::var("ENGINE_MIN_SCORE")
@@ -120,8 +152,13 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.25);
+    // TP artık GERÇEK kapanıştır (P1-H): mesafesi (tp_atr_mult/sl_atr_mult)
+    // × gerçek risk mesafesidir (min 2×risk kapılı); giriş dolumunda
+    // reduce-only TP trigger borsaya asılır, fill → ExitReason::TakeProfit.
+    // Trailing yalnız SL'yi ratchet'ler.
     tracing::info!(
-        "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          (TP sabit 3×ATR — trailing TP kâr elde etmeyi düşürür, §8.3.15)"
+        "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          \
+         (yalnız SL ratchet'lenir; TP GERÇEK kapanıştır: giriş dolumunda reduce-only TP trigger asılır — entry_eff ± max(tp/sl×risk, 2×risk), §4)"
     );
     let lc = LoopConfig {
         coins,
@@ -137,69 +174,33 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut engine = Engine::new(cfg.clone(), lc).await?;
 
+    // P1-K: WIPE modunda temiz taban — TÜM pozisyonlar kapatılır ve açık
+    // emirler iptal edilir (ENGINE_FLATTEN'den bağımsız; bu bir deney
+    // başlangıcıdır). Normal restart'ta BUNLAR ÇALIŞMAZ.
+    if decision == engine::epoch::FreshDecision::Wipe {
+        engine.executor.cancel_all_open_orders().await?;
+        engine.flatten_positions().await;
+        tracing::warn!("[TESTNET] hesap düzleşti + açık emirler temizlendi — temiz deney başlangıcı");
+    }
+
     // akış + döngü
-    let ingestor = data::Ingestor::new(cfg.clone(), ing_cfg).await?;
+    let ingestor = data::Ingestor::with_universe(cfg.clone(), ing_cfg, universe.clone()).await?;
     let _rx = ingestor.start(cfg.clone());
 
     // KULLANICI EVENT AKIŞI (orderUpdates + userEvents) — gerçek fill geri beslemesi
     let user = std::env::var("USER_ADDRESS").unwrap_or_default();
-    // WS kuyruk izleme için sarmalayıcı
-    struct MonitoredRx {
-        rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>,
-        pending: Arc<AtomicUsize>,
-    }
-    impl MonitoredRx {
-        fn new(rx: tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>, pending: Arc<AtomicUsize>) -> Self {
-            Self { rx, pending }
-        }
-        async fn recv(&mut self) -> Option<hyperliquid_api::websocket::WsEvent> {
-            let event = self.rx.recv().await;
-            if event.is_some() {
-                self.pending.fetch_sub(1, Ordering::Relaxed);
-            }
-            event
-        }
-        fn pending(&self) -> usize {
-            self.pending.load(Ordering::Relaxed)
-        }
-    }
-
-    // S4: WS kuyruk izleme için sayaç
-    let pending_ws = Arc::new(AtomicUsize::new(0));
     let mut oe_rx = {
         if user.is_empty() {
             None
         } else {
-            let (tx, rx): (tokio::sync::mpsc::Sender<hyperliquid_api::websocket::WsEvent>, tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>) = tokio::sync::mpsc::channel(2048);
+            let ws = hyperliquid_api::WsClient::new(cfg.clone());
+            let (tx, rx) = tokio::sync::mpsc::channel(2048);
             let subs = vec![
                 serde_json::json!({ "type": "orderUpdates", "user": user.to_ascii_lowercase() }),
                 serde_json::json!({ "type": "userEvents", "user": user.to_ascii_lowercase() }),
             ];
-            let (tx, rx): (tokio::sync::mpsc::Sender<hyperliquid_api::websocket::WsEvent>, tokio::sync::mpsc::Receiver<hyperliquid_api::websocket::WsEvent>) = tokio::sync::mpsc::channel(2048);
-            let (monitored_tx, monitored_rx) = tokio::sync::mpsc::channel(2048);
-            
-            // Spawn 1: WS client
-            let cfg_ws = cfg.clone();
-            let subs_clone = subs.clone();
-            let ws_tx = tx.clone();
-            tokio::spawn(async move {
-                let ws = hyperliquid_api::WsClient::new(cfg_ws);
-                ws.run(subs.clone(), ws_tx).await.ok();
-            });
-            
-            // Spawn 2: Bridge WS events -> monitored channel
-            let pending_bridge = Arc::new(AtomicUsize::new(0));
-            let pending_bridge_clone = pending_bridge.clone();
-            let monitored_tx = monitored_tx.clone();
-            let mut rx = rx;
-            tokio::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    pending_bridge_clone.fetch_add(1, Ordering::Relaxed);
-                    if monitored_tx.send(event).await.is_err() { break; }
-                }
-            });
-            
-            Some((monitored_rx, pending_bridge))
+            tokio::spawn(async move { ws.run(subs, tx).await.ok(); });
+            Some(rx)
         }
     };
 
@@ -235,36 +236,41 @@ async fn main() -> anyhow::Result<()> {
     // Neden: o ağırlıklar look-ahead biased motordan geliyordu (S19). Motor
     // kaldırıldı; yine de bayat dosya sessizce yüklenirse sistem "eğitilmiş"
     // görünür ama veri biaslı olur — en kötü durum (görünmez yanlış).
+    // Dosya VARSA doğrulanır; geçersizse **AÇILIŞ BAŞARISIZ** (sessiz
+    // cold-start = öğrenilmiş ağırlıkların sessizce kaybı; P1-D'deki
+    // "universe uyuşmazlığı açılışı durdurur" disipliniyle aynı).
     match std::fs::read_to_string(&weights_in) {
-        Ok(txt) => match serde_json::from_str::<serde_json::Value>(&txt) {
-            Ok(v) => {
-                let origin = v
-                    .get("origin")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("(yok)");
-                if origin == "live" {
-                    let n = v
-                        .get("weights")
-                        .and_then(|w| w.as_object())
-                        .map(|o| o.len())
-                        .unwrap_or(0);
-                    engine.load_live_weights(&v);
-                    tracing::info!(
-                        "[LEARN] canlı ağırlıklar yüklendi: {n} strateji ← {weights_in} (origin=live)"
-                    );
-                } else {
-                    tracing::warn!(
-                        "[LEARN] {weights_in} REDDEDİLDİ: origin={origin:?} ≠ \"live\" \
-                         (backtest çıktısı kaldırıldı) — nötr cold-start (w=1.0)"
-                    );
-                }
+        Ok(txt) => {
+            let v = serde_json::from_str::<serde_json::Value>(&txt).map_err(|e| {
+                anyhow::anyhow!("[LEARN] canlı ağırlık dosyası PARSE EDİLEMEDİ ({weights_in}): {e}")
+            })?;
+            let rep = engine.load_live_weights(&v).map_err(|e| {
+                anyhow::anyhow!("[LEARN] canlı ağırlık dosyası GEÇERSİZ ({weights_in}): {e}")
+            })?;
+            if rep.defaulted.is_empty() {
+                tracing::info!(
+                    "[LEARN] canlı ağırlık dosyası doğrulandı: {weights_in} → {} strateji (origin=live)",
+                    rep.applied
+                );
+            } else {
+                tracing::info!(
+                    "[LEARN] canlı ağırlık dosyası doğrulandı: {weights_in} → {} strateji; \
+                     dosyada OLMAYAN {} strateji AÇIKÇA nötr 1.0: {:?}",
+                    rep.applied,
+                    rep.defaulted.len(),
+                    rep.defaulted
+                );
             }
-            Err(e) => tracing::warn!("[LEARN] {weights_in} parse edilemedi: {e} — nötr cold-start"),
-        },
-        Err(e) => tracing::warn!(
-            "[LEARN] ağırlık dosyası yok ({e}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => tracing::info!(
+            "[LEARN] ağırlık dosyası yok ({weights_in}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
             strategy::STRATEGY_COUNT
         ),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "[LEARN] canlı ağırlık dosyası okunamadı ({weights_in}): {e}"
+            ))
+        }
     }
     engine.explore_on = explore_on;
     engine.apply_effective_weights();
@@ -275,9 +281,6 @@ async fn main() -> anyhow::Result<()> {
     // [LEARN] tablosu 60 sn'de bir (döngü 5 sn → 12 döngüde bir). Log spam olmaz.
     let mut learn_table_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
     learn_table_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // S4: WS kuyruk izleme (her 60 sn)
-    let mut ws_q_cycle = tokio::time::interval(std::time::Duration::from_secs(60));
-    ws_q_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // P1-2: Restart exponential backoff
     let mut restart_count_last_hour: Vec<u64> = Vec::new();
@@ -338,7 +341,18 @@ async fn main() -> anyhow::Result<()> {
                 _ = dump_cycle.tick() => {
                     let w = engine.tracker_weights_json();
                     if !w.is_empty() && w != "{}" {
-                        let _ = std::fs::write(&weights_out, w);
+                        // ATOMİK YAZIM: bu dosya restart'ta AÇILIŞI ETKİLİYOR
+                        // (geçersizse bot açılmaz). Yarım yazılmış dosya
+                        // kalıcı bozulma olurdu → tmp + rename.
+                        let tmp = format!("{weights_out}.tmp");
+                        if let Err(e) = std::fs::write(&tmp, w.as_bytes())
+                            .and_then(|()| std::fs::rename(&tmp, &weights_out))
+                        {
+                            tracing::error!(
+                                "[LEARN] canlı ağırlık dosyası yazılamadı ({weights_out}): {e} \
+                                 — restart'ta bu ağırlıklar KAYBOLUR"
+                            );
+                        }
                     }
                     let _ = engine.executor.save_px_dec(&tick_cache_out);
                     // P0-B: tracker durumu diske. YAZILMAZSA restart'ta
@@ -349,21 +363,9 @@ async fn main() -> anyhow::Result<()> {
                 _ = learn_table_cycle.tick() => {
                     engine.log_learn_table();
                 }
-                // S4: WS kuyruk izleme (her 60 sn)
-                _ = ws_q_cycle.tick() => {
-                    if let Some((_, ref pending)) = oe_rx {
-                        let depth = pending.load(Ordering::Relaxed);
-                        let cap = 2048;
-                        let pct = (depth * 100) / cap;
-                        tracing::info!("[WS-Q] doluluk=%{} | bekleyen={} | toplam_kuyruk={}", pct, depth, cap);
-                        if pct >= 80 {
-                            tracing::warn!("[WS-Q] UYARI: kuyruk %{} dolu ({}/{})", pct, depth, cap);
-                        }
-                    }
-                }
                 oe_ev = async {
                     match oe_rx.as_mut() {
-                        Some((ch, _)) => ch.recv().await,
+                        Some(ch) => ch.recv().await,
                         None => std::future::pending::<Option<hyperliquid_api::websocket::WsEvent>>().await,
                     }
                 } => {

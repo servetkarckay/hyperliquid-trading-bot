@@ -1,8 +1,8 @@
-//! Yüksek performanslı loglama — tracing + tracing-subscriber (env-filter).
+//! LOGGER — tracing subscriber kurulumu.
 //!
-//! init(): LOG_LEVEL (.env) > RUST_LOG > "info" önceliğiyle subscriber'ı
-//! kurar; Once ile tek seferlik (ikinci çağrı no-op). .env henüz yüklenmemişse
-//! kendisi yüklemeyi dener. Tüm crate'ler tracing::info!/warn!/error! yazar.
+//! `init()`: LOG_LEVEL > RUST_LOG > "info" önceliğiyle tek seferlik
+//! (`Once`) subscriber kurar; .env'i kendisi yüklemeyi dener.
+//! İkinci çağrı no-op — çift subscriber yasak.
 use std::sync::Once;
 
 static INIT: Once = Once::new();

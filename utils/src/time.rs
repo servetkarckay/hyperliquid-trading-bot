@@ -1,13 +1,9 @@
-//! NTP senkronizasyonu ve gecikme ölçümü.
+//! TIME — NTP (SNTP v4) senkronizasyonu ve RTT ölçümü.
 //!
-//! Neden: Hyperliquid nonce'u unix ms'dir ve (T-2gün, T+1gün) penceresinde
-//! olmalı; yerel saat kayması emir reddine yol açabilir. SNTP v4 istemcisi
-//! 4 sunucuya (pool.ntp.org, time.google.com, time.cloudflare.com,
-//! time.apple.com) paralel sorgu atar, ofsetlerin MEDIAN'ını alır ve
-//! global ofset olarak uygular; now_ms() bundan sonra düzeltilmiş saattir.
-//!
-//! Gecikme ölçümü: rest_rtt() POST /info round-trip süresi; measure() genel
-//! senkron ölçüm. Emir öncesi/reconnect sonrası sağlık kontrolü için.
+//! `DEFAULT_SERVERS` havuzundan `sync` → ofset hesaplar; `now_ms`
+//! ofset-düzeltilmiş unix ms döner; `rest_rtt` borsa gecikme probu.
+//! Ağ engelli ortamda None döner (saat varsayımına DÜŞMEZ — offset'siz
+//! yol açıkça loglanmalı).
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
