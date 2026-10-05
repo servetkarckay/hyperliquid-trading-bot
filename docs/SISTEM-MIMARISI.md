@@ -139,7 +139,39 @@ fill (kapanış) → R = net PnL / (risk_px × size)
 
 ---
 
-## 7. Strateji durum raporu
+## 7. TESTNET öğrenme dönemi (P1-K)
+
+```
+TESTNET_FRESH_START=1  (İLK çalıştırma; epoch dosyası yoksa)
+  ├→ eski tracker state silinir → tüm stratejiler nötr w=1.0
+  ├→ eski canlı ağırlık snapshot silinir (look-ahead'den temiz)
+  ├→ eski trade_exits.jsonl ARŞİVLENİR (*.prev — kayıp yok, karışma yok)
+  ├→ yeni LearningEpoch yazılır: epoch_id / environment=testnet /
+  │   started_at / starting_trade_count=0 / completed_trade_count=0
+  └→ tüm pozisyonlar kapatılır + açık emirler iptal edilir (temiz taban)
+
+normal restart / ENV kaldırıldığında
+  └→ HİÇBİR state silinmez: sayaç + öğrenme kaldığı yerden devam eder
+```
+
+- **İşlem sayımı**: 1 gerçek kapanmış pozisyon = 1 `completed_trade_count`
+  (sinyal/emir/fill sayısı İŞLEM DEĞİLDİR; TP/SL/trailing/signal-exit/
+  emergency hepsi sayılır). Duplicate/replay fill'ler tid dedup ile
+  düşer → ikinci kez sayım yok. Sayaç `learning_epoch.json`'da ATOMİK
+  kalıcı; `trade_exits.jsonl` ile birebir tutarlı (her kapanışta tek
+  TradeExit + tek sayım).
+- Log: `[TESTNET] completed trades: N/100` … `100/100 tamamlandı — LIVE
+  geçişi için hazır (otomatik canlı işlem YOK)`.
+- 100 sonrası: `status = ready_for_live` kalıcı yazılır; canlı emir
+  **başlatılmaz** (operatör kararı).
+- **Yapısal koruma**: testnet epoch `NETWORK != testnet` veya canlı API
+  url ile BAŞLAMAZ (emir hiç atılmadan süreç durur); `TESTNET_FRESH_START`
+  yalnız testnet endpoint'te geçerlidir.
+- P0/P1 güvenlikleri aynen korunur: reconciliation, state recovery,
+  SL/TP, risk-lock, UNKNOWN reconciliation, live-weight validation,
+  tracker persistence, tid dedup.
+
+## 8. Strateji durum raporu
 
 `[STRAT]` (saatte bir) her stratejiyi sınıflandırır — sessiz ölü strateji yasak:
 
@@ -153,7 +185,7 @@ fill (kapanış) → R = net PnL / (risk_px × size)
 
 ---
 
-## 8. Test katmanları
+## 9. Test katmanları
 
 | Katman | Ne kanıtlar | Sayı |
 |---|---|---|
@@ -169,7 +201,7 @@ fill (kapanış) → R = net PnL / (risk_px × size)
 
 ---
 
-## 9. ENV referansı
+## 10. ENV referansı
 
 | ENV | Varsayılan | Anlam |
 |---|---|---|
@@ -190,17 +222,19 @@ fill (kapanış) → R = net PnL / (risk_px × size)
 | `ENSEMBLE_LIVE_WEIGHTS_OUT` | aynı dosya | atomik dump hedefi |
 | `ENGINE_TICK_CACHE` | config/tick_cache.json | öğrenilen tick hassasiyeti |
 | `TRADE_EXITS_PATH` | config/trade_exits.jsonl | trade-exit arşivi |
+| `TESTNET_FRESH_START` | (yok) | =1: İLK çalıştırmada temiz deney (sonraki restartlar state'i korur) |
+| `LEARNING_EPOCH_PATH` | config/learning_epoch.json | öğrenme dönemi + kalıcı işlem sayacı |
 | `EV_TAKER_FEE_BPS / EV_SLIPPAGE_BPS / EV_MIN_DIST_BPS` | 4.5 / 5.0 / 75 | TEK maliyet modeli |
 | `CLICKHOUSE_URL / REDIS_URL` | (boş) | kalıcılık; boşsa Memory fallback |
 | `RUST_LOG / LOG_LEVEL` | info | log seviyesi |
 
 ---
 
-## 10. Operasyon
+## 11. Operasyon
 
 - Başlatma: `scripts/start_bot.sh` (pgrep-temelli güvenli restart; önceki log `<log>.prev`).
 - Log: `/tmp/opencode/bot.log`.
 - Fiyat probu: `probe_px <COIN>`; trailing analitiği: `trail_report`.
 - CI: `.github/workflows/test.yml` — push/PR→master'da `cargo test --workspace`.
 
-*Test sayıları: engine 135, api 5, data 9, strategy 65 = **214 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-05.*
+*Test sayıları: engine 149, api 5, data 9, strategy 65 = **228 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-05 (P1-K).*

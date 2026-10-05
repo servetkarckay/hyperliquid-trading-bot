@@ -979,6 +979,23 @@ impl Executor {
         Ok(())
     }
 
+    /// P1-K — hesaptaki TÜM açık emirleri iptal et (fresh-start temizliği).
+    ///
+    /// `cancel_all(coin)` coin bazlıdır; fresh start HER coinin emirlerini
+    /// temizlemelidir. Kaynak: `openOrders` taraması (bot'un kendi
+    /// emirleri + trigger'lar) — her oid için tek POST, hata loglanır.
+    pub async fn cancel_all_open_orders(&mut self) -> anyhow::Result<usize> {
+        let rows = self.fetch_open_order_rows().await?;
+        let mut n = 0usize;
+        for row in &rows {
+            match self.cancel(&row.coin, row.oid).await {
+                Ok(()) => n += 1,
+                Err(e) => tracing::warn!("[RECON] iptal hatası coin={} oid={}: {e}", row.coin, row.oid),
+            }
+        }
+        Ok(n)
+    }
+
     /// Coin'deki tüm açık emirleri iptal et -> iptal edilen sayı
     pub async fn cancel_all(&mut self, coin: &str) -> Result<usize> {
         self.refresh_orders().await?;

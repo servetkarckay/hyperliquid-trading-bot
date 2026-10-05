@@ -11,6 +11,7 @@
 //! Kural: motor beslenmeden strateji çalışmaz; borsa yanıtı UNKNOWN
 //! olursa reconciliation yapılmadan state değişmez.
 pub mod engine_loop;
+pub mod epoch;
 pub mod executor;
 pub mod allocation_manager;
 pub mod state_machine;

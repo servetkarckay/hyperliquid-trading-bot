@@ -261,6 +261,11 @@ pub struct Engine {
     trade_exits_path: String,
     /// P1-3: Son recon zamanı (mutex yerine engine field)
     last_recon_ms: u64,
+    /// P1-K — TESTNET öğrenme dönemi: kalıcı işlem sayacı + ready_for_live.
+    /// (trade-exit kayıtlarının `epoch` etiketiyle KARIŞTIRMA — bu dönems
+    /// kapanmış-pozisyon sayacıdır.)
+    pub learning: crate::epoch::LearningEpoch,
+    learning_epoch_path: String,
     /// P0-A: Risk lock — black-swan/flatten-fail sonrası kalıcı kilit.
     /// Sadece black-swan/flatten-fail yolu true yapar.
     /// health_ok && !risk_locked = entries_allowed.
@@ -821,7 +826,40 @@ impl Engine {
         tracker.load_state(&std::env::var("TRACK_STATE_PATH")
             .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into()));
 
+        // P1-K: öğrenme dönemi — varsa YÜKLE (restart devamı), yoksa yeni
+        // TESTNET dönem aç (nötr başlangıç; tracker zaten fresh/boş).
+        let learning_epoch_path = std::env::var("LEARNING_EPOCH_PATH")
+            .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
+        let learning = match crate::epoch::LearningEpoch::load(&learning_epoch_path) {
+            Some(e) => {
+                tracing::info!(
+                    "[TESTNET] öğrenme dönemi sürüyor: {} — completed trades: {}/{}",
+                    e.epoch_id,
+                    e.completed_trade_count,
+                    crate::epoch::LEARNING_TRADES_TARGET
+                );
+                e
+            }
+            None => {
+                let e = crate::epoch::LearningEpoch::new_testnet(
+                    hyperliquid_api::now_ms().to_string(),
+                    hyperliquid_api::now_ms(),
+                );
+                if let Err(er) = e.save(&learning_epoch_path) {
+                    tracing::error!("[TESTNET] epoch dosyası yazılamadı ({learning_epoch_path}): {er}");
+                }
+                tracing::info!(
+                    "[TESTNET] yeni öğrenme dönemi: {} — nötr w=1.0 başlangıç, hedef {} GERÇEK kapanmış işlem",
+                    e.epoch_id,
+                    crate::epoch::LEARNING_TRADES_TARGET
+                );
+                e
+            }
+        };
+
         Ok(Self {
+            learning,
+            learning_epoch_path,
             loop_cfg,
             executor,
             info,
@@ -1021,10 +1059,34 @@ impl Engine {
         }
     }
 
+    /// P1-K — **GERÇEK kapanmış işlem** sayacı (TESTNET öğrenme dönemi).
+    ///
+    /// Yalnız pozisyonun GERÇEKTEN kapandığı yollardan çağrılır (bkz.
+    /// `write_ws_exit_record` — tek-yazım garantisi sayaç da tek tutar):
+    /// - sinyal sayısı / emir sayısı / fill sayısı İŞLEM DEĞİLDİR,
+    /// - duplicate/replay fill'ler tid dedup'la zaten düşer → ikinci kez
+    ///   yazım → ikinci kez sayım YOK,
+    /// - sayaç atomik kalıcıdır: restart'ta kaldığı yerden devam eder.
+    pub fn record_completed_trade(&mut self) {
+        let (n, ready_now) = self.learning.record_completed_trade();
+        let target = crate::epoch::LEARNING_TRADES_TARGET;
+        if ready_now {
+            tracing::warn!("[TESTNET] {n}/{target} tamamlandı — LIVE geçişi için hazır (otomatik canlı işlem YOK)");
+        } else {
+            tracing::info!("[TESTNET] completed trades: {n}/{target}");
+        }
+        if let Err(e) = self.learning.save(&self.learning_epoch_path) {
+            tracing::error!(
+                "[TESTNET] sayaç yazılamadı ({}): {e} — restart'ta sayı GERİYE düşebilir",
+                self.learning_epoch_path
+            );
+        }
+    }
+
     /// WS-yolu (makine PendingExit→Flat) çıkışının trade-exit kaydı.
     /// `entry_attr` YAKINMAZ kaldırıldığı için recon yolu ikinci kez YAZMAZ.
     fn write_ws_exit_record(
-        &self,
+        &mut self,
         coin: &str,
         attr: &EntryAttr,
         r: f64,
@@ -1077,6 +1139,9 @@ impl Engine {
         if let Err(e) = write_trade_exit(&self.trade_exits_path, &exit) {
             tracing::warn!("trade-exit yazılamadı ({coin}): {e}");
         }
+        // P1-K: TradeExit yazıldıysa bu GERÇEK kapanış sayılır (birebir
+        // tutarlılık: sayaç ↔ trade_exits.jsonl).
+        self.record_completed_trade();
     }
 
     /// **CANLI** ağırlık snapshot'ını yükle — `origin:"live"` zorunlu.
@@ -1792,7 +1857,11 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                         .max(f64::EPSILON);
                     let risk_usd = attr.risk_px * sz;
                     let pnl = self.executor.take_closed_pnl(&c);
-                    let _ = &excursion;
+                    // P1-K — TEK KAPANIŞ = TEK KAYIT = TEK SAYIM:
+                    // TradeExit her kapanışta BİR KEZ yazılır (excursion
+                    // yoksa sentetik boş kayıt — `write_ws_exit_record`),
+                    // sayaç da tam bir kez artar (trade_exits.jsonl ile
+                    // birebir tutarlı; restart'ta kalıcı).
                     match pnl {
                         Some(p) => {
                             let r = p / risk_usd.max(f64::EPSILON);
@@ -1801,42 +1870,20 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                                 hyperliquid_api::now_ms(),
                                 r,
                             );
-                            // A2 — trade_exits.jsonl yaz (append-only, epoch+git taşıyor)
-                            if let Some((fav, adv, t)) = &excursion {
-                                let exit_reason = attr.exit_reason.unwrap_or(ExitReason::Unknown);
-                                let exit_str = match exit_reason {
-                                    ExitReason::StopLoss => "stop",
-                                    ExitReason::TakeProfit => "tp",
-                                    ExitReason::TrailingStop => "trailing",
-                                    ExitReason::SignalExit => "signal",
-                                    ExitReason::EmergencyFlatten => "emergency",
-                                    ExitReason::Manual => "manual",
-                                    ExitReason::Unknown => "unknown",
-                                };
-                                let exit = TradeExit {
-                                    ts: hyperliquid_api::now_ms(),
-                                    epoch: self.epoch.clone(),
-                                    git: self.git_sha.clone(),
-                                    coin: c.clone(),
-                                    side: if t.is_long { "LONG" } else { "SHORT" }.into(),
-                                    strategies: attr.voters.clone(),
-                                    mfe_r: *fav,
-                                    mae_r: *adv,
-                                    dur_sn: (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
-                                    ratchet: t.ratchets,
-                                    cikis: exit_str.into(),
-                                    r_kapanis: r,
-                                    atr_bps: if t.atr_px > 0.0 { t.atr_px / t.entry_px * 10_000.0 } else { 0.0 },
-                                    k: self.loop_cfg.trail_atr_k,
-                                };
-                                let _ = write_trade_exit(&self.trade_exits_path, &exit);
-                            }
+                            self.write_ws_exit_record(&c, &attr, r, excursion);
                         }
-                        // WS dolumu kaçtıysa R bilinmiyor: kayıt yine de düşer
-                        // (24h bias'ının kaynağı), ama yanlış R yazmak daha kötü.
-                        None => tracing::warn!(
-                            "[R] {c} kapandı, dolum fiyatı kaçtı — R atlandı"
-                        ),
+                        // WS dolumu kaçtıysa/break-even: işlem GERÇEKTEN
+                        // kapandı → kayıt R=0 ile düşer (sessiz düşürme =
+                        // ters seçim bias; yanlış R yazmaktan iyidir).
+                        None => {
+                            tracing::warn!("[R] {c} kapandı, dolum fiyatı kaçtı — R=0 kaydedildi");
+                            self.tracker.record_outcome_r(
+                                attr.voters.clone(),
+                                hyperliquid_api::now_ms(),
+                                0.0,
+                            );
+                            self.write_ws_exit_record(&c, &attr, 0.0, excursion);
+                        }
                     }
                 }
             }

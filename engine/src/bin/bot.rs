@@ -22,6 +22,70 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = hyperliquid_api::Config::from_env()?;
+
+    // ================= P1-K — TESTNET ÖĞRENME DÖNEMİ (bootstrap) =================
+    // "Sıfırdan başlamak" = testin başlangıcında temizlemek; her restart'ta
+    // state silmek DEĞİL. Sayaç/epoch/öğrenme kalıcıdır.
+    let fresh_env = std::env::var("TESTNET_FRESH_START").ok().is_some_and(|v| v == "1");
+    let epoch_path = std::env::var("LEARNING_EPOCH_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
+    let tracker_path = std::env::var("TRACK_STATE_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into());
+    let trade_exits_path = std::env::var("TRADE_EXITS_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into());
+    let weights_path = std::env::var("ENSEMBLE_WEIGHTS_IN")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
+    let is_testnet = cfg.network == "testnet";
+    // YAPISAL KORUMA (her başlangıç yolunda): TESTNET epoch canlı endpoint'e
+    // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
+    engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
+
+    let decision = engine::epoch::fresh_start_decision(fresh_env, std::path::Path::new(&epoch_path).exists(), is_testnet);
+    match decision {
+        engine::epoch::FreshDecision::Invalid => {
+            anyhow::bail!("[TESTNET] TESTNET_FRESH_START yalnız testnet endpoint üzerinde çalışabilir — canlı anahtarlarla flatten/reset İSTENEMEZ");
+        }
+        engine::epoch::FreshDecision::Wipe => {
+            tracing::warn!("[TESTNET] FRESH_START: temiz deney başlatılıyor");
+            // 1) eski tracker state (öğrenme) — silinir → nötr w=1.0
+            match std::fs::remove_file(&tracker_path) {
+                Ok(()) => tracing::info!("[TESTNET] eski tracker state temizlendi: {tracker_path}"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => anyhow::bail!("[TESTNET] tracker state silinemedi: {e}"),
+            }
+            // 2) eski canlı ağırlık snapshot — silinir (look-ahead'den temiz)
+            match std::fs::remove_file(&weights_path) {
+                Ok(()) => tracing::info!("[TESTNET] eski canlı ağırlık snapshot temizlendi: {weights_path}"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => anyhow::bail!("[TESTNET] ağırlık snapshot silinemedi: {e}"),
+            }
+            // 3) eski trade_exits — ARŞİVLE (kayıp yok, yeni döneme karışmaz)
+            if std::path::Path::new(&trade_exits_path).exists() {
+                let ts = hyperliquid_api::now_ms();
+                let archive = format!("{trade_exits_path}.{ts}.prev");
+                std::fs::rename(&trade_exits_path, &archive)
+                    .map_err(|e| anyhow::anyhow!("[TESTNET] trade_exits arşivlenemedi: {e}"))?;
+                tracing::info!("[TESTNET] eski trade_exits arşivlendi: {archive}");
+            }
+            // 4) yeni epoch dosyası (Engine::new yükler; burada yazılırsa
+            //    "ilk çalıştırma" mührü atılmış olur → sonraki restart KORUR)
+            let epoch = engine::epoch::LearningEpoch::new_testnet(
+                hyperliquid_api::now_ms().to_string(),
+                hyperliquid_api::now_ms(),
+            );
+            epoch.save(&epoch_path)
+                .map_err(|e| anyhow::anyhow!("[TESTNET] yeni epoch yazılamadı: {e}"))?;
+            tracing::info!("[TESTNET] yeni öğrenme dönemi: {} (hedef {} GERÇEK kapanmış işlem)", epoch.epoch_id, engine::epoch::LEARNING_TRADES_TARGET);
+        }
+        engine::epoch::FreshDecision::KeepExisting => {
+            if fresh_env {
+                tracing::info!(
+                    "[TESTNET] FRESH_START istendi ama öğrenme dönemi zaten aktif → state KORUNDU                      (reset yalnız ilk çalıştırmada olur)"
+                );
+            }
+        }
+    }
+
     // P1-D — TEK KAYNAKLI EVREN. Sıralama ÖNEMLİ:
     //   1. `ENGINE_COINS` spec'i çözülür (tam sayı → TopByVolume, liste → Exact)
     //   2. aktif evren çekilir (delist + hacim filtresi) — `max_coins` ARTIK YOK
@@ -109,6 +173,15 @@ async fn main() -> anyhow::Result<()> {
         trail_min_step,
     };
     let mut engine = Engine::new(cfg.clone(), lc).await?;
+
+    // P1-K: WIPE modunda temiz taban — TÜM pozisyonlar kapatılır ve açık
+    // emirler iptal edilir (ENGINE_FLATTEN'den bağımsız; bu bir deney
+    // başlangıcıdır). Normal restart'ta BUNLAR ÇALIŞMAZ.
+    if decision == engine::epoch::FreshDecision::Wipe {
+        engine.executor.cancel_all_open_orders().await?;
+        engine.flatten_positions().await;
+        tracing::warn!("[TESTNET] hesap düzleşti + açık emirler temizlendi — temiz deney başlangıcı");
+    }
 
     // akış + döngü
     let ingestor = data::Ingestor::with_universe(cfg.clone(), ing_cfg, universe.clone()).await?;
