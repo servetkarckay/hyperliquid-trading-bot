@@ -2009,6 +2009,12 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
         let mut recon_notes: Vec<String> = Vec::new();
         if now_ms.saturating_sub(self.last_recon_ms) >= 30_000 {
             self.last_recon_ms = now_ms;
+            // P1-M — DEDUPE ÖNCESİ DRAIN ZORUNLU: P1-3 recon, spawn
+            // kanallarını tük-etmeden dedupe çalıştırıyordu → `sl_last_px`
+            // boş → SL-WARN seviye assert'i baypas → bot KENDİ TP'sini
+            // "artık stop" sanıp İPTAL EDİYORDU (ölçüldü: BIO/GRAM).
+            self.executor.drain_sl_results();
+            self.executor.drain_tp_results();
             let cands = self.executor.refresh_orders().await;
             let cands = match cands {
                 Ok(c) => c,
@@ -2031,7 +2037,10 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             // giriş/çıkış emirlerini bilir, `sl_orders` stop'ları
             // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
             // pozisyonunu borsada korumasız bırakırdı.
-            let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid);
+            // P1-M: TP trigger da bot'un KORUMA çiftidir — "yetim" sayıp
+            // iptal etmek, kâr hedefini borsadan SİLER (ölçüldü).
+            let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid)
+                || self.executor.tp_orders.get(&cn) == Some(&oid);
             if !known && !is_sl {
                 if let Err(e2) = self.executor.cancel(&cn, oid).await {
                     tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
@@ -4513,6 +4522,34 @@ mod dedupe_tp_tests {
         assert!(
             prod.contains("self.tp_last_px.insert(coin, px)"),
             "drain_tp_results tp_last_px YAZMIYOR"
+        );
+    }
+}
+
+/// ── P1-M devam — RECON YOLU BAĞLANTI ISPATI ─────────────────────────────
+#[cfg(test)]
+mod recon_path_tests {
+    /// P1-3 (30 sn) recon'u dedupe ÖNCESİ drain ZORUNLU — ölçülen vaka:
+    /// drain'siz dedupe `sl_last_px`'i boş görüp TP'yi "artık stop" sanıp
+    /// iptal ediyordu (BIO/GRAM).
+    #[test]
+    fn p13_recon_dedupe_oncesi_drain_yapar() {
+        let prod = include_str!("engine_loop.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+        let recon = prod.split("PERİYODİK RECON (30 sn)").nth(1).unwrap_or("");
+        let head = recon.split("let cands").next().unwrap_or("");
+        assert!(
+            head.contains("drain_sl_results") && head.contains("drain_tp_results"),
+            "P1-3 recon dedupe ÖNCESİ spawn kanallarını DRAIN ETMELİ: {head}"
+        );
+        // yetim temizliği TP'yi "yetim" SANMAMALI
+        let orphan = prod.split("Yetim emir temizliği").nth(1).unwrap_or("");
+        let orphan = orphan.split("for (cn, oid)").nth(1).unwrap_or("");
+        assert!(
+            orphan.contains("tp_orders"),
+            "yetim-emir temizliği TP oid'ini korumalı: {orphan}"
         );
     }
 }
