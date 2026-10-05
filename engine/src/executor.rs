@@ -59,6 +59,18 @@ pub fn make_cloid(coin: &str, px: f64, sz: f64, salt: u64) -> String {
 
 use hyperliquid_api::{Config, Exchange, Info, Tif, now_ms};
 
+/// P1-L — bu dinlenen reduce-only satır **bizim TP trigger'ımız mı?**
+///
+/// TP trigger-LIMIT'in REST `limitPx` değeri TP fiyatının KENDİSİDİR
+/// (ölçek yok); `tp_last_px` ile ±%0.1 eşleşme ayırt edicidir
+/// (SL trigger-MARKET'in `limitPx`'i trigger×1.05/0.95 → asla eşleşmez).
+/// `None`/0 = tp_last_px bilinmiyor → "TP" denemez (SL dedupe'una gider;
+/// oradaki SL-WARN seviye assert'i yine korur).
+pub fn is_our_tp_row(row_px: f64, reduce_only: bool, tp_last_px: Option<f64>) -> bool {
+    let Some(want) = tp_last_px else { return false };
+    reduce_only && want > 0.0 && row_px > 0.0 && (row_px - want).abs() / want <= 0.001
+}
+
 /// `user` kanalından gelen gerçek dolum (borsa ort. fiyatı burada verir)
 #[derive(Debug, Clone)]
 pub struct FillEvent {
@@ -241,8 +253,8 @@ pub struct Executor {
     /// kanal. `tokio::spawn` `&mut self` yakalayamaz; bu olmadan kurulan stop
     /// `sl_orders`'a **hiç** yazılmaz ve motor aynı stop'u tekrar kurar
     /// (ölçülen çift-stop hatasının asıl kaynağı).
-    pub sl_tx: tokio::sync::mpsc::UnboundedSender<(String, i64)>,
-    pub sl_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64)>,
+    pub sl_tx: tokio::sync::mpsc::UnboundedSender<(String, i64, f64)>,
+    pub sl_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64, f64)>,
     /// GİRİŞ EMİRİ ATILDI, henüz dolmadı: coin -> (hedef SL fiyatı, ts_ms).
     /// Dolum anında (fill gelir gelmez) borsa stop'u kurulur.
     /// DİKKAT: `run_cycle` bitmeden WS dolumu işlenemez (ana döngü `await`
@@ -275,8 +287,8 @@ pub struct Executor {
     /// `openOrders` taramasından oid geri yükleme eşleşmesi).
     pub tp_last_px: HashMap<String, f64>,
     /// Arka plandaki TP kurulumlarının oid'ini taşıyan kanal (`sl_tx` şeması).
-    pub tp_tx: tokio::sync::mpsc::UnboundedSender<(String, i64)>,
-    pub tp_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64)>,
+    pub tp_tx: tokio::sync::mpsc::UnboundedSender<(String, i64, f64)>,
+    pub tp_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64, f64)>,
     /// Son dolumun TP/SL oid eşleşme bayrağı (apply_fill → FillEvent taşıma).
     tp_fill_flags: HashMap<String, (bool, bool)>,
 }
@@ -822,8 +834,11 @@ impl Executor {
     /// Arka planda kurulan TP'lerin oid'ini kayda al (`drain_sl_results` şeması).
     pub fn drain_tp_results(&mut self) -> usize {
         let mut n = 0usize;
-        while let Ok((coin, oid)) = self.tp_rx.try_recv() {
-            self.tp_orders.insert(coin, oid);
+        while let Ok((coin, oid, px)) = self.tp_rx.try_recv() {
+            self.tp_orders.insert(coin.clone(), oid);
+            if px > 0.0 {
+                self.tp_last_px.insert(coin, px);
+            }
             n += 1;
         }
         if n > 0 {
@@ -1106,6 +1121,14 @@ impl Executor {
             let reduce_only = row.reduce_only;
             let is_buy = row.is_buy;
             let px = row.px;
+            // P1-L — **BİZİM TP'MİZ SL DEĞİLDİR**: reduce-only trigger-LIMIT
+            // TP de dinlenir; eski kural ("resting + reduceOnly = stop") TP'yi
+            // de aday sayıp dedupe EN YENİ oid'i tuttuğu için oid sırasına
+            // göre ya TP'yi ya SL'yi İPTAL EDİYORDU (ölçüldü: ZRO/AVAX/ONDO
+            // TP'leri, BIO'nun SL'i iptal edildi).
+            if is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn).copied()) {
+                continue;
+            }
             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
             if reduce_only {
                 let has_pos = self
@@ -1538,7 +1561,7 @@ impl Executor {
                                                 if is_long_tp { "LONG" } else { "SHORT" },
                                                 (tp - px) / px * 100.0
                                             );
-                                            let _ = tx2.send((c2, oid));
+                                            let _ = tx2.send((c2, oid, tp));
                                         }
                                         Err(e) => {
                                             tracing::warn!("[TP] {c2} TP kurulamadı (döngüde yeniden denenir): {e}");
@@ -1566,7 +1589,7 @@ impl Executor {
                                         (sl - px) / px * 100.0
                                     );
                                     // oid'i sahibe geri ver (bkz. `drain_sl_results`)
-                                    let _ = tx.send((c, oid));
+                                    let _ = tx.send((c, oid, sl));
                                 }
                                 Err(e) => tracing::error!(
                                     "[SL] {c}: borsa stop KURULAMADI ({e}) — pozisyon yalnızca bot içinde korunuyor"
@@ -1589,8 +1612,11 @@ impl Executor {
     /// (ölçülen hata).
     pub fn drain_sl_results(&mut self) -> usize {
         let mut n = 0usize;
-        while let Ok((coin, oid)) = self.sl_rx.try_recv() {
-            self.sl_orders.insert(coin, oid);
+        while let Ok((coin, oid, px)) = self.sl_rx.try_recv() {
+            self.sl_orders.insert(coin.clone(), oid);
+            if px > 0.0 {
+                self.sl_last_px.insert(coin, px);
+            }
             n += 1;
         }
         if n > 0 {

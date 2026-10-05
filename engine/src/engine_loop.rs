@@ -4463,3 +4463,56 @@ mod ws_finalize_tests {
         assert!(!should_finalize_on_ws(false, false, false, true));
     }
 }
+
+/// ── P1-L — DEDUPE ↔ TP SÖZLEŞMESİ (bot kendi TP'sini iptal etmemeli) ───
+#[cfg(test)]
+mod dedupe_tp_tests {
+    use crate::executor::is_our_tp_row;
+
+    /// Ölçülen vaka: dedupe_sl reduce-only TP trigger'ı "artık stop" sanıp
+    /// İPTAL EDİYORDU (ZRO/AVAX/ONDO TP'leri; BIO'da SL). Kural: TP satırı
+    /// SL adayına GİRMEZ.
+    #[test]
+    fn dedupe_sl_kendi_tp_orderini_iptal_etmez() {
+        let tp_px = 1.8568_f64;
+        // bizim TP trigger (reduce-only, limitPx = TP fiyatı) → TP
+        assert!(is_our_tp_row(tp_px, true, Some(tp_px)));
+        // yuvarlama toleransı ±%0.1 içinde
+        assert!(is_our_tp_row(tp_px * 1.0009, true, Some(tp_px)));
+        // SL trigger-MARKET satırı (limitPx = trigger×0.95/1.05) → TP DEĞİL
+        let sl_px = 1.9964_f64;
+        assert!(!is_our_tp_row(sl_px, true, Some(tp_px)), "SL satırı TP sanılmaz");
+        // tp_last_px bilinmiyor → TP DENEMEZ (SL yoluna gider; SL-WARN korur)
+        assert!(!is_our_tp_row(tp_px, true, None));
+        assert!(!is_our_tp_row(tp_px, true, Some(0.0)));
+        // reduce-only değil (giriş emri) → TP değil
+        assert!(!is_our_tp_row(tp_px, false, Some(tp_px)));
+        // bozuk fiyat
+        assert!(!is_our_tp_row(0.0, true, Some(tp_px)));
+        // sapma %0.1 üstü (farklı fiyat) → TP değil
+        assert!(!is_our_tp_row(tp_px * 1.01, true, Some(tp_px)));
+    }
+
+    /// Bağlantı ispatı (kaynak taraması): tanıma fonksiyonu refresh_orders'da
+    /// ÇAĞRILIYOR ve drain'ler *_last_px'i yazıyor — aksi halde koruma
+    /// yapısal değil, "fonksiyon var ama kimse çağırmıyor" tuzak olurdu.
+    #[test]
+    fn dedupe_baglantisi_kaynak_taramasi() {
+        let prod = include_str!("executor.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+        assert!(
+            prod.contains("is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn)"),
+            "refresh_orders TP tanımasını ÇAĞIRMIYOR (eski hata geri geldi)"
+        );
+        assert!(
+            prod.contains("self.sl_last_px.insert(coin, px)"),
+            "drain_sl_results sl_last_px YAZMIYOR (SL-WARN koruması baypas olurdu)"
+        );
+        assert!(
+            prod.contains("self.tp_last_px.insert(coin, px)"),
+            "drain_tp_results tp_last_px YAZMIYOR"
+        );
+    }
+}
