@@ -428,6 +428,22 @@ pub struct LiveWeightsLoad {
 /// P0-A: kilidin otomatik açılması için gereken ardışık flat döngü sayısı.
 pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
 
+/// P1-L — WS kapanış fill'i pozisyonu gerçekten kapattıysa kayıt ANINDA
+/// düşmeli (REST clearinghouse sync'ine BAĞIMLI DEĞİL — REST taraması
+/// 429/arıza yüzünden kaçarsa kapanış kaydı YİNE yazılır).
+///
+/// Koşullar: exchange-trigger fill (SL/TP oid eşleşmesi) + pozisyon artık
+/// haritada YOK (tam kapanış) + EntryAttr biliniyor. Kısmi dolum
+/// (`position_open=true`) finalize ÜRETMEZ — pozisyon sürüyor.
+pub fn should_finalize_on_ws(
+    is_sl_fill: bool,
+    is_tp_fill: bool,
+    position_open: bool,
+    has_entry_attr: bool,
+) -> bool {
+    (is_sl_fill || is_tp_fill) && !position_open && has_entry_attr
+}
+
 /// BLOCKER-1 RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
 ///
 /// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber vermez
@@ -963,8 +979,8 @@ impl Engine {
     pub fn ingest_oe(&mut self, channel: &str, data: &serde_json::Value) {
         self.executor.handle_ws_event(channel, data);
         // (oid, coin, dolan, kalan, ort.fiyat, red mi)
-        // (oid, coin, dolan, kalan, ort.fiyat, red mi, tp fill mi, sl fill mi)
-        let mut evs: Vec<(i64, String, f64, f64, f64, bool, bool, bool)> = Vec::new();
+        // (oid, coin, dolan, kalan, ort.fiyat, red mi, tp fill mi, sl fill mi, closedPnl)
+        let mut evs: Vec<(i64, String, f64, f64, f64, bool, bool, bool, f64)> = Vec::new();
         if channel == "orderUpdates" {
             for o in data.as_array().cloned().unwrap_or_default() {
                 let oid = o["order"]["oid"].as_i64().unwrap_or(0);
@@ -988,20 +1004,20 @@ impl Engine {
                     // F: oid eşleşmesi — bu dolum bizim TP/SL trigger'dan mı?
                     let is_tp = self.executor.tp_orders.get(&coin) == Some(&oid);
                     let is_sl = self.executor.sl_orders.get(&coin) == Some(&oid);
-                    evs.push((oid, coin, filled, (orig - filled).max(0.0), avg, false, is_tp, is_sl));
+                    evs.push((oid, coin, filled, (orig - filled).max(0.0), avg, false, is_tp, is_sl, 0.0));
                 } else if rejected {
-                    evs.push((oid, coin, 0.0, 0.0, 0.0, true, false, false));
+                    evs.push((oid, coin, 0.0, 0.0, 0.0, true, false, false, 0.0));
                 }
             }
         } else {
             // `user` kanalı: gerçek dolumlar (coin, px, sz, oid) — borsa
             // ortalama dolum fiyatını BURADA verir.
             for f in self.executor.drain_fills() {
-                evs.push((f.oid, f.coin, f.sz, 0.0, f.px, false, f.is_tp_fill, f.is_sl_fill));
+                evs.push((f.oid, f.coin, f.sz, 0.0, f.px, false, f.is_tp_fill, f.is_sl_fill, f.closed_pnl));
             }
         }
 
-        for (oid, coin, filled, remaining, avg, rejected, is_tp_fill, is_sl_fill) in evs {
+        for (oid, coin, filled, remaining, avg, rejected, is_tp_fill, is_sl_fill, fill_pnl) in evs {
             let mut exited_now = false;
             if let Some(m) = self.machines.get_mut(&coin) {
                 let st_before = m.state.clone();
@@ -1026,6 +1042,36 @@ impl Engine {
                         exit_reason_from_fill(is_tp_fill, is_sl_fill, ratchets, false, false)
                     {
                         apply_exit_reason(&mut attr.exit_reason, reason);
+                    }
+                }
+                // P1-L — ANINDA FİNALİZE: pozisyon bu fill'le kapandıysa
+                // (haritadan düşmüşse) TradeExit + R + sayaç ŞİMDİ yazılır;
+                // REST clearinghouse taramasına bağımlı DEĞİL (429/arıza
+                // kapanış kaydını kaçıramaz — ölçülen ZRO/AVAX vakası).
+                let pos_open = self
+                    .executor
+                    .positions()
+                    .get(&coin)
+                    .map(|p| p.szi.abs() > 1e-12)
+                    .unwrap_or(false);
+                if should_finalize_on_ws(is_sl_fill, is_tp_fill, pos_open, self.entry_attr.contains_key(&coin)) {
+                    let excursion = self.trail.remove(&coin).map(|t| {
+                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                        let fav = if t.is_long { (t.peak_px - t.entry_px) / risk }
+                            else { (t.entry_px - t.peak_px) / risk };
+                        let adv = if t.is_long { (t.worst_px - t.entry_px) / risk }
+                            else { (t.entry_px - t.worst_px) / risk };
+                        (fav, adv, t)
+                    });
+                    if let Some(attr) = self.entry_attr.remove(&coin) {
+                        let risk_usd = attr.risk_px * attr.size.abs().max(f64::EPSILON);
+                        let r = fill_pnl / risk_usd.max(f64::EPSILON);
+                        self.tracker.record_outcome_r(
+                            attr.voters.clone(),
+                            hyperliquid_api::now_ms(),
+                            r,
+                        );
+                        self.write_ws_exit_record(&coin, &attr, r, excursion);
                     }
                 }
             }
@@ -1720,7 +1766,8 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
         if let Err(e) = self.rest_snapshot().await {
             tracing::warn!("rest tarama: {e}");
         }
-        if let Ok(st) = self.info.clearinghouse_state(self.executor.user()).await {
+        match self.info.clearinghouse_state(self.executor.user()).await {
+            Ok(st) => {
             if let Some(eq) = st["marginSummary"]["accountValue"]
                 .as_str()
                 .and_then(|s| s.parse::<f64>().ok())
@@ -1733,7 +1780,18 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             // tetiklenmiyordu, 3 açık pozisyon varken 4. giriş açıldı).
             // Aynı REST yanıtı zaten çekildi → buradan bedava senkron.
             if let Some(arr) = st["assetPositions"].as_array() {
-                let closed = self.executor.sync_positions_from(arr);
+                let mut closed = self.executor.sync_positions_from(arr);
+                // P1-L — REST delta TEK BAŞINA YETMEZ: `apply_fill` kapanan
+                // pozisyonu haritadan düştüğü için 'gone' delta kapanışları
+                // YUTAR (ölçüldü: ZRO/AVAX SL tetiklendi, kayıt YOK).
+                // Gerçek WS işareti: closed_pnl haritasındaki closing fill'ler
+                // → union; ikisi de aynı bloktan TEK kayıt + TEK sayım alır
+                // (entry_attr remove tek-yazım garantisi).
+                for c in self.executor.closed_pnl_coins() {
+                    if !closed.contains(&c) {
+                        closed.push(c);
+                    }
+                }
                 // P0-A: harita bu döngüde BORSADAN tazelendi → auto-unlock
                 // flat doğrulaması sayacı ilerleyebilir.
                 self.rest_sync_verified = true;
@@ -1887,6 +1945,10 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     }
                 }
             }
+            }
+            Err(e) => tracing::warn!(
+                "[PZ] clearinghouseState çekilemedi: {e} — pozisyon haritası/öğrenme kaydı bu döngüde ertelendi (bayat veriyle karar YOK)"
+            ),
         }
         // `trail` haritasını da pozisyonlarla senkronla: kapanmış coinin
         // MFE/MAE kaydı kalırsa sonraki girişte yanlış tepe ile başlar.
@@ -4313,10 +4375,14 @@ mod fill_protection_tests {
         let closed_pnl = 0.0f64;
         // YENİ KURAL: `dir` kaynak; closedPnl karar için KULLANILMAZ.
         assert!(!is_open_fill(dir));
-        // ÜRETİM İSPATI: kapı apply_fill'de dir ile çağrılır — kaynak
-        // taraması `closed == 0.0` İLE KORUMA KURULAMAZ oldugunu korur.
+        // ÜRETİM İSPATI 1: koruma kapısı closedPnl'e BAĞLANAMAZ (kaynak taraması).
+        // ÜRETİM İSPATI 2: closing fill (dir=Close) closedPnl=0 olsa bile
+        // closed_pnl HARİTASINA YAZILMALI — recon kapanış kaydının WS
+        // işareti. `closed != 0.0` İLE HARİTAYA YAZIM YASAK (eski hata:
+        // break-even kapanışlar kayboluyordu).
         let src = include_str!("executor.rs");
-        for (i, l) in src.lines().enumerate() {
+        let prod = src.split("#[cfg(test)]").next().unwrap_or("");
+        for (i, l) in prod.lines().enumerate() {
             let t = l.trim_start();
             if t.starts_with("//") || t.starts_with("///") {
                 continue;
@@ -4327,6 +4393,46 @@ mod fill_protection_tests {
                 i + 1
             );
         }
+        // ÜRETİM İSPATI 2 (kaynak taraması): closed_pnl YAZIM koşulu
+        // `closed != 0.0` İÇEREMEZ — eski hata: break-even kapanışlar
+        // haritaya yazılmıyor → kapanış kaydı kayboluyordu.
+        let entry_line = prod
+            .lines()
+            .position(|l| l.contains("self.closed_pnl.entry(coin.clone())"))
+            .expect("closed_pnl yazım noktası bulunmalı");
+        let around: String = prod
+            .lines()
+            .skip(entry_line.saturating_sub(6))
+            .take(6)
+            .map(|l| {
+                let t = l.trim_start();
+                if t.starts_with("//") || t.starts_with("///") {
+                    ""
+                } else {
+                    l
+                }
+            })
+            .collect();
+        assert!(
+            !around.contains("closed != 0.0"),
+            "closed_pnl yazımı closedPnl'e koşullu — break-even kapanış kaybolur: {around}"
+        );
+        let mut seen = false;
+        for (i, l) in prod.lines().enumerate() {
+            let t = l.trim_start();
+            if t.starts_with("//") || t.starts_with("///") {
+                continue;
+            }
+            if t.contains("closed_pnl.entry(coin.clone())") {
+                seen = true;
+            }
+            if seen && t.contains("closed != 0.0") {
+                panic!("satır {}: closed_pnl yazımı closedPnl'e koşullu — break-even kapanış kaybolur: {l}", i + 1);
+            }
+            if seen && !t.ends_with(',') && !t.is_empty() && !t.contains("closed_pnl") && !t.starts_with('*') {
+                break;
+            }
+        }
         let _ = closed_pnl;
     }
 
@@ -4336,5 +4442,24 @@ mod fill_protection_tests {
         assert!(is_open_fill("Open Long"));
         assert!(is_open_fill("Open Short"));
         assert!(is_open_fill("Long > Short"), "flip yeni tarafa açılış");
+    }
+}
+
+/// ── P1-L — WS ANINDA FİNALİZE sözleşmesi ───────────────────────────────
+#[cfg(test)]
+mod ws_finalize_tests {
+    use super::*;
+
+    /// SL/TP fill pozisyonu kapattı → finalize ANINDA (REST'e bağımlı değil).
+    #[test]
+    fn ws_closing_fill_finalizes_immediately() {
+        assert!(should_finalize_on_ws(true, false, false, true), "SL fill + pozisyon kapandı");
+        assert!(should_finalize_on_ws(false, true, false, true), "TP fill + pozisyon kapandı");
+        // kısmi dolum → pozisyon SÜRÜYOR → finalize YOK
+        assert!(!should_finalize_on_ws(true, false, true, true));
+        // attr yok (restart devralınan) → bu yoldan finalize YOK (recon yolu alır)
+        assert!(!should_finalize_on_ws(false, true, false, false));
+        // kapanış bayrağı yok (normal giriş fill'i) → finalize YOK
+        assert!(!should_finalize_on_ws(false, false, false, true));
     }
 }

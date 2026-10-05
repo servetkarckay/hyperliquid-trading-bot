@@ -1353,6 +1353,7 @@ impl Executor {
         let oid = f["oid"].as_u64().unwrap_or(0) as i64;
         let closed: f64 = f["closedPnl"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let dir_field: &str = f["dir"].as_str().unwrap_or("");
+        let mut closing_counted: std::collections::HashSet<String> = std::collections::HashSet::new();
         // P0-4: TID DEDUP — aynı transaction ID iki kez işlenmesin
         let tid = f["tid"].as_str().unwrap_or("");
         if !tid.is_empty() && crate::track::tid_seen(tid) {
@@ -1361,8 +1362,14 @@ impl Executor {
         }
         self.fill_count += 1;
         self.realized_pnl += closed;
-        if !coin.is_empty() && closed != 0.0 {
+        // P1-L: KAPANIŞ fill'i closedPnl=0 olsa bile (break-even) haritaya
+        // yazılmalı — recon bloğunun kapanış kaydının tek güvenilir WS
+        // işaretidir (0 yazmamak = break-even kapanışların kaybolması).
+        // Açılış fill'lerinde closedPnl zaten 0'dır ve pozisyon açılır —
+        // ayrım `dir` ile yapılır.
+        if !coin.is_empty() && is_open_fill(dir_field) == false && !closing_counted.contains(&coin) {
             *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;
+            closing_counted.insert(coin.clone());
         }
         tracing::info!(oid, coin = %coin, sz, px, closed, "fill(user)");
         if !coin.is_empty() && sz > 0.0 {
@@ -1606,6 +1613,14 @@ impl Executor {
     pub fn realized_pnl(&self) -> f64 {
         self.realized_pnl
     }
+    /// P1-L — bekleyen KAPANIŞ fill'i olan coinler (WS closing fill'ler).
+    /// Recon bloğu bunları REST 'gone' deltasıyla BİRLİŞTİRİR: `apply_fill`
+    /// pozisyonu haritadan düştüğü için 'gone' delta kapanışları YUTAR —
+    /// kapanış kaydının gerçek kaynağı bu haritadır.
+    pub fn closed_pnl_coins(&self) -> Vec<String> {
+        self.closed_pnl.keys().cloned().collect()
+    }
+
     /// Coin'in biriken gerçekleşmiş PnL'ini oku ve SİL (pozisyon kapanınca
     /// R-çarpanı bir kez hesaplanmalı; ikinci kez sayılırsa bias olur).
     pub fn take_closed_pnl(&mut self, coin: &str) -> Option<f64> {
