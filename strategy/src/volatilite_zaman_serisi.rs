@@ -1,15 +1,9 @@
-//! VOLATİLİTE ZAMAN SERİSİ — GARCH(1,1) koşullu volatilite.
+//! VOLATİLİTE ZAMAN SERİSİ — GARCH(1,1) koşullu vol sıkışması.
 //!
-//! AMAÇ: volatilite kümelenmesini modelleyip yarınki volu tahmin etmek.
-//! HESAPLAMA:
-//! 1. Son 300 bar log getirilerine deterministik GARCH fit
-//!    (varyans hedefleme ω = var·(1-α-β), koordinat inişi)
-//! 2. Koşullu varyans serisi -> σ_next (yarın beklenen vol)
-//! 3. Uzun dönem vol: sqrt(ω/(1-α-β))
-//! 4. Karar: sıkışma oranı σ_next/σ_longrun < 0.85 -> genişleme
-//!    beklentisi; yön son 24 bar momentumundan, güç sıkışma
-//!    derinliğine bağlı [0-0.7]. Normal bölge Hold.
-//! GEREKLİ VERİ: >=200 mum (fit güvenilirliği).
+//! 1. GARCH(1,1) deterministik fit → σ_next / σ_long-run oranı.
+//! 2. Oran <0.85 (sıkışma) + kısa momentum işareti → Long/Short
+//!    [(0.85−ratio)×2, ≤0.7] — genişleme + yön.
+//! 3. <200 mum veya varyans bozuk → Skip (SAHTE tahmin yok).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

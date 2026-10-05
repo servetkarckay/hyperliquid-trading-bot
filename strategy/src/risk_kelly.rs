@@ -1,19 +1,11 @@
-//! RİSK KELLY — işlem BOYUTU hesabı (yön üretmez, **AUXILIARY**).
+//! RİSK KELLY — işlem boyutu hesabı (yön üretmez, AUXILIARY).
 //!
-//! FORMÜL:
-//!   f* = p - (1-p)/b  (binary Kelly; p=win rate, b=win/loss oranı)
-//!   pragmatik = f*·0.5 (yarım Kelly)
-//!
-//! **VERİ KAYNAĞI — SADECE GERÇEK CANLI KANIT** (`MarketInput::
-//! portfolio_win_rate` / `portfolio_wl_ratio`; engine tracker'ın toplam
-//! canlı işlem penceresinden doldurur).
-//!
-//! KANIT YOK → `Skip`. Sabit `%45 win-rate / 1.8:1` varsayımıyla
-//! **gerçek para sizing YAPILMAZ** — eski kod tam olarak bunu yapıyordu ve
-//! örnek istatistiği canlı veri gibi gösteriyordu. Çıktı sinyal (Hold/Skip)
-//! olduğundan actual allocation'a etkisi zaten YOKTUR; not yalnız
-//! öneri/bilgidir ve bu yüzden durum `AUXILIARY`'dir.
-//! GEREKLİ VERİ: equity + en az 1 canlı işlem kanıtı.
+//! 1. f* = p − (1−p)/b — p ve b YALNIZ tracker'ın GERÇEK canlı kanıtından
+//!    (`MarketInput::portfolio_*`); kanıt yok → Skip
+//!    ("sabit %45 KULLANILMADI" — eski kod örnek istatistiği canlı veri
+//!    gibi gösteriyordu).
+//! 2. Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle kanıtlı);
+//!    not yalnız boyut ÖNERİSİdir.
 use crate::{MarketInput, Signal, StratStatus, Strategy};
 use math::portfolio;
 

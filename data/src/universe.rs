@@ -1,33 +1,12 @@
-//! P1-D: **TEK KAYNAKLI evren** (`TradingUniverse`).
+//! UNIVERSE — evrenin TEK KAYNAĞI (P1-D).
 //!
-//! Sorun: `ENGINE_COINS` verildiğinde engine bu isimleri kullanıyordu,
-//! ingestor ise `max_coins = Some(n)` ile **kendi** TOP-N'ini seçiyordu.
-//! `engine.len() == ingestor.len()` olabiliyor ama **set'ler farklıydı**:
-//! engine sessizce kırpmasız çalışıyor, ingestor hacme göre sıralayıp
-//! kesiyordu. Aynı sayı, farklı coinler = risk hesabı ile veri akışı
-//! birbirini görmüyor.
-//!
-//! Çözüm: evren **bir kez** burada çözülür ve **her katman aynı nesneden**
-//! türetilir:
-//!
-//! ```text
-//!   UniverseSpec (ENGINE_COINS)
-//!        │
-//!        ▼
-//!   load_universe()  ── aktif/delist filtresi + hacim filtresi
-//!        │
-//!        ▼
-//!   TradingUniverse::build()   ◄── TEK KARAR NOKTASI (burada bir kez)
-//!        │
-//!        ├── engine_scan_list()      -> Engine döngü listesi
-//!        ├── subscription_list()     -> Ingestor WS abonelikleri
-//!        ├── risk_universe()         -> risk limitleri
-//!        └── ws_universe()           -> WS kanal kapsamı
-//! ```
-//!
-//! **Sessiz kırpma yok.** Exact listede bulunamayan bir coin hata üretir
-//! (sessizce düşürülmez). Başlangıçta engine/ingestor set'leri birebir
-//! karşılaştırılır; uyuşmazlıkta bot başlamaz.
+//! 1. `UniverseSpec::parse(ENGINE_COINS)`: boş/"all" → tüm aktif evren;
+//!    isim listesi → `Exact`; tamsayı N → `TopByVolume` (sessiz kırpma
+//!    YASAK — exact listede olmayan coin → hata).
+//! 2. `TradingUniverse`: coin seti + abonelik listesi; volume-eşitlikte
+//!    deterministik kırıcı (volume desc, isim asc).
+//! 3. `verify_layers`: engine/ingestor/risk/WS katmanlarının aynı evreni
+//!    kullandığını doğrular — uyuşmazlıkta AÇILIŞ DURUR.
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};

@@ -1,18 +1,11 @@
-//! REST info sorguları — resmi api/info-endpoint.md (+perpetuals,+spot).
+//! OKUMA — Hyperliquid info endpoint metotları.
 //!
-//! Stratejilerin ihtiyaç duyduğu tüm okuma fonksiyonları:
-//! - meta / meta_and_asset_ctxs : evren (szDecimals, maxLeverage, isDelisted)
-//!   + bağlam (funding, openInterest, dayNtlVlm, premium, mark/oracle/midPx)
-//! - all_mids                   : tüm coinlerin mid fiyatları (+spot @index)
-//! - l2_book                    : emir defteri snapshot (levels=[bids,asks])
-//! - candle_snapshot            : OHLCV (max 5000; endTime GERÇEK ms şart)
-//! - funding_history            : tarihsel funding oranları
-//! - clearinghouse_state        : hesap durumu (GERÇEK master adres gerekli)
-//! - user_fees / open_orders / user_fills / order_status : hesap sorguları
-//! - predicted_fundings, spot_meta : ek kaynaklar
-//! - name_to_asset              : coin adı -> perp asset ID (universe index)
-//!
-//! Tüm fonksiyonlar POST /info kullanır; paginasyon 500 kayıt/istek.
+//! `Info` üzerinde market ve hesap sorguları; her biri ham serde_json
+//! döner (şema ayrıştırma crate dışında tiplidir):
+//! `meta`, `meta_and_asset_ctxs`, `all_mids`, `l2_book`, `candle_snapshot`
+//! (endTime ms ZORUNLU), `funding_history`, `clearinghouse_state`
+//! (master adres şart), `user_fees`, `open_orders`, `user_fills`,
+//! `order_status`, `predicted_fundings`, `name_to_asset` (coin→asset ID).
 use std::collections::HashMap;
 
 use serde_json::{json, Value};

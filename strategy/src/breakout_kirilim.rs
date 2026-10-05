@@ -1,13 +1,13 @@
-//! BREAKOUT — sıkışma ön koşuluyla kırılım OLAY dedektörü.
+//! BREAKOUT — sıkışma ön koşullu kırılım OLAY dedektörü.
 //!
-//! SÜREÇ:
-//!   1. Sıkışma: Bollinger(20,2) genişlik yüzdeliği < %35 (son 100 bar)
-//!   2. Tetik: fiyat son 30 barın zirvesine/ducini geçmesi
-//!   3. Onay: taker akışı + OI değişimi
-//!   4. Kırılım = OLAY, yön tahmini değil — iki tarafta simetrik
-//! Sinyal: sıkışma yoksa Hold (sıkışma olmadan girilmez), tetikte
-//! Long/Short [0.75].
-//! GEREKLİ VERİ: >=120 mum + canlı taker/OI.
+//! 1. Sıkışma: BB(20,2) genişliğinın kırılımdan **5 bar önceki** değeri,
+//!    ÖNCESİNİN 100 ölçümü içinde ilk %35'lik dilimde (P1-I düzeltmesi:
+//!    eski kod kırılım barında ölçüyordu → yüzdelik daima %100 → ölü strateji).
+//! 2. Tetik: fiyat son 30 barın zirve/dibini geçer (kırılım OLAY — yön
+//!    tahmini değil, iki yan simetrik).
+//! 3. Onay: taker akışı (yok → Skip) + OI teyidi (yok → kırılım sinyal
+//!    ÜRETMEZ — Hold "OI teyidi YOK").
+//! 4. ≥125 mum / BB serisi ≥105; aksi Skip.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

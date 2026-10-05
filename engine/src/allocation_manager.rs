@@ -1,14 +1,15 @@
-//! SERMAYE TAHSİS MOTORU — "sinyal geldiyse gir" değil, "evreni tara,
-//! sırala, birbirine benzeyenleri ele, en iyi ve en ÇEŞİTLİ N coine gir,
-//! en güçlü olana en çok para ver".
+//! ALLOCATION MANAGER — sermaye tahsisi ve TEK maliyet modeli.
 //!
-//!wall Street portföy optimizasyonu katmanı:
-//!   1. İNANÇ SKORU (conviction):
-//!      oy yoğunluğu × dinamik-Kelly ağırlığı ÷ ATR risk marjı
-//!   2. KORELASYON FİLTRESİ (çeşitlendirme zorunluluğu):
-//!      seçilmiş adaylar arasındaki korelasyon > %70 ise aday düşer
-//!      (mega bahis denetimi — borsa çöküşü koruması)
-//!   3. TAHSİS: conviction-temelli oranlı tahsis (fractional Kelly dilimleri)
+//! Görevler:
+//! 1. `conviction`: ağırlık-payı × genişlik × güç / volatilite → aday
+//!    conviction'ı; `allocate`: min_conviction + korelasyon (>%70 LOOSE
+//!    üstü çakışan düşürülür) + keşif indirimi → `Candidate`.
+//! 2. `sl_tp`: SL = mid ± sl_atr_mult×ATR; TP `tp_from_entry` (P1-E TEK
+//!    formül: max((tp/sl)×risk, 2×risk), gerçek dolumdan).
+//! 3. `CostModel` (F): EV kapısı ile yürütme bandı TEK modelden —
+//!    `expected_slippage(spread) = base + 0.5×spread`,
+//!    `execution_cost = fee + slip + spread`, taban = max(EV_MIN_DIST, 3×rt).
+//! 4. MIN_NOTIONAL_USD=$10 altı tahsis → emir üretme.
 
 use std::collections::HashMap;
 

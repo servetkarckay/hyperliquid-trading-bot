@@ -1,22 +1,15 @@
-//! POZİSYON DURUM MAKİNESİ — strateji kararı ile emir iletimi arasındaki
-//! yönetim katmanı.
+//! STATE MACHINE — pozisyon yaşam döngüsü (idempotent).
 //!
-//! DURUMLAR:  Flat → Pending(entry) → InPosition → PendingExit → Flat
-//!
-//! GARANTİLER:
-//! 1. IDEMPOTENCY: Pending/InPosition iken aynı yönlü sinyal YENİ emir
-//!    ÜRETMEZ (bot restart/tekrar sinyal tuzakları)
-//! 2. RED GERİ BESLEMESİ: API reddi → anında Flat (strateji "gittim"
-//!    sanmasın)
-//! 3. KISMİ DOLUM: kalan boyut Pending'te korunur; timeout'a uğrarsa
-//!    iptal yete/kalanı sıuup edilir (sweep)
-//! 4. TRAILING STOP: InPosition'da fiyat zirve izleme; geri çekilme
-//!    -> ExitNow (reduce_only)
-//! 5. STATE RECOVERY: başlangıçta borsadaki gerçek pozisyondan kurulur
-//!    (Flat başlanmaz)
-//!
-//! KARAR ŞELKELERİ (Action):
-//!   Place(BotOrder) / Cancel(oid) / Sweep(BotOrder) / ExitNow(BotOrder) / Nothing
+//! `Flat → Pending → InPosition → PendingExit → Flat`.
+//! Garantiler:
+//! 1. `on_decision`: Flat'ta eşik üstü skor → Place; Pending'te aynı
+//!    yön → Nothing (çift emir yok); InPosition'da ters eşiği geçen skor →
+//!    ExitNow (reduce_only, GERÇEK boyut).
+//! 2. `force_exit` (B): ensemble exit kanalı → aynı garanti; Flat'ta
+//!    HİÇBİR emir üretmez, PendingExit idempotent.
+//! 3. `on_rejected`: red → Flat (yeniden giriş serbest).
+//! 4. `on_order_status`: dolum/iptal geri beslemesi; bilinmeyen oid no-op.
+//! 5. `oid_zero_pending`: yalnız oid==0 bekleyen girişte revert serbest.
 
 use std::collections::HashMap;
 

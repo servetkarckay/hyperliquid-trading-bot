@@ -1,5 +1,8 @@
-//! Strateji test yardımcıları — DETERMİNİSTIK mum üretimi.
-//! (test-only modül; lib.rs'ten açılır)
+//! STRATEJİ TEST YARDIMCILARI — deterministik mum üretimi (yalnız test).
+//!
+//! Sabit tohumlu, zamansız seriler: `candle` (kapalı mum), `flat` (düz
+//! seri), `linear` (rampa), `set/set_last` (bar değiştirme) — testler
+//! ENV/zamana/rafineryale BAĞLI DEĞİLDİR; aynı girdi → aynı sinyal.
 #[cfg(test)]
 pub mod helpers {
     use crate::Candle;

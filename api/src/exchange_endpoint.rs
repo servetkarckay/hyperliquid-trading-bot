@@ -1,3 +1,14 @@
+//! EMİR İLETİMİ — Hyperliquid exchange endpoint zarfları.
+//!
+//! Görevler:
+//! 1. `Exchange::place_limit / place_ioc / place_trigger / batch_place /
+//!    batch_cancel`: tek ve toplu emir iletimi (cloid'li idempotency).
+//! 2. `OrderStatuses`: yanıt durum ayrıştırma — `resting_oid` (dinledi),
+//!    `filled` (anında doldu), `error`.
+//! 3. `WireOrder / BatchPlace / Tif`: wire şemaları.
+//! 4. Yuvarlama yardımcıları: `round_5sig / round_px_wire / round_px_for /
+//!    round_sz_up` — borsanın 5-anlamlı-basamak fiyat ve szDecimals lot
+//!    kuralları.
 use serde_json::{json, Value};
 
 use crate::signing::{float_to_wire, HyperliquidClient, ExchangeOutcome};

@@ -1,13 +1,12 @@
 //! DOW TEORİSİ — birincil trend yapısı kontrolü (tahmin değil ELEME).
 //!
-//! HESAPLAMA:
-//! 1. Pivotlar: ±10 bar merkezi en yüksek/en düşük (prime swings)
-//! 2. Yapı: son iki pivot -> HH+HL (yükseliş) veya LH+LL (düşüş)
-//! 3. Hacim doğrulayıcı: yükseliş barlarının hacmi > düşüşlerin mi
-//! 4. EMA50 konumu (birincil trend teyidi)
-//! 5. Karar: HH+HL+hacim onayı+E50 üstü -> Long [0.6]; ayna Short;
-//!    eksikte Hold (eleme — yapı bozuksa sinyal yok).
-//! GEREKLİ VERİ: >=100 mum + hacim.
+//! 1. Pivotlar: ±10 bar merkezli en yüksek/en düşük (onay ±10 bar gecikir
+//!    — sızıntısız, prefix-replay testli).
+//! 2. Yapı: HH+HL (yükseliş) / LH+LL (düşüş) + hacim doğrulayıcı
+//!    (yükseliş bar hacmi baskınlığı) + EMA50 konumu.
+//! 3. Dört onay tamamsa Long/Short [0.6]; eksikte Hold (eleme).
+//! 4. EMA hesaplanamazsa Skip — SAHTE onay yok (eski `unwrap_or(0.0)`
+//!    sahte Long üretiyordu).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

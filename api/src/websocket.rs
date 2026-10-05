@@ -1,14 +1,10 @@
-//! Canlı WebSocket akışları — resmi api/websocket.md (+subscriptions,
-//! +timeouts-and-heartbeats).
+//! CANLI AKIŞ — Hyperliquid WebSocket istemcisi.
 //!
-//! Abonelik tipleri: candle, l2Book (her değişimde TAM snapshot), trades,
-//! allMids, activeAssetCtx (canlı funding/OI/mark), orderUpdates, userEvents...
-//! Sunucu 60 sn sessizlikte bağlantıyı kapatır -> 50 sn'de bir {"method":"ping"}
-//! gönderilir, {"channel":"pong"} cevabı süzülür.
-//!
-//! `run()`: bağlan -> abone ol -> mesajları (channel, data) mpsc kanalına
-//! pompala; kopma halinde 5 sn sonra kendini yeniden bağla. Bot'a düşen tek
-//! iş: Receiver'dan WsEvent tüketmek.
+//! `WsClient::run(subscriptions, tx)`: abonelikleri açar, her mesajı
+//! `WsEvent { channel, data }` olarak pompalar.
+//! - 50 sn'de bir ping; sessiz bağlantı kopsun diye
+//! - 5 sn'de bir otomatik yeniden bağlanma (reconnect)
+//! - alıcı kapatılırsa görev sonlanır (leak yok)
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};

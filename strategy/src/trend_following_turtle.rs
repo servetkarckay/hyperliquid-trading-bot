@@ -1,12 +1,12 @@
-//! TURTLE TREND FOLLOWING — Donchian 20/55 + ATR birim boyutlandırma.
+//! TURTLE TREND FOLLOWING — Donchian 20/55 + ATR birim boyut.
 //!
-//! KURALLAR:
-//!   Giriş: kapanış önceki 20-bar zirvesini aşarsa Long [0.7];
-//!          20-bar dibi aşarsa Short
-//!   Filtre: 55-bar kanal — fiyat üstündeyse trend sürüyor (piramit
-//!           koşulu yeni 20-bar kırılımı), altındaysa long Exit
-//!   Birim: %1 equity / ATR14 → ATR-bazlı boyut
-//! GEREKLİ VERİ: >=56 mum + equity.
+//! 1. Giriş: kapanış önceki 20-bar kanalın üstünde → Long [0.7];
+//!    altında → Short [0.7] (kanal ÖNCEKİ barın — kırılım konvansiyonu).
+//! 2. Filtre: 55-bar kanal üstü → Hold (trend sürüyor, piramit koşulu).
+//! 3. **Ölü sinyal düzeltmesi (P1-I)**: `price<ll55→Exit` dalı yapısal
+//!    ölüydü (ll55 ≤ ll20 ⟹ Short önce); kural `long_exit_signal()`
+//!    helper'ına taşındı — engine LONG pozisyonda Exit yönlendirir.
+//! 4. ATR ≤ 0 / kanal serisi kısa → Skip; <56 mum → Skip.
 use crate::{closes, highs, lows, MarketInput, Signal, Strategy};
 use math::indicators;
 

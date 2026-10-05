@@ -1,12 +1,10 @@
-//! OI/LİKİDASYON — ΔOI × ΔP matrisi karar tablosu.
+//! OI LİKİDASYON — ΔOI × ΔP kadrans matrisi.
 //!
-//! HL'de piyasa geneli likidasyon feed'i yok; OI değişiminden ÇIKARIMSAL:
-//!   OI↑ + P↑ = yeni long girişi -> Long (trend devam)
-//!   OI↑ + P↓ = yeni short girişi -> Short
-//!   OI↓ + P↓ = long likidasyon kaskadı -> kontra Long (dip)
-//!   OI↓ + P↑ = short squeeze -> kontra Short (zirve)
-//! Güç: |ΔOI|/son fiyat göreliliği [0.2-0.8]; kontra yönler %30 zayıf.
-//! GEREKLİ VERİ: OI deltası (MarketCtx OI serisi) + >=13 mum.
+//! 1. OI↑ + P↑ → Long (trend devam); OI↑ + P↓ → Short; OI↓ + P↓ →
+//!    kontra Long (likidasyon kaskadı, ×0.7); OI↓ + P↑ → kontra Short
+//!    (squeeze, ×0.7).
+//! 2. Güç: |ΔOI|/px göreliliği [0.2–0.8]; ΔOI yok veya <13 mum → Skip
+//!    (HL'de ayrı likidasyon feed'i yok — OI'dan çıkarımsal; sahte kadrans yok).
 use crate::{closes, MarketInput, Signal, Strategy};
 
 pub struct OiLikidasyon;

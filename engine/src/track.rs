@@ -1,34 +1,16 @@
-//! CANLI İSTATİSTİK İZLEYİCİ — dinamik Kelly geri beslemesi.
+//! TRACK — canlı öğrenme: R kaydı, etkin ağırlıklar, Kelly kanıtı, metrikler.
 //!
-//! AMAÇ: "son 1 yılda %60 idi ama son 20 işlemde %30'a düştü" durumunda
-//! sistem kendi kendini düzeltsin:
-//!   - her kapanan pozisyon → katkı veren stratejilere (win/loss) işlenir
-//!   - ROLLING WINDOW: son 100 işlem (eski kayıt: pencere dışına düşer)
-//!   - f* = p − (1−p)/b pencereden; b = 1.8 (win/loss payı, sabit başlangıç)
-//!   - win-rate <%35 → ensemble ağırlığı 0; f*>0 → pay
-//!
-//! Attribution: emir açılışında katkı veren stratejiler kaydedilir
-//! (allocation_manager::Vote.voters).
-//!
-//! # NÖTR COLD-START (P0-B)
-//!
-//! Backtest motoru **kaldırıldı** (look-ahead bias kaynağı — S19). Eğitim
-//! tamamen canlıya taşındı: 18 strateji **eşit ağırlıkla (w=1.0)** başlar ve
-//! gerçek dolumlarla tracker üzerinden yavaşça öğrenir.
-//!
-//! | pencere n | davranış |
-//! |---|---|
-//! | `n < LEARN_MIN_N` (10) | **w = 1.0 sabit** — 2-3 rastgele işlem ağırlığı öldürmesin |
-//! | `10 ≤ n < LEARN_FULL_N` (30) | dinamik formül, clamp `[0.1, 2.0]` |
-//! | `n ≥ LEARN_FULL_N` (30) | tam kurallar (`win < %35` → 0) |
-//!
-//! ENV: `LEARN_MIN_N`, `LEARN_FULL_N`.
-//!
-//! # VERİ TOPLAMA DÖNEMİ (A2) — trade_exits.jsonl
-//!
-//! Her işlem kapanışında append-only JSONL yazılır (config/trade_exits.jsonl).
-//! Şema: epoch, git_sha, coin, side, strategies, mfe_r, mae_r, dur_sn, ratchet,
-//! cikis, r_kapanis, atr_bps, k. Log rotasyonu/restart veriyi yok etmez.
+//! Görevler:
+//! 1. `StrategyTracker::record_outcome_r`: kapanan işlemin R-çarpanını
+//!    GERÇEK fill verisinden pencereye (TRACK_WINDOW=100) yazar.
+//! 2. `effective_weights`: n<min_n → donmuş 1.0 (cold-start); min_n..full_n
+//!    → dinamik Kelly formülü clamp [0.1,2.0]; n≥full_n → win<%35 → 0.
+//! 3. `PerformanceMetrics`: win_rate / pf / E[R] / avg±R / maxDD_R /
+//!    ardışık kayıp / MFE/MAE — uydurma sayı yok (kanıt yoksa None).
+//! 4. Persistence: `save_state/load_state` (atomik tmp+rename; origin="live"
+//!    doğrulaması — backtest çıkışı RED).
+//! 5. `Health`: hata taksonomisi (transient/kritik) + ExitsOnly kipi +
+//!    kill-switch (karar-kritik seri).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;

@@ -1,23 +1,11 @@
-//! # data
+//! DATA — piyasa verisi hattı: WS bağlantı → tick → mum + bağlam.
 //!
-//! Veri katmanı: evren geneli (tüm aktif coinler) canlı veri akışı,
-//! tick->candle dönüşümü, piyasa bağlamı serileri ve kalıcı depolama.
-//!
-//! VERİ AKIŞI (üretim topolojisi):
-//!   Hyperliquid WS (shard'lı bağlantılar)
-//!     -> Ingestor   : trades + allMids + activeAssetCtx + l2Book olayları
-//!     -> Aggregator : tick -> çoklu interval candle (1m..1d)
-//!     -> MarketCtx  : canlı funding/OI/mark serileri (ΔOI, basis)
-//!     -> Storage    : Redis (SICAK önbellek) + ClickHouse (KALICI arşiv)
-//!
-//! Depolama rolleri:
-//! - Redis  : SON durumun milisaniyelik erişimi (mids haritası, coin başına
-//!            son ctx). Strateji sorguları API'ye gitmeden cache'ten okur;
-//!            TTL ile bayat veri otomatik düşer. REDIS_URL ile aktif.
-//! - ClickHouse: yüksek hacimli tick/candle/ctx zaman serilerinin kalıcı
-//!            arşivi; SQL ile geçmiş analizi, backtest verisi, ΔOI/funding
-//!            serileri. CLICKHOUSE_URL ile aktif.
-//! İkisi de opsiyoneldir: URL boşsa sistem Memory ile çalışır.
+//! Akış topolojisi:
+//! `Ingestor` (shard'lı WS) → `StreamEvent` → `Aggregator` (tick→mum,
+//! taker akışı) / `MarketCtx` (funding/OI/mark serileri) → motor.
+//! Kalıcılık `Storage` arkasında: ClickHouse (üretim), Memory (test/fallback),
+//! Redis (sıcak mids/ctx önbelleği). Evren `TradingUniverse` tek kaynaktır
+//! (engine/ingestor/risk/WS aynı listeden).
 pub mod aggregator;
 pub mod backfill_job;
 pub mod ingestor;

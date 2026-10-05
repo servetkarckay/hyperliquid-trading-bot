@@ -1,15 +1,10 @@
-//! KLASİK GÖSTERGELER — 5 göstergeli birleşik skor.
+//! KLASİK GÖSTERSGELER — 5 göstergeli birleşik skor katmanı.
 //!
-//! KATMANLAR (her biri oy verir):
-//!   RSI14     — 30-50 dip bölge: +1; >70: -0.5 (aşırı — tuzak kuralı)
-//!   MACD hist — işaret ±1
-//!   Bollinger — alt banda temas +1; üst banda -1
-//!   OBV       — son 10 bar artışsa +0.5
-//!   VWAP20    — fiyat üstünde +0.5; altında -0.5
-//! SKOR: >=2 -> Long, <=-2 -> Short [0-0.8]; yoksa Hold.
-//! KLAVUZ: "RSI>70 -> SHORT" içiçe tuzak KULLANILMAZ; gösterge
-//! konum + hacim onayıyle birlikte oylar.
-//! GEREKLİ VERİ: >=60 mum.
+//! Skor: RSI14 (30-50 → +1 dip bölge; >70 → −1 aşırı — SİMETRİ);
+//! MACD hist işareti (±1); Bollinger alt/üst temas (±1); OBV 10-bar
+//! eğimi (±0.5 — aşağı kol eklendi, gizli Long yanlılığı giderildi);
+//! VWAP konumu (±0.5). Skor ≥+2 → Long, ≤−2 → Short; arası Hold.
+//! <60 mum → Skip; None göstergeler oy KATMAZ (nötr fallback yok).
 use crate::{closes, last, MarketInput, Signal, Strategy};
 use math::indicators;
 

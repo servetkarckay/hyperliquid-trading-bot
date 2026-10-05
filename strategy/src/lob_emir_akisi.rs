@@ -1,13 +1,9 @@
 //! LOB EMİR AKIŞI — defter dengesi + taker akışı ÇİFT teyidi.
 //!
-//! AMAÇ: emir defterinin kısa vadeli yön öngörüsü.
-//! HESAPLAMA:
-//! 1. Defter dengesi: üst N seviye hacim imbalance (bids-asks)/(bids+asks)
-//! 2. Taker oranı: agresif alış hacmi payı (0..1)
-//! 3. Momentum onayı: son 12 bar net değişim (çelişki varsa nötr)
-//! 4. Karar: imbalance>+0.15 VE taker>%55 VE momentum -%1 üstü -> Long;
-//!    tersler Short. Tek başına yeterli değil — çift onay kuralı.
-//! GEREKLİ VERİ: defter dengesi + taker akışı + >=30 mum.
+//! 1. Girdi: book_imbalance (5 seviye) + taker_ratio (300 sn pencere) +
+//!    ≥30 mum; herhangi biri yok → Skip (SAHTE sinyal yok).
+//! 2. Long: imb>+0.15 VE taker>%55 VE momentum −%1 üstü; Short ayna.
+//! 3. Tek onay yeterli DEĞİL — çift onay kuralı (nötr → Hold).
 use crate::{closes, MarketInput, Signal, Strategy};
 
 pub struct LobEmirAkisi;

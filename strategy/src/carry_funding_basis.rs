@@ -1,23 +1,12 @@
-//! CARRY — funding oranı taşıma + basis yardımcıları.
+//! CARRY — funding taşıma + basis yardımcıları.
 //!
-//! AMAÇ: funding receiver tarafında pozisyon aç → carry kazan.
-//! Hyperliquid mekanizması (DOĞRULANMIŞ — P1-I ölçek denetimi):
-//!   - **API `funding` alanı SAATLİK orandır.** Kanıt:
-//!     (1) `fundingHistory` kayıtları 1 saat (3.600.000 ms) aralıklıdır,
-//!     (2) BTC `activeAssetCtx.funding` = 1.25e-5 ≈ faiz(1.04e-5/h) +
-//!         küçük premium — HL'in **saatlik** funding formülünün tam imzası
-//!         (`rate = interest + clamp(premium, −5e-5, +5e-4)`),
-//!     (3) funding HER SAAT hesaplanır ve ödenir (UI'daki "8s" gösterimi
-//!         = hourly × 8 — gösterim ölçeği, API alanı değil).
-//!   - **pozitif funding → LONG'lar SHORT'lara ÖDER** (short receiver)
-//!   - **negatif funding → SHORT'lar LONG'lara ÖDER** (long receiver)
-//!   Yani: funding > 0 → Short aç; funding < 0 → Long aç
-//! HESAPLAMA:
-//!   yıllık funding = hourly × 24 × 365 = funding × 8760
-//!   eşik: |yıllık| > %10 anlamlı; pozitif → Short, negatif → Long
-//! Yardımcılar: basis_pct(mark, spot_mid) — perp-spot sapması;
-//! find_spot_mid — allMids'ten anlamlı USD spot çifti.
-//! GEREKLİ VERİ: canlı ctx (funding/mark) — data::MarketCtx.
+//! 1. HL mekanizması (DOĞRULANMIŞ): API `funding` alanı **SAATLİK**
+//!    (fundingHistory 1h aralıklı; BTC 1.25e-5 = faiz+premium imzası);
+//!    funding HER SAAT ödenir; UI'daki "8s" gösterimi = hourly×8.
+//!    `FUNDING_ANNUALIZATION = 24×365 = 8760`.
+//! 2. Yön: pozitif funding → LONG öder → SHORT carry; negatif → LONG.
+//!    Eşik |yıllık| > %10; altı Hold (sıfır funding Hold).
+//! 3. ctx yok → Skip. Yardımcılar: `basis_pct`, `find_spot_mid`.
 use crate::{MarketInput, Signal, Strategy};
 use data::market_ctx::CtxState;
 

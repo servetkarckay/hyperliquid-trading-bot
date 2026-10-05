@@ -1,32 +1,14 @@
-//! # hyperliquid-api
+//! API — Hyperliquid veri ve emir erişim katmanı (façade).
 //!
-//! Hyperliquid veri erişim katmanı (REST + WebSocket + imzalı emir iletimi).
-//! Bu katman PROJE TEKNİ BEYANI: her fonksiyon Hyperliquid resmi API'siyle
-//! birebir çalışır, imza zinciri resmi Python SDK 0.24 ile bayt-bayt
-//! doğrulanmıştır. Bot mantığı BURADA YOK — sadece veri erişimi.
-//!
-//! Dosyalar (resmi dokümantasyon sayfalarıyla birebir):
-//! - signing.rs            -> api/signing.md + nonces-and-api-wallets.md
-//!                            EIP-712 phantom agent imzası, msgpack action hash,
-//!                            secp256k1, nonce (unix ms) yönetimi
-//! - info_endpoint.rs      -> api/info-endpoint.md (+perpetuals,+spot)
-//!                            Piyasa ve hesap sorguları: meta, metaAndAssetCtxs,
-//!                            allMids, l2Book, candleSnapshot, fundingHistory,
-//!                            clearinghouseState, userFees, openOrders, userFills
-//! - exchange_endpoint.rs  -> api/exchange-endpoint.md (+tick-and-lot-size.md)
-//!                            Emir yerleştirme/iptal/değiştirme, kaldıraç,
-//!                            izole marjin, scheduleCancel + tick/lot yuvarlama
-//! - websocket.rs          -> api/websocket.md (+subscriptions,+timeouts)
-//!                            Canlı akışlar: trades, l2Book (anlık snapshot),
-//!                            candle, allMids, activeAssetCtx, orderUpdates,
-//!                            userEvents; 50sn ping + otomatik reconnect
-//! - error_responses.rs    -> api/error-responses.md
-//!                            Hata tipleri: HTTP, API mesajı, imza, WebSocket
-//! - types.rs              -> info-endpoint yanıt şemaları (wire format, camelCase)
-//! - config.rs             -> .env yükleme + doğrulama (anahtarlar, URL'ler)
-//!
-//! Kullanıcı sorgularında (clearinghouseState vb.) GERÇEK hesap (master)
-//! adresi kullanılır; agent adresi boş sonuç döner (resmi kural).
+//! Tek görev: borsa I/O'sunu tipli, test edilebilir yüzeylere indirmek;
+//! bot mantığı İÇERMEZ. Alt modüller:
+//! - `config`   — .env yükleme/doğrulama (`Config`)
+//! - `signing`  — EIP-712 phantom-agent imzası + HTTP istemci
+//! - `exchange_endpoint` — emir/iptal iletimi + fiyat/lot yuvarlama
+//! - `info_endpoint`     — market/hesap okuma metotları
+//! - `error_responses`   — `ApiError` hata taksonomisi
+//! - `types`    — info endpoint wire şemaları
+//! - `websocket`— canlı akış (ping + otomatik yeniden bağlanma)
 pub mod error_responses;
 pub mod config;
 pub mod exchange_endpoint;

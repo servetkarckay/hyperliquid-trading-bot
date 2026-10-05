@@ -1,11 +1,9 @@
-//! Yerel L2 orderbook yönetimi ve senkronizasyonu.
+//! LOCAL BOOK — yerel L2 defter (WS tam snapshot tabanlı).
 //!
-//! Hyperliquid WS l2Book her değişimde TAM snapshot gönderir; yerel kopya
-//! REST sync_from_rest ile başlar, WS apply_ws ile canlı sürer.
-//! Metrikler: best bid/ask, mid, spread_bps, imbalance (üst N seviye hacim
-//! dengesi), vwap_fill (verilen miktarın tahmini dolum ortalaması),
-//! depth_within_bps (±band hacmi), is_stale (WS kopma tespiti),
-//! is_sane (crossed/bozuk defter reddi).
+//! `LocalBook`: `sync_from_rest / apply_ws` ile seviyeleri kurar;
+//! `best_bid/ask, mid, spread_bps, imbalance, vwap_fill, depth_within_bps`;
+//! `is_stale / is_sane` — bayat/bozuk defter sinyale ve emre GİTMEZ.
+//! Reconnect sonrası tam snapshot'tan yeniden kurulum; artımlı varsayım yok.
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};

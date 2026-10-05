@@ -1,14 +1,10 @@
-//! TARİHİ VERİ POMPASI — backtest veri tabanı doldurma servisi.
+//! BACKFILL — REST candleSnapshot/funding geçmiş doldurma (tarih pompası).
 //!
-//! AMAÇ (araştırma kuralı): backtest için en az 6 ay (tercihen 1 yıl)
-//! veri şart — rejim çeşitliliği (yatay/bull/bear/likidasyon kaskadları)
-//! olmadan Kelly istatistiğine güvenilmez.
-//!
-//! KAYNAKLAR (paginasyon):
-//! - candleSnapshot (5000 bar/istek) → hl_candles
-//! - fundingHistory → hl_funding (Kelly strateji çarpan katmanı)
-//!
-//! RATE LIMIT: istekler arası uyku (varsayılan 250 ms).
+//! `pump_candles` / `pump_candles_resumable`: sayfalı geçmiş mum çekimi
+//! (MAX_BARS_PER_REQUEST=5000, istek arası uyku) — `CandleSink` trait'i
+//! hedefi soyutlar; `pump_funding` funding geçmişi pompalar.
+//! Not: motorun ısınma penceresi (`ENGINE_HIST_BARS`) bu görevle değil,
+//! `Aggregator::configure_history` + REST snapshot ile açılır.
 
 use anyhow::Result;
 use async_trait::async_trait;

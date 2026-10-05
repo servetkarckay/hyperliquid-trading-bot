@@ -1,19 +1,19 @@
-//! MOTOR DÖNGÜSÜ — veri → strateji → ensemble → TAHSİS → durum makinesi →
-//! toplu emir.
+//! ENGINE LOOP — ana motor: veri → strateji → ensemble → tahsis →
+//! durum makinesi → toplu emir → dolum → çıkış → öğrenme.
 //!
-//! İKİ FAZ (Portföy optimizasyonu mimarisi):
-//!   FAZ 1 — TARAMA: her coin → stratejiler → ensemble kararı (skor, oylar)
-//!   FAZ 2 — TAHSİS: allocation_manager — inanç skoru = (oy yoğunluğu ×
-//!           dinamik-Kelly ağırlığı × güc) / ATR marjı;
-//!           korelasyon >%70 coinler ayrı seçilmez (çeşitlendirme zorunluluğu);
-//!           conviction-temelli sermaye dilimleri (top-N)
-//!   FAZ 3 — YÜRÜTME: seçilen coinlerin gelmiş emirleri + tüm coinlerin
-//!           exit/cancel eylemleri — BİR imzalı POST (batching)
-//!
-//! ATTPIBUTION: giriş atan stratejiler kaydedilir; pozisyon kapanınca
-//! tracker'a (win/loss) işlenir → son 100 işlem penceresinden kelly f*
-//! yenilenir; win-rate <%35 → ağırlık sıfır (sistem adaptif).
-//! Bütçe: equity × f*; tahsis dilimi en yüksek inanç önce.
+//! Fazlar (run_cycle):
+//! 1. TARAMA: her coin için kapanmış mumlar + canlı son bar → `MarketInput`
+//!    → 18 strateji (panik-izole) → ensemble → rejim kapısı.
+//! 2. TAHSİS: conviction + korelasyon + bütçe → `Candidate`.
+//! 3. YÜRÜTME: makine `Action`'ları → WireOrder/Cancel — TEK batch POST.
+//! 4. ÇIKIŞLAR: SL/TP trigger'lar borsada asılı (F: TP fill →
+//!    `ExitReason::TakeProfit`); trailing ratchet; makine ExitNow.
+//! ÇIKIŞ KANALLARI (B/C): ensemble `exit_requested` + kesit rank kayması +
+//! turtle 55-bar altı — yalnız AÇIK pozisyonda ExitNow; Flat'ta emir yok.
+//! INVARIANT (P0-A): `entries_allowed = health_ok && !risk_locked`
+//! (`EntryGate` — alan değil, türetilmiş; kaynak taramasıyla korunur).
+//! ÖĞRENME: R kaydı → tracker → etkin ağırlık; canlı ağırlık snapshot'ı
+//! (`origin:"live"`) atomik dosyaya yazılır/okunur (sessiz ezme yok).
 
 use std::collections::HashMap;
 

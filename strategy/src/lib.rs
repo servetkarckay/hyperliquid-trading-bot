@@ -1,22 +1,18 @@
-//! # strategy
+//! STRATEGY — sinyal sözleşmesi ve 18-strateji registry.
 //!
-//! Sinyal üretim katmanı: 19 canlı strateji + kayıt defteri (registry).
-//!
-//! MİMARİ KURAL: stratejiler pozisyon AÇMAZ, SİNYAL üretir. Her strateji
-//! `MarketInput` snapshot'ını alır, `Signal` döndürür:
-//!   Long/Short { strength: -1..1 } — yön + kayıtsız güç
-//!   Hold { note } — sinyal yok, karar gerekçesi notta
-//!   Exit { note } — pozisyon kapatma/değişim önerisi
-//!   Skip { reason } — veri yetersizliği (SAHTE sinyal üretmek yasak)
-//! Emir dönüştürme Executor + RiskManager kapısından geçer; burada yok.
-//!
-//! VERİ AKIŞI: snapshot şunları taşır — 1h mumlar (kronolojik), canlı bağlam
-//! (funding/OI/mark: data::MarketCtx), OI değişimi, taker buy oranı, defter
-//! dengesi + en iyi bid/ask, evren geneli 1g getiri sıralaması, opsiyonel
-//! harici IV, equity, mevcut envanter ve parent emir boyutu.
-//!
-//! `registry()`: tüm stratejileri döner; 19 strateji + 1 meta (sistem
-//! testi) + 1 proxy (değer yatırım).
+//! Sözleşme:
+//! 1. `Strategy::evaluate(&MarketInput) -> Signal` — SAFTIR: pozisyon
+//!    açamaz, ağ erişemez; panik motorca izole edilir (Skip).
+//! 2. `Signal`: Long/Short { strength ∈ [0,1] } / Hold / Exit (kapanış
+//!    önerisi — engine exit kanalına gider) / Skip (veri yok — SAHTE
+//!    sinyal üretilmez; `unwrap_or(0.5)` fallback'leri yasak).
+//! 3. `Strategy::status(input)`: ACTIVE / AUXILIARY (yönsüz yardımcı:
+//!    Kelly/MM/OptExec) / DATA-MISSING (VRP IV'süz) — sessiz ölü
+//!    strateji raporlanmak zorunda.
+//! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
+//!    (funding/OI/taker/imbalance/universe_returns).
+//! 5. `registry()`: 18 strateji; `strat_test_helpers` yalnız-test
+//!    deterministik mum üreteci.
 pub mod wyckoff;
 pub mod kesit_momentum;
 pub mod lob_emir_akisi;

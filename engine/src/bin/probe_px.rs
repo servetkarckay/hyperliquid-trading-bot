@@ -1,10 +1,8 @@
-//! Fiyat geçerlilik probu (testnet).
+//! PROBE PX — testnet fiyat yuvarlama probu (araç binary).
 //!
-//! Borsa "Order has invalid price." diyince hangi yuvarlamanın kabul edildiğini
-//! ölçmek için: ALO (post-only) emir atar, cevabı yazar, KABUL EDİLENİ anında
-//! iptal eder → dolum olmaz, pozisyon olmaz.
-//!
-//! Kullanım: probe_px <COIN> [mid_fiyat]
+//! `probe_px <COIN> [mid]`: ALO emri atar, anında iptal eder — POZİSYON
+//! ÜRETMEZ; borsanın kabul ettiği fiyat/lot hassasiyetini (`px_dec`)
+//! keşfeder. Sonuç `config/tick_cache.json` kalıcılığına beslenir.
 
 use anyhow::Result;
 use hyperliquid_api::{Config, Exchange, Info, Tif};

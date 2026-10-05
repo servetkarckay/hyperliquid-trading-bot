@@ -1,3 +1,14 @@
+//! İMZA — Hyperliquid L1 action imzası (EIP-712, phantom agent).
+//!
+//! Görevler:
+//! 1. `action_hash` + `phantom_agent_digest`: emir/iptal payload'ını
+//!    Hyperliquid'in beklediği phantom-agent sözleşmesine bağlar.
+//! 2. `sign_l1_action`: `L1Signature { r, s, v }` üretir.
+//! 3. `float_to_wire`: fiyatları borsanın wire formatına yuvarlar.
+//! 4. `HyperliquidClient`: info/exchange action POST'ları; `ExchangeOutcome`
+//!    SUCCESS / ERROR / **UNKNOWN** (ağ zaman aşımı — borsada işlenmiş
+//!    OLABİLİR) ayrımını yapar; UNKNOWN yukarıya reconciliation için taşınır.
+//! 5. `now_ms`: NTP-offset'li zaman damgası.
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};

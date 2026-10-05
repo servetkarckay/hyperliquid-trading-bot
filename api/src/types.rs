@@ -1,11 +1,10 @@
-//! Yanıt şemaları — info-endpoint dokümantasyonundaki wire formatları.
+//! WİRE ŞEMALARI — info endpoint yanıtlarının tipli hâlleri.
 //!
-//! Alan adları Hyperliquid'in kendi isimleriyle (camelCase) birebir tutulur:
-//! PerpMeta (name, szDecimals, maxLeverage, isDelisted, marginMode),
-//! Meta{universe}, AssetCtx (funding, openInterest, dayNtlVlm, premium,
-//! oraclePx, markPx, midPx, impactPxs), Candle (t,T,s,i,o,c,h,l,v,n),
-//! L2Book {coin, time, levels[0]=bids, levels[1]=asks}, FundingEntry.
-//! max_px_decimals(): fiyat için izin verilen hane = 6 - szDecimals (perp).
+//! `PerpMeta` (szDecimals/maxLeverage/max_px_decimals), `Meta`,
+//! `AssetCtx` (funding/OI/mark/oracle/prevDayPx/dayNtlVlm),
+//! `Candle`, `Level`, `L2Book` (bids/asks/best_*), `FundingEntry`.
+//! Bu şemalar motor veri hattının kaynağıdır — alan anlamları değişirse
+//! ölçek hataları (bkz. funding saatlik) doğar.
 #![allow(non_snake_case)]
 
 use serde::Deserialize;

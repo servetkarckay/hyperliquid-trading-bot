@@ -1,17 +1,11 @@
-//! WYCKOFF — arz-talep kuramı + efor/sonuç divergence.
+//! WYCKOFF — arz-talep efor/sonuç divergence (birikim/dağıtım).
 //!
-//! AMAÇ: trendin hacimle ONAYLANIP onaylanmadığını ölçmek.
-//! HESAPLAMA:
-//! 1. Trend yönü: EMA20 vs EMA50 (yapı yönü)
-//! 2. Efor: son barın hacmi / 20-bar ortalama hacim
-//!    (>1.8 burst = birikim/dağıtım patlaması, <0.7 dry-up = kuruma)
-//! 3. Sonuç: son 20 barın zirve-dip aralığında konum (<0.05 dip, >0.95 zirve)
-//! 4. Karar:
-//!    - yukarı trend + hacim onayı (efor>1.2) -> Long [0.4-0.9]
-//!    - düşüş trend + hacim onayı -> Short
-//!    - zirvede hacim kurusu -> dağıtım, kontra Short [0.3]
-//!    - diple hacim patlaması -> birikim/spring, kontra Long [0.5]
-//! GEREKLİ VERİ: >=60 mum + hacim.
+//! 1. Girdi: ≥60 mum + hacim; EMA boş/NaN → Skip (panik yok).
+//! 2. Trend: EMA20/EMA50 işareti; efor = son bar hacmi / 20-bar ortalama.
+//! 3. Sonuç: son 20 barlık aralıkta konum (0=alt, 1=üst).
+//! 4. Divergence: trend↑ + hacim onayı + zirveye yakın değil → Long;
+//!    ayna Short; yeni zirve + hacim kurusu → dağıtım Short [0.3];
+//!    yeni dip + hacim patlaması → birikim Long [0.5]; karışık → Hold.
 use crate::{closes, last, volumes, MarketInput, Signal, Strategy};
 use math::indicators;
 

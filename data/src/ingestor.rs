@@ -1,20 +1,14 @@
-//! Yüksek hacimli veri akışı yönetimi — tüm aktif coinler için.
+//! INGESTOR — shard'lı Hyperliquid WS bağlantıları ve olay çevirisi.
 //!
-//! load_universe(): metaAndAssetCtxs tek çağrıyla 234 coinden delist edilmişleri
-//! ve hacim eşiği altındakileri eler, günlük hacme göre sıralar.
-//!
-//! Ingestor::start(): coinleri N adet WS bağlantısına (shard) böler; her shard
-//! kendi coinleri için trades + activeAssetCtx (+ ilk N coine l2Book)
-//! aboneliği açar; shard 0 tüm evreni tek abonelikten getiren allMids'i ekler.
-//! Kopan shard otomatik yeniden bağlanıp abonelikleri tazeler.
-//!
-//! StreamEvent (birleşik akış):
-//! - Trade  : {coin, px, sz, ts, is_buy}      -> Aggregator
-//! - Book   : {coin, bids, asks, ts}          -> yerel defter takibi
-//! - Mids   : tüm evren mid haritası          -> tarama/rejim
-//! - Ctx    : {funding, OI, mark, oracle, premium, dayVlm} -> MarketCtx
-//! translate(): ham WsEvent'i StreamEvent'e çevirir; trades dizisi tek tek
-//! iletilir (HİÇ tick kaybolmaz — canlı testte 77->438 tick yakalandı).
+//! Görevler:
+//! 1. Evreni abonelik listelerine böler (shard başına ~160 kanal) ve
+//!    her shard için ayrı WS bağlantısı açar.
+//! 2. Ham WS kanallarını (trades / l2Book / activeAssetCtx / orderUpdates /
+//!    userEvents) `StreamEvent`'e çevirir (`translate`).
+//! 3. `IngestorConfig`: shard_count, min_day_volume_usd (düşük hacimli
+//!    coin filtresi), l2book_top_n, ctx_enabled.
+//! P1-D: evren DIŞARIDAN verilir (`with_universe`) — sessiz kırpma yok;
+//! abonelik listesi `TradingUniverse`'den üretilir.
 use std::collections::HashMap;
 
 use anyhow::Result;

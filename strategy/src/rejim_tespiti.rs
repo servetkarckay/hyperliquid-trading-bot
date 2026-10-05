@@ -1,15 +1,12 @@
-//! REJİM TESPİTİ — piyasa modunu sınıflandırır; diğer stratejilerin hangi
-//! modda çalışması gerektiğini belirleyen filtre katmanı.
+//! REJİM TESPİTİ — piyasa modu sınıflandırma (strateji + motor kapısı).
 //!
-//! 3 BOYUT: ADX14 (trend gücü), Hurst üssü (R/S), vol yüzdelik
-//! (son 30 barın 200-bar geçmişteki yeri).
-//! KARAR AĞACI:
-//!   TREND          — ADX>25 + H>0.55 -> yön momentum yönünde Long/Short [0.5]
-//!   MEAN_REVERSION — ADX<20 + H<0.45 (sinyal stratejilerini bekler)
-//!   VOL_SPIKE      — vol %90 üstü -> pozisyon küçültme
-//!   SQUEEZE        — vol %10 altı -> breakout bekleme
-//!   GECIS          — diğer durumlar -> nötr
-//! GEREKLİ VERİ: >=200 mum.
+//! 1. Karar ağacı: ADX>25∧Hurst>0.55 → TREND; ADX<20∧Hurst<0.45 → MR;
+//!    vol yüzdeliği >%90 → VOL_SPIKE; <%10 → SQUEEZE; değilse GEÇİŞ.
+//! 2. TREND dalı yön sinyali (son 25 bar yönü, 0.5); MR/SPIKE/SQUEEZE
+//!    yönsüz Hold.
+//! 3. `RegimeLabel::gate` → motor RegimeGate (Squeeze/Spike = Blocked —
+//!    yeni giriş yasak); `classify` stratejiyle AYNI hesabı kullanır
+//!    (çift mantık yasak); <200 mum → None.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 use math::stats;

@@ -1,13 +1,10 @@
-//! VOLATİLİTE ARBİTRAJI — VRP (vol risk premium) çarpan katmanı.
+//! VOLATİLİTE ARBİTRAJI — VRP (vol risk premium) katmanı.
 //!
-//! GERÇEK VRP (IV feed bağlı): VRP = IV - RV30;
-//!   VRP>0 -> vol satışı lehine; VRP<0 -> vol alışı lehine
-//! YEREL PROXY (IV yok): RV terim yapısı — 10-bar vs 100-bar realized vol:
-//!   <0.6 — vol sıkışması (genişleme riski); >1.6 — gerileme beklentisi
-//!   arada nötr
-//! NOT: HL'de opsiyon yok; çıktı pozisyon değil — risk katmanı +
-//! komşu stratejiler için vol-rejim bilgisi.
-//! GEREKLİ VERİ: (IV mod) >=60 mum; (proxy) >=120 mum.
+//! 1. IV feed bağlıyken GERÇEK VRP = IV − RV30: VRP>0 → Short (vol
+//!    satışı lehine), VRP<0 → Long; güç (|VRP|/(IV·0.5)).min(0.7).
+//! 2. IV yok: yerel RV terim yapısı proxy (10-bar/100-bar) — yalnız
+//!    Hold NOTU, yön üretmez; **SAHTE IV ÜRETİLMEZ**.
+//! 3. Durum: IV'süz → DATA-MISSING (raporda ayrışır); IV'li → ACTIVE.
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 

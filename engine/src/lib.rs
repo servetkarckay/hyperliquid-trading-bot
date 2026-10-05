@@ -1,10 +1,15 @@
-//! # engine
+//! ENGINE — ticaret motoru: karar → emir → pozisyon → öğrenme.
 //!
-//! Emir motoru: veri katmanından gelen gerçek veriyle pozisyon yönetimi.
-//! - orderbook.rs    : yerel L2 defter (WS snapshot senkronu + türetilmiş metrikler)
-//! - executor.rs     : api Exchange üstünde emir/iptal + doldurma takibi
-//! - risk_manager.rs : tüm emirlerden önce risk kapısı (limitler, drawdown)
-//! Bağımlılıklar: hyperliquid-api (veri erişimi), utils (saat/log).
+//! Modüller:
+//! - `engine_loop`       — ana döngü (tarama→tahsis→yürütme→çıkışlar)
+//! - `executor`          — borsa I/O ince katmanı (SL/TP, cloid, recon)
+//! - `allocation_manager`— sermaye tahsisi + TEK maliyet modeli
+//! - `state_machine`     — pozisyon durum makinesi (idempotent)
+//! - `risk_manager`      — emir öncesi risk kapıları
+//! - `track`             — canlı öğrenme / Kelly / metrikler
+//! - `orderbook`         — yerel L2 defter
+//! Kural: motor beslenmeden strateji çalışmaz; borsa yanıtı UNKNOWN
+//! olursa reconciliation yapılmadan state değişmez.
 pub mod engine_loop;
 pub mod executor;
 pub mod allocation_manager;

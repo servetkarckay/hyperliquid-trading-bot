@@ -1,14 +1,13 @@
-//! Tick -> candle üretimi: coin başına çoklu interval, tüm aktif coinler.
+//! AGGREGATOR — tick akışını çoklu interval (1m..1d) mumlara çevirir.
 //!
-//! Varsayılan interval'lar (strateji gereksinimleri): 1m, 5m, 15m, 1h, 4h, 1d.
-//! Her tick bucket'ına (ts div interval) yazılır; bucket döndüğünde mum
-//! KAPANIR, geçmişe eklenir ve kapanan mum geri döner (storage'a yazılır).
-//!
-//! Ayrıca tick akışından türetilenler:
-//! - taker_balance(coin): son 5 dk taker buy/sell hacim dengesi (strateji 23)
-//! - vwap(coin): oturum VWAP (Σpx·sz / Σsz)
-//! - backfill(): REST candleSnapshot ile geçmiş doldurma (WS öncesi)
-//! Sunucu zamanı (trade `time`) kullanılır — yerel saat kaymasından bağımsız.
+//! Görevler:
+//! 1. `on_trade`: her tick'te açık mumu günceller; bucket kapanınca
+//!    mumu `closed=true` olarak yayınlar.
+//! 2. `current` / `history`: canlı (kapanmamış) mum ve kapanmış mum
+//!    penceresi — motor stratejilere kapanmış geçmiş + canlı son bar verir.
+//! 3. `taker_balance`: TAKER_WINDOW_SECS (300 sn) penceresinde alış/satış
+//!    hacim dengesi.
+//! 4. `is_stale`: donmuş veri sinyale karışmasın (stale-skip kapısı).
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;

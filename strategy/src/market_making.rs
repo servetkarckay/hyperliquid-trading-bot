@@ -1,22 +1,9 @@
-//! MARKET MAKING — Avellaneda-Stoikov rezervasyon fiyatı.
+//! MARKET MAKING — Avellaneda-Stoikov rezervasyon fiyatı (AUXILIARY).
 //!
-//! AMAÇ: envantere göre quote'ları kaç birim kaydırmak gerektiği.
-//! FORMÜLLER:
-//!   rezervasyon r = mid - q·γ·σ²·T
-//!   yarım spread = γ·σ²·T/2 + ln(1+γ/κ)/γ
-//!   q = envanter/10k USD (işaretli), γ=0.1, κ=1.5, T=1 bar
-//! HESAPLAMA: σ — son 50 bar log-getiri std (bar bazlı).
-//! Sinyal: Hold — quote koordinatları notta (bid/ask, r, skor bps, ALO).
-//! Hyperliquid'de MM yalnız ALO (post-only) quote'larla çalışır;
-//! taker'a dolan her emir spread kazancını eritir (fee katmanı kuralı).
-//!
-//! ÖNEMLİ (ölçüldü): bu strateji **hiçbir koşulda Long/Short üretmez** — yalnız
-//! `Hold`/`Skip`. `ensemble.rs` bu ikisini skora katmaz, sadece nota düşer.
-//! Yani MM bugün **hiç emir istemiyor** ve executor'ın global "giriş IOC" kararı
-//! onunla çelişemez (ALO gereksinimi bugün erişilemez bir durum).
-//! MM'nin gerçekten ALO emir göndermesi istenirse executor'a global bir TIF
-//! bayrağı değil, sinyal başına taşıyıcı alan (`prefer_alo`) eklenmelidir.
-//! GEREKLİ VERİ: defter bid/ask + >=50 mum.
+//! Görev: quote planı — rezervasyon fiyatı `r = mid − q·γ·σ²·T`,
+//! yarım spread + envanter skew'i (bps). Çıktı **Hold** — yönlü giriş
+//! sinyali üretmez; gerçek parayla quote KONULMAZ (MM emir yolu motor
+//! IOC'yle çelişir — bilinen sınır). σ≤0 / defter yok → Skip.
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 

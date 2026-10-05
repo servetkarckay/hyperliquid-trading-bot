@@ -1,29 +1,11 @@
 //! KESİT MOMENTUM — evren geneli göreli güç sıralaması.
 //!
-//! AMAÇ: tekil coin trendi değil, TÜM coinler arasındaki göreli sıra.
-//!
-//! # PENCERE: **1 GÜN** (P1-G ölçümü)
-//!
-//! `MarketInput::universe_returns` motor tarafında şöyle kurulur
-//! (`engine_loop.rs`):
-//! ```ignore
-//! ctx.all().filter(|c| c.prev_day_px > 0 && c.mark_px > 0)
-//!     .map(|c| (c.coin, c.mark_px / c.prev_day_px - 1.0))
-//! ```
-//! Yani **günlük getiri** (`activeAssetCtx.prevDayPx` → `markPx`). Kod tabanında
-//! 7 günlük getiri hesabı **YOKTUR** (doğrulandı: `prev_day_px` dışında başka
-//! bir alan kullanılmıyor). Dokümanın "7g sıralama" ifadesi **kodla
-//! çelişiyordu** ve düzeltildi.
-//!
-//! HESAPLAMA:
-//! 1. Evren 1g getirileri azalan sıralanır
-//! 2. Üst %20 = long dilim, alt %20 = short dilim
-//! 3. Coinin sırada bulunması Long/Short [0.6]; orta bar (0.4-0.6) nötr
-//! 4. Sıralama kayması: üst dilimden alt %40'a düşen coin Exit —
-//!    otomatik çıkış kuralı
-//! GEREKLİ VERİ: >=20 coin evren getirisi (data pipeline besler).
-//! NOT: kripto kesit korelasyonu yüksek (ortak beta) — risk katmanı
-//! kovaryans düzeltmesini uygulamalı.
+//! 1. Girdi: evren **1g** getirileri (`mark/prevDay − 1`); <20 coin → Skip.
+//! 2. `rank_band` (tek kaynak — strateji + engine): üst %20 Top /
+//!    alt %20 BottomShort / %40-60 Mid.
+//! 3. Long/Short [0.6] dilim üyeliği; orta dilim Hold.
+//! 4. `rank_shift_exit_long`: LONG, Top'tan alt %40'a düştü → Exit
+//!    (stratija pozisyon tarafını bilmez; intent ENGINE'den yönlendirilir).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

@@ -1,10 +1,19 @@
-//! Emir gönderme, iptal, doldurma takibi.
+//! EXECUTOR — api::Exchange ince katmanı: emir durumu takibi + koruma.
 //!
-//! api::Exchange üstüne ince katman: tick/lot doğrulama + min $10 notional
-//! garantisi, açık emir defteri (oid -> OrderInfo), pozisyon önbelleği
-//! (clearinghouseState.assetPositions), WS orderUpdates/user event'lerinden
-//! anlık dolum takibi (realizedPnl dahil), kopma sonrası refresh_orders/
-//! refresh_positions ile toparlama. USER_ADDRESS (master) .env'den alınır.
+//! Görevler:
+//! 1. `place_limit / place_ioc / cancel / cancel_all`: lot/fiyat yuvarlama,
+//!    $10 minimum, hayalet emir koruması.
+//! 2. BORSA STOP/TP: `ensure_sl / replace_sl (trailing) / cancel_sl` ve
+//!    `ensure_tp / cancel_tp` — reduce-only trigger (`tpsl="tp"/"sl"`),
+//!    idempotent (`sl_orders`/`tp_orders` + TS_GRACE_MS grace kapısı —
+//!    çift emir yasağı).
+//! 3. DOLUM: `handle_ws_event` (orderUpdates + user fills) → pozisyon
+//!    haritası + `FillEvent` (is_tp_fill/is_sl_fill oid eşleşmesiyle).
+//! 4. RECONCILIATION (P1-C): `parse_open_orders` cloid eşleşmesi —
+//!    UNKNOWN emir borsada bulunursa oid bağlanır, bulunamazsa yalnız
+//!    oid==0 pending'de Flat revert.
+//! 5. `make_cloid`: deterministik 16-hane hex (retry idempotency).
+//! 6. `save/load_px_dec`: öğrenilen tick hassasiyeti kalıcılığı.
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, bail, Result};

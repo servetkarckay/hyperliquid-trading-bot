@@ -1,14 +1,12 @@
 //! ELLIOTT DALGA — pivot tabanlı dalga sayımı + Fibonacci teyidi.
 //!
-//! HESAPLAMA:
-//! 1. Pivotlar: ±12 bar
-//! 2. 5 dalga yukarı şablonu: artan üç zirve (W1,W3,W5)
-//! 3. Düzeltme dipleri yükseliyor mu (W2/W4)
-//! 4. Fibonacci: son geri çekilme W1'in %30-65 bandında mı
-//! 5. Likidite teyidi (hacim > 0)
-//! Güç zayıf [0.45] — sayım belirsizliği yüksek; onaysız sayım
-//! sinyal değildir (doküman kuralı).
-//! GEREKLİ VERİ: >=150 mum.
+//! 1. Pivotlar ±12 bar merkezli; <3 pivot → Hold (sayım belirsiz).
+//! 2. Şablon: artan zirveler (W1,W3,W5) + artan dipler (W2,W4) + son
+//!    geri çekilme fib bandında (%30-65) + hacim > 0 → Long [0.45]
+//!    (zayıf sinyal — sayım belirsizliği bilinçli).
+//! 3. **SINIR (dürüst)**: SHORT kolu yazılmamış — sahte Short ÜRETİLMEZ
+//!    (testle kanıtlandı; icat edilmedi).
+//! 4. <150 mum → Skip; pivot penceresi onay gecikmesi sızıntısız.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

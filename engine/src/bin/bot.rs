@@ -1,27 +1,15 @@
-//! BOT — ana binary: NTP → ingestor WS → engine döngüsü.
-//! ENV:
-//!   ENGINE_COINS=BTC,ETH,SOL   (döngüde koşacak coinler; boş/"all" = tam evren)
-//!   ENGINE_INTERVAL=3600       (MUM aralığı, sn — döngü periyodu DEĞİL)
-//!   ENGINE_CYCLE_SECS=5        (motor döngü periyodu, sn)
-//!   ENGINE_MIN_SCORE=0.30      (ensemble eşiği)
-//!   ENGINE_TOP_N=3             (pozisyon tavanı)
-//!   ENGINE_BUDGET_USD=300      (döngü bütçesi; tahsis ayrıca $50/coin ile sınırlı)
-//!   ENGINE_HIST_BARS=4400      (indikatör ısınma penceresi)
-//!   ENGINE_FLATTEN=1           (açılışta tüm pozisyonları kapat)
-//!   ENGINE_TICK_CACHE=…        (öğrenilen tick hassasiyeti dosyası)
-//!   ENGINE_EXPLORE=1           (veri-açlığı keşif kuyruğu açık)
-//!   ENGINE_CRIT_THRESHOLD=5    (kill-switch: **karar-kritik** hata eşiği)
-//!   TRAIL_ON=1 TRAIL_ATR_K=1.5 TRAIL_MIN_STEP=0.25   (trailing stop, §8.3.15)
+//! BOT — üretim binary'si: NTP → ingestor WS → engine döngüsü.
 //!
-//! CANLI ÖĞRENME (§8.4 — backtest kaldırıldı):
-//!   LEARN_MIN_N=10             (bu n altında ağırlık DONMUŞ 1.0)
-//!   LEARN_FULL_N=30            (bu n üstü: tam kurallar + keşif kuyruğu dışı)
-//!   TRACK_STATE_PATH=…         (tracker persistence, atomik 5 dk dump)
-//!   ENSEMBLE_WEIGHTS_IN=…      (yalnız origin:"live" kabul edilir)
-//!   ENSEMBLE_LIVE_WEIGHTS_OUT=…
-//!   EV_TAKER_FEE_BPS=4.5 EV_SLIPPAGE_BPS=5.0 EV_MIN_DIST_BPS=75  (P0-D EV kapısı)
-//!
-//! Çalıştırma süresi yok — Ctrl+C ile kes.
+//! Sorumluluklar:
+//! 1. Tüm konfig ENV'den (ENGINE_* / TRAIL_* / LEARN_*); secret .env'den
+//!    (dotenvy) — restart'ta export gereksinimi yok.
+//! 2. Canlı ağırlık dosyası doğrulaması: `origin:"live"` zorunlu; bozuk
+//!    dosya → AÇILIŞ BAŞARISIZ (sessiz cold-start = öğrenme kaybı);
+//!    dosya yok → nötr cold-start.
+//! 3. WS fırtınası (>10 kopma/5dk) → ExitsOnly (kill YOK); health → engine.
+//! 4. Periyodik dump (300 sn): etkin ağırlıklar (ATOMİK tmp+rename),
+//!    tick cache, tracker state.
+//! 5. Restart exponential backoff (30..300 sn).
 
 use engine::engine_loop::{Engine, LoopConfig};
 use utils::{logger, time};
@@ -100,13 +88,13 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.25);
-    // P1-E: "TP sabit 3×ATR" YANLIŞ YORUMU. TP sabit bir ATR çarpanı
-    // değil; mesafesi (tp_atr_mult/sl_atr_mult) × gerçek risk mesafesidir ve
-    // min 2×risk kapısına tabidir. Trailing yalnız SL'yi ratchet'ler; TP
-    // analytical target olarak yerinde durur (bkz. §8.3.15).
+    // TP artık GERÇEK kapanıştır (P1-H): mesafesi (tp_atr_mult/sl_atr_mult)
+    // × gerçek risk mesafesidir (min 2×risk kapılı); giriş dolumunda
+    // reduce-only TP trigger borsaya asılır, fill → ExitReason::TakeProfit.
+    // Trailing yalnız SL'yi ratchet'ler.
     tracing::info!(
         "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          \
-         (yalnız SL ratchet'lenir; TP analytical: entry_eff ± max(tp/sl×risk, 2×risk) — sabit 3×ATR DEĞİL, §8.3.15)"
+         (yalnız SL ratchet'lenir; TP GERÇEK kapanıştır: giriş dolumunda reduce-only TP trigger asılır — entry_eff ± max(tp/sl×risk, 2×risk), §4)"
     );
     let lc = LoopConfig {
         coins,

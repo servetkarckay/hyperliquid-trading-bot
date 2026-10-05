@@ -1,10 +1,8 @@
-//! trail_report — MFE/MAE epoch raporu (Section C k-revizyon protokolü).
+//! TRAIL REPORT — `trade_exits.jsonl` offline analitiği (araç binary).
 //!
-//! `cargo run --bin trail_report -- config/trade_exits.jsonl 2026-10-03-a`
-//!
-//! Okur: trade_exits.jsonl (A2 JSONL), epoch-filtreli tablo basar.
-//! Çıkış: MFE/MAE quartile'lar, çıkış sebebi dağılımı, ratchet dağılımı,
-//! geri-verme oranı, ilk-stop oranı.
+//! Epoch bazında MFE/MAE quartile'leri, çıkış sebebi dağılımı, ratchet
+//! dağılımı — trailing'in faydasının ölçümsüz savunulmasını engelleyen
+//! rapor. I/O yok, argümanla dosya seçilir.
 
 use std::collections::HashMap;
 use std::env;

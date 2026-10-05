@@ -1,14 +1,13 @@
-//! ENSEMBLE — 18 stratejinin oylarını tek karara birleştirir.
+//! ENSEMBLE — 18 oyu tek karara birleştirir.
 //!
-//! AMAÇ: stratejiler bağımsız oy verir (Long/Short/Hold/Skip); ensemble:
-//!   1. Skip'leri EXCLUDE eder (sahiyle sayılmaz)
-//!   2. Ağırlıklı ortalama skor hesaplar (ağırlıklar dizinden)
-//!   3. Rejim filtresi: SQUEEZE/VOL_SPIKE rejimlerinde yeni giriş YASAK
-//!   4. |skor| >= min_score -> karar; değilse nötr
-//!
-//! OVERFITTING KORUMASI: ağırlıklar sabit diziden gelir (canlıda gerçek
-//! fill performansıyla güncellenir — dinamik karşılığı burada).
-//! NOT: çelişen oylar birbirini götürür; net skor karar verir.
+//! Kurallar:
+//! 1. `combine`: Skip'ler SAYILMAZ; Long/Short ağırlıklı net skor
+//!    [−1,1] (contributors audit); `Signal::Exit` → `exit_requested`
+//!    + `exit_contributors` (ÇIKIŞ KANALI — skora karışmaz, çoklu oy
+//!    idempotent).
+//! 2. `apply_regime`: Blocked rejimi YENİ GİRİŞİ nötrler; çıkış kanalını
+//!    KAPATMAZ; TrendBoost skoru yalnız yukarı değil iki yönde ölçekler.
+//! Ağırlıklar tracker'ın etkin ağırlıklarıdır (cold-start 1.0).
 
 use std::collections::HashMap;
 

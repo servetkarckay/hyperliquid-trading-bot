@@ -1,16 +1,13 @@
-//! Depolama soyutlaması: Redis (sıcak) + ClickHouse (kalıcı) + Memory (yedek).
+//! STORAGE — kalıcılık soyutlaması (trait + üç gerçekleme).
 //!
-//! ROLLER:
-//! - RedisCache  : SICAK ÖNBELLEK. Son mids haritası ve coin başına son ctx,
-//!   TTL ile yazılır. Strateji döngüsü milisaniyeler içinde okur; API'ye
-//!   sorgu gitmez, bayat veri otomatik düşer. REDIS_URL gerekli.
-//! - ClickHouseStorage: KALICI ARŞİV + analitik. Tüm tick'ler (hl_trades),
-//!   kapanmış mumlar (hl_candles), ctx serileri (hl_ctx) JSONEachRow ile
-//!   toplu INSERT edilir; SQL ile backtest/geçmiş analizi. CLICKHOUSE_URL.
-//! - MemoryStorage: sunucu yoksa yedek + test referansı.
-//!
-//! Storage trait: save_trades, save_candles, load_candles, save_ctx,
-//! trade_count. Yeni backend (örn. TimescaleDB) trait'i implemente eder.
+//! 1. `Storage` trait: trades / candles / ctx / funding kaydetme-okuma.
+//! 2. `MemoryStorage`: test ve düşük-konfig fallback.
+//! 3. `ClickHouseStorage` (CLICKHOUSE_URL): üretim arşivi — hl_trades /
+//!    hl_candles / hl_funding / hl_ctx / hl_strategy_performance;
+//!    JSONEachRow toplu yazım, ReplacingMergeTree dedup, resume imleci.
+//! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li).
+//! URL'ler boşsa sistem Memory ile ÇALIŞMAYA devam eder (indirimli mod —
+//! arşiv/backtest kaybı loglanır).
 use std::collections::HashMap;
 
 use anyhow::Result;

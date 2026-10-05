@@ -1,9 +1,9 @@
-//! # utils
+//! UTILS — çapraz-kesit yardımcıları.
 //!
-//! Bot yardımcıları (api'den bağımsız, tüm crate'ler kullanabilir):
-//! - logger.rs : tracing ile yapılandırılmış loglama (LOG_LEVEL env)
-//! - time.rs   : NTP saat senkronu (SNTP v4, median ofset) + düzeltilmiş
-//!               unix ms + gecikme (latency) ölçümü (REST RTT, measure)
+//! `logger` — tracing subscriber kurulumu (tek seferlik).
+//! `time` — NTP (SNTP v4) saat senkronu; `now_ms` NTP offset'li ms döner.
+//! Bot'un zaman duyarlı yolları (timeout, mühür, candle bucket) bu
+//! senkronizasyonu kullanır.
 
 pub mod logger;
 pub mod time;

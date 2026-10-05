@@ -1,13 +1,10 @@
 //! DAVRANIŞSAL FİNANS — aşırı tepki (overreaction) geri alımı.
 //!
-//! AMAÇ: kayıp tetiklenen panik satışları (loss aversion) kısa vadede
-//! geri döner; euphoria alımları soğur.
-//! HESAPLAMA:
-//!   6-bar getiri, 100-bar σ ile normalize edilir (<-2σ / >+2σ)
-//!   + hacim 20-bar ortalamanın 2x üstü = tetik
-//!   panik -> kontra Long [0-0.8]; euphoria -> kontra Short
-//!   tetiklenmediyse Hold.
-//! GEREKLİ VERİ: >=100 mum.
+//! 1. 6-bar getiri, 100-bar σ ile normalize (<−2σ / >+2σ) + hacim
+//!    2× spike'ı tetik koşulu; tetik yok → Hold.
+//! 2. Panik satışı → kontra Long; euphoria → kontra Short; güç
+//!    (|σ|/4).min(0.8).
+//! 3. <100 mum → Skip; bölenler max(1e-9) korumalı (panik yok).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 

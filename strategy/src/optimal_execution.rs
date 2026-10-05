@@ -1,15 +1,10 @@
-//! OPTİMAL YÜRÜTME — parent emir parçalama planı.
+//! OPTIMAL EXECUTION — parent emir parçalama planı (AUXILIARY).
 //!
-//! AMAÇ: piyasa etkisi ile zamanlama arasındaki denge.
-//! KURALLAR:
-//!   - "vol yüksekse hızlı yürüt, emir büyükse yavaş yürüt"
-//!   - parça boyutu defter ilk seviye derinliğine bağlı
-//!   - U-şekilli trajectory: başta/sonda hızlı, ortada yavaş
-//! HESAPLAMA: parça sayısı = sqrt(parent/derinlik), kısıt [3,20];
-//! aciliyet = bar volatilitesi (Ioc/Alo seçimi ~2.5 eşiği); parça
-//! ağırlıkları U-trajektörüyle orantılı. Sinyal: Hold + plan notta
-//! (parça sayısı, USD/parça, önerilen TIF, ilk 5 parça).
-//! GEREKLİ VERİ: order_size_usd + >=50 mum.
+//! Görev: U-şekilli trajectory — parça sayısı = sqrt(parent/derinlik),
+//! kısıt [3,20]; aciliyet (bar volu) → Ioc/Alo önerisi; parça ağırlıkları
+//! notta. `order_size_usd ≤ 0` → Skip (engine tahsis sonrası planladığı
+//! için evaluation'a beslenemez — strateji AUXILIARY işaretli, sessiz
+//! ölü değil).
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
