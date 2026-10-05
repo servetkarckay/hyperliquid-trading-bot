@@ -85,9 +85,11 @@ struct CycleEval {
 /// TRAİLİNG STOP KARARI (gerekçeli):
 /// - **SL ratchet'lenir.** Tepe (peak) lehli yönde ilerledikçe stop
 ///   `tepe ∓ k×ATR`'ye çekilir; **asla** gevşemez.
-/// - **TP SABİT KALIR** (3×ATR). Trailing TP, 3:1'lik hedefi başarısız bir
-///   yaklaşımda ~0.8:1'e çevirip işlemi kârsız kapattırır — yani kâr elde
-///   etme olasılığını düşürür. Trailing yalnız **zararı sınırlar**.
+/// - **TP sabit kalır** (`tp_from_entry` sözleşmesi — P1-E/P1-H): mesafe
+///   `(tp/sl)×risk` (min 2×risk) dolumla KİLİTLENMİŞTİR; trailing'i TP'ye
+///   dokunsaydı başarısız bir yaklaşımda 3:1 hedef ~0.8:1'e düşer ve
+///   işlem kârsız kapanırdı. Trailing yalnız **zararı sınırlar**; TP borsa
+///   trigger'ı ayrı durur.
 ///
 /// `peak`/`worst` yalnız mark fiyatıyla güncellenir (bar yüksek/almak yerine):
 /// 1 saatlik bar'da tepe, stop'u borsada olduğu anda tetikleyecek bir seviyeye
@@ -420,6 +422,39 @@ pub struct LiveWeightsLoad {
 
 /// P0-A: kilidin otomatik açılması için gereken ardışık flat döngü sayısı.
 pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
+
+/// BLOCKER-1 RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
+///
+/// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber vermez
+/// (makine o oid'i bilmemez); makine `InPosition`'da KALIRDI:
+/// - `already_on=true` → aynı coine yeni giriş kilitli kalır,
+/// - çıkış kanalı (`force_exit`) **bayat boyutla** yeni ExitNow üretebilir
+///   (canlı emir riski).
+///
+/// Doğru kaynak: borsa pozisyon haritası (`sync_positions_from` 'gone'
+/// listesi). Sadece `InPosition`/`PendingExit` geri çevrilir — `Pending`
+/// (dolum bekleyen giriş) DOKUNULMAZ (dolum sonra gelebilir).
+///
+/// Dönen: makinesi Flat'a çevrilen coinler (evidence temizliği çağıranın).
+pub fn reconcile_machines_to_exchange(
+    machines: &mut Machines,
+    positions: &HashMap<String, crate::executor::Position>,
+) -> Vec<String> {
+    let mut closed = Vec::new();
+    for (coin, m) in machines.iter_mut() {
+        let on_exchange = positions
+            .get(coin)
+            .map(|p| p.szi.abs() > 1e-12)
+            .unwrap_or(false);
+        if !on_exchange
+            && matches!(m.state, PosState::InPosition { .. } | PosState::PendingExit { .. })
+        {
+            m.state = PosState::Flat;
+            closed.push(coin.clone());
+        }
+    }
+    closed
+}
 
 /// F — **TP emrinin soyutlanmış planı** (saf fonksiyon; testler de BUNU
 /// sınar, kopya mantık yok). Üretimde `Executor::ensure_tp` bu planı yürütür.
@@ -1637,6 +1672,36 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 // P0-A: harita bu döngüde BORSADAN tazelendi → auto-unlock
                 // flat doğrulaması sayacı ilerleyebilir.
                 self.rest_sync_verified = true;
+                // BLOCKER-1: borsa kapanışlarını durum makinesine UYGULA
+                // (TP/SL/external close makineye oid üzerinden gelmez).
+                {
+                    let gone_machines = {
+                        let positions = self.executor.positions().clone();
+                        reconcile_machines_to_exchange(&mut self.machines, &positions)
+                    };
+                    for c in &gone_machines {
+                        tracing::info!("[RECON] {c} borsa kapanışı → machine Flat");
+                        // break-even/kaçan-fill kapanışı: işlem GERÇEKTEN kapandı —
+                        // kaydı R=0 ile düşür (sessiz düşürme = ters seçim bias).
+                        if let Some(attr) = self.entry_attr.remove(c) {
+                            self.tracker.record_outcome_r(
+                                attr.voters.clone(),
+                                hyperliquid_api::now_ms(),
+                                0.0,
+                            );
+                            let excursion = self.trail.remove(c).map(|t| {
+                                let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                                let fav = if t.is_long { (t.peak_px - t.entry_px) / risk }
+                                    else { (t.entry_px - t.peak_px) / risk };
+                                let adv = if t.is_long { (t.worst_px - t.entry_px) / risk }
+                                    else { (t.entry_px - t.worst_px) / risk };
+                                (fav, adv, t)
+                            });
+                            self.write_ws_exit_record(c, &attr, 0.0, excursion);
+                        }
+                        self.executor.pending_tp.remove(c);
+                    }
+                }
                 // entry_attr: 24h SABİT RETENTION SESSİZ BİAS ÜRETİYOR.
                 // (a) `sync_exchange_sl` SL fiyatını `risk_px`'ten alıyor; kayıt
                 //     düşünce %2'lik çok gevşek kurtarma stop'u kuruluyor → 24 saatten
@@ -4085,5 +4150,144 @@ mod metrics_tests {
             assert!(!t2.contains("%99") && !t2.contains("garantili"),
                 "satır {}: kesin kazanç iddiası yasak: {l}", i + 1);
         }
+    }
+}
+
+/// ── BLOCKER 1+2 — BORSA KAPANIŞI ↔ DURUM MAKİNESİ SÖZLEŞMESİ ────────────
+#[cfg(test)]
+mod recon_contract_tests {
+    use super::*;
+    use crate::executor::is_open_fill;
+    use crate::state_machine::{Decision, PosState, PositionStateMachine, Side as SmSide};
+    use crate::executor::Position;
+
+    fn in_position_machine(coin: &str) -> PositionStateMachine {
+        let mut m = PositionStateMachine::new(coin, SmConfig::default());
+        m.on_decision(Decision { score: 0.6 }, 100.0, 100.5, 1);
+        m.on_order_status(0, 2.0, 0.0, 100.5);
+        assert!(matches!(m.state, PosState::InPosition { .. }));
+        m
+    }
+
+    fn pos(szi: f64) -> Position {
+        Position { coin: "X".into(), szi, entry_px: 100.0, position_value: szi.abs() * 100.0, unrealized_pnl: 0.0, leverage: 1.0, liquidation_px: None }
+    }
+
+    /// BLOCKER-1: borsa TP fill → pozisyon borsadan silinir → makine FLAT
+    /// olmalı; sonraki döngüde force_exit EMİR ÜRETMEMELİ.
+    #[test]
+    fn tp_fill_closes_machine_to_flat() {
+        let mut machines: Machines = HashMap::new();
+        machines.insert("BTC".into(), in_position_machine("BTC"));
+        // TP tetiklendi → pozisyon borsadan KALKTI (boş harita)
+        let gone = reconcile_machines_to_exchange(&mut machines, &HashMap::new());
+        assert_eq!(gone, vec!["BTC".to_string()]);
+        let m = machines.get("BTC").unwrap();
+        assert!(matches!(m.state, PosState::Flat));
+        // sonraki döngü: bayat boyutla ExitNow ÜRETİLMEZ
+        let mm = machines.get_mut("BTC").unwrap();
+        assert!(matches!(mm.force_exit(99.0, 99.5), Action::Nothing));
+    }
+
+    /// BLOCKER-1: borsa SL fill → makine FLAT (aynı sözleşme, ters yön).
+    #[test]
+    fn sl_fill_closes_machine_to_flat() {
+        let mut machines: Machines = HashMap::new();
+        let mut m = PositionStateMachine::new("ETH", SmConfig::default());
+        m.on_decision(Decision { score: -0.6 }, 100.0, 100.5, 1);
+        m.on_order_status(0, 3.0, 0.0, 100.5);
+        assert!(matches!(m.state, PosState::InPosition { .. }));
+        machines.insert("ETH".into(), m);
+        let gone = reconcile_machines_to_exchange(&mut machines, &HashMap::new());
+        assert_eq!(gone, vec!["ETH".to_string()]);
+        assert!(matches!(machines.get("ETH").unwrap().state, PosState::Flat));
+        assert!(matches!(machines.get_mut("ETH").unwrap().force_exit(100.0, 100.5), Action::Nothing));
+    }
+
+    /// HARİCİ kapanış (emir bize ait değil: exit fill / flip): makine Flat'a
+    /// döner; POZİSYON DURUYORSA (hâlâ borsada) makine DOKUNULMAZ.
+    #[test]
+    fn external_close_reconciles_machine_to_flat() {
+        let mut machines: Machines = HashMap::new();
+        machines.insert("BTC".into(), in_position_machine("BTC"));
+        machines.insert("ETH".into(), in_position_machine("ETH"));
+
+        // BTC: harici kapanış (borsada yok) → Flat
+        // ETH: hâlâ borsada → DOKUNULMAZ (hayalet-flat yasağı)
+        let mut positions = HashMap::new();
+        positions.insert("ETH".into(), pos(2.0));
+        let gone = reconcile_machines_to_exchange(&mut machines, &positions);
+
+        assert_eq!(gone, vec!["BTC".to_string()], "yalnız borsadan kaybolanlar");
+        assert!(matches!(machines.get("BTC").unwrap().state, PosState::Flat));
+        assert!(matches!(machines.get("ETH").unwrap().state, PosState::InPosition { .. }));
+
+        // Pending (dolum bekleyen giriş) revert DOKUNULMAZ — dolum sonra gelir
+        let mut pend = PositionStateMachine::new("SOL", SmConfig::default());
+        pend.on_decision(Decision { score: 0.6 }, 100.0, 100.5, 1);
+        assert!(matches!(pend.state, PosState::Pending { .. }));
+        machines.insert("SOL".into(), pend);
+        let gone2 = reconcile_machines_to_exchange(&mut machines, &HashMap::new());
+        assert!(!gone2.contains(&"SOL".to_string()), "bekleyen giriş revert edilmez");
+        assert!(matches!(machines.get("SOL").unwrap().state, PosState::Pending { .. }));
+    }
+
+    /// BLOCKER-2 — açılış/kapanış ayrımı: `dir` alanı kaynak; closedPnl DEĞİL.
+    #[test]
+    fn closing_fill_zero_pnl_is_not_open_fill() {
+        // BREAK-EVEN kapanış: closedPnl=0 AMA dir=Close → açılış DEĞİL
+        assert!(!is_open_fill("Close Long"), "break-even kapanış koruma ARMAMALI");
+        assert!(!is_open_fill("Close Short"));
+        // açılışlar
+        assert!(is_open_fill("Open Long"));
+        assert!(is_open_fill("Open Short"));
+        // ters çevirme: eski taraf kapanır, YENİ TARAFA açılış
+        assert!(is_open_fill("Long > Short"));
+        assert!(is_open_fill("Short > Long"));
+        // bilinmeyen/boş şema → fail-safe: açılış SAYILMAZ
+        assert!(!is_open_fill(""));
+        assert!(!is_open_fill("bilinmeyen"));
+    }
+}
+
+/// ── BLOCKER 2 devam — exec-apply_fill kapısı: kapanış fill'i koruma
+/// KURMAZ; açılış fill'i kurar (yalnız gerçek apply_fill yolu koşar — bu
+/// test soyutlanmış kapıyı sınar).
+#[cfg(test)]
+mod fill_protection_tests {
+    use crate::executor::is_open_fill;
+
+    /// break-even kapanış → koruma ARMILMAZ (pending_sl/pending_tp kurmaz)
+    #[test]
+    fn zero_pnl_close_does_not_arm_entry_protection() {
+        // gerçek şema: break-even kapanış fill'i
+        // { dir: "Close Long", closedPnl: "0.0" }
+        let dir = "Close Long";
+        let closed_pnl = 0.0f64;
+        // YENİ KURAL: `dir` kaynak; closedPnl karar için KULLANILMAZ.
+        assert!(!is_open_fill(dir));
+        // ÜRETİM İSPATI: kapı apply_fill'de dir ile çağrılır — kaynak
+        // taraması `closed == 0.0` İLE KORUMA KURULAMAZ oldugunu korur.
+        let src = include_str!("executor.rs");
+        for (i, l) in src.lines().enumerate() {
+            let t = l.trim_start();
+            if t.starts_with("//") || t.starts_with("///") {
+                continue;
+            }
+            assert!(
+                !t.contains("open_fill = closed") && !t.contains("if closed =="),
+                "satır {}: koruma kapısı closedPnl'e BAĞLANAMAZ: {l}",
+                i + 1
+            );
+        }
+        let _ = closed_pnl;
+    }
+
+    /// açılış fill'i koruma kurar (imza davranışı korunur)
+    #[test]
+    fn open_fill_arms_entry_protection() {
+        assert!(is_open_fill("Open Long"));
+        assert!(is_open_fill("Open Short"));
+        assert!(is_open_fill("Long > Short"), "flip yeni tarafa açılış");
     }
 }

@@ -76,6 +76,19 @@ pub struct FillEvent {
     pub is_sl_fill: bool,
 }
 
+/// BLOCKER-2 DÜZELTMESİ: dolumun açılış/kapanış ayrımı `closedPnl`'den
+/// YAPILMAZ. Hyperliquid fill şeması `dir` alanını ayrıca verir:
+/// "Open Long"/"Open Short" (açılış), "Close Long"/"Close Short"
+/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — eski tarafı
+/// kapatıp yeniyi açar → yeni taraf için açılış).
+///
+/// `closedPnl == 0` kesinlikle "açılış" demek değildir: break-even
+/// kapanışta 0'dır ve eski kod tam bunu açılış sanıp giriş korumasını
+/// TEKRAR kuruyordu.
+pub fn is_open_fill(dir_field: &str) -> bool {
+    dir_field.starts_with("Open") || dir_field.contains('>')
+}
+
 /// BORSA STOP grid denemesi: fiyat tick'i coin'e özel ve meta'da YOK
 /// (ölçüldü: ME 6 haneyi reddediyor). "invalid price" gelince kaba ızgarada
 /// bir hane azaltılır. Giriş yolu (`batch_execute`) ile aynı strateji.
@@ -1322,6 +1335,7 @@ impl Executor {
         let sz: f64 = f["sz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
         let oid = f["oid"].as_u64().unwrap_or(0) as i64;
         let closed: f64 = f["closedPnl"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let dir_field: &str = f["dir"].as_str().unwrap_or("");
         // P0-4: TID DEDUP — aynı transaction ID iki kez işlenmesin
         let tid = f["tid"].as_str().unwrap_or("");
         if !tid.is_empty() && crate::track::tid_seen(tid) {
@@ -1420,7 +1434,17 @@ impl Executor {
             // (Döngü 1 saatte bir -> "sonraki döngüde" koymak pozisyonu
             // 1 saat korumasız bırakıyordu.) WS yolu senkron olduğu için
             // emir arka plan görevinde atılır; başarısızsa 3 kez denenir.
-            if closed == 0.0 {
+            // NOT: is_open_fill(dir) — "open" fill ise koruma kur.
+            // `dir` boş geliyorsa (beklenmeyen şema) koruma KURULMAZ ve
+            // uyarı loglanır (fail-safe: bayat koruma > illüzyon koruma);
+            // pozisyon sonraki döngüde executor recon'undan korunur.
+            let open_fill = is_open_fill(dir_field);
+            if dir_field.is_empty() {
+                tracing::warn!(
+                    "fill'te dir alanı yok (oid={oid} coin={coin}) — giriş koruması ARMILMADI (fail-safe)"
+                );
+            }
+            if open_fill {
                 if let Some((risk, _ts)) = self.pending_sl.remove(&coin) {
                     // STOP GERÇEK DOLUM FİYATINDAN. `px` = dolum fiyatı.
                     // (Ölçülen hata: karar anındaki defter fiyatı + IOC kayması
