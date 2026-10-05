@@ -197,3 +197,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
 pub const STRATEGY_COUNT: usize = 18;
+
+#[cfg(test)]
+#[path = "strat_test_helpers.rs"]
+pub mod strat_test_helpers;

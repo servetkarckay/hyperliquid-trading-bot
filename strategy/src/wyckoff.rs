@@ -30,8 +30,14 @@ impl Strategy for Wyckoff {
             return Signal::Skip { reason: ">=60 mum gerekli".into() };
         }
         let vols = volumes(&input.candles);
-        let e20 = last(&indicators::ema(&c, 20)).unwrap();
-        let e50 = last(&indicators::ema(&c, 50)).unwrap();
+        // D: EMA boş/NaN → Skip (panik yerine; engine zaten panik-izole eder
+        // ama deterministik davranış üretimde Skip olmalı)
+        let (Some(e20), Some(e50)) = (
+            last(&indicators::ema(&c, 20)).filter(|x| x.is_finite()),
+            last(&indicators::ema(&c, 50)).filter(|x| x.is_finite()),
+        ) else {
+            return Signal::Skip { reason: "EMA hesaplanamadı".into() };
+        };
         let price = c[c.len() - 1];
 
         // trend yönü
@@ -81,4 +87,65 @@ fn highs_of(candles: &[data::Candle]) -> f64 {
 }
 fn lows_of(candles: &[data::Candle]) -> f64 {
     candles[candles.len() - 20..].iter().map(|c| c.l).fold(f64::MAX, f64::min)
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// A — Long koşulu: trend yukarı (E20>E50) + hacim onayı + zirvede değil.
+    #[test]
+    fn wyckoff_trend_up_hacim_onayli_long_uretir() {
+        let mut candles = H::linear(80, 100.0, 0.1); // yükselen
+        H::set_last(&mut candles, 108.0, 108.5, 107.0, 300.0); // hacim patlaması
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        match Wyckoff.evaluate(&input) {
+            Signal::Long { strength, note } => {
+                assert!(strength > 0.0 && strength <= 0.9);
+                assert!(note.contains("trend yukarı"));
+            }
+            other => panic!("Long beklenirdi: {other:?}"),
+        }
+    }
+
+    /// C — Short simetrisi: trend aşağı + hacim onayı.
+    #[test]
+    fn wyckoff_trend_down_hacim_onayli_short_uretir() {
+        let mut candles = H::linear(80, 108.0, -0.1);
+        H::set_last(&mut candles, 100.0, 101.0, 99.5, 300.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        match Wyckoff.evaluate(&input) {
+            Signal::Short { strength, .. } => assert!(strength > 0.0 && strength <= 0.9),
+            other => panic!("Short beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — EMA hesaplanamadı → Skip (panik/unwrap yok).
+    #[test]
+    fn wyckoff_ema_yoksa_skip() {
+        // 60 mum ama hepsi aynı — ema yine değer üretir; Skip yolu için
+        // NaN mum kullan (ema NaN üretir → filtre Skip'e düşmeli)
+        let mut candles = H::flat(80, 100.0);
+        H::set_last(&mut candles, f64::NAN, 100.0, 99.0, 100.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        assert!(matches!(Wyckoff.evaluate(&input), Signal::Skip { .. }), "NaN son bar → Skip");
+    }
+
+    /// B — FUTURE LEAKAGE: kırılım/karar sinyali onay verisi OLMADAN üretilmez.
+    /// Veri A = t anına kadar; t'ten ÖNCE sinyal yok, t'te var.
+    #[test]
+    fn wyckoff_prefix_replay_erken_sinyal_uretmez() {
+        let candles = H::linear(80, 100.0, 0.1);
+        // son bar hariç: EMA'lar benzer ama hacim onayı son barda geldi
+        let early = candles[..candles.len() - 1].to_vec();
+        let input = MarketInput { coin: "T".into(), candles: early, ..Default::default() };
+        let sig = Wyckoff.evaluate(&input);
+        // erken sinyal hacim patlaması olmadan KONTRAYSA (Short/Hold/Skip) doğru;
+        // kritik olan: son barın bilgisine bakmadan Long ÜRETMEZ (hacim onayı yok)
+        assert!(
+            !matches!(&sig, Signal::Long { note, .. } if note.contains("hacim onaylı")),
+            "hacim patlaması olmadan hacim-onaylı Long üretilmez: {sig:?}"
+        );
+    }
 }

@@ -267,6 +267,86 @@ pub struct StrategyTracker {
     stats: HashMap<String, StratStats>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PerformanceMetrics {
+    pub trades: usize,
+    pub win_rate: Option<f64>,
+    pub profit_factor: Option<f64>,
+    pub expectancy_r: Option<f64>,
+    pub avg_win_r: Option<f64>,
+    pub avg_loss_r: Option<f64>,
+    pub max_drawdown_r: Option<f64>,
+    pub max_consecutive_losses: Option<usize>,
+    pub mfe_r: Option<f64>,
+    pub mae_r: Option<f64>,
+}
+
+impl PerformanceMetrics {
+    /// R dizisinden (GERÇEK fill kayıtları) metrikler.
+    ///
+    /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
+    /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
+    pub fn from_rs(rs: &[f64], mfe_r: Option<f64>, mae_r: Option<f64>) -> Self {
+        if rs.is_empty() {
+            return Self { trades: 0, mfe_r, mae_r, ..Default::default() };
+        }
+        let wins: Vec<f64> = rs.iter().copied().filter(|r| *r > 0.0).collect();
+        let losses: Vec<f64> = rs.iter().copied().filter(|r| *r < 0.0).collect();
+        let win_sum: f64 = wins.iter().sum();
+        let loss_sum: f64 = losses.iter().copied().map(|r| r.abs()).sum();
+
+        // max drawdown: kümülatif R eğrisi
+        let mut cum = 0.0f64;
+        let mut peak = 0.0f64;
+        let mut mdd = 0.0f64;
+        for r in rs {
+            cum += *r;
+            peak = peak.max(cum);
+            mdd = mdd.max(peak - cum);
+        }
+        // ardışık kayıp serisi
+        let mut streak = 0usize;
+        let mut worst = 0usize;
+        for r in rs {
+            if *r <= 0.0 {
+                streak += 1;
+                worst = worst.max(streak);
+            } else {
+                streak = 0;
+            }
+        }
+        Self {
+            trades: rs.len(),
+            win_rate: Some(wins.len() as f64 / rs.len() as f64),
+            profit_factor: Some(if loss_sum > 0.0 { win_sum / loss_sum } else if win_sum > 0.0 { 10.0 } else { 0.0 }),
+            expectancy_r: Some(rs.iter().sum::<f64>() / rs.len() as f64),
+            avg_win_r: if wins.is_empty() { None } else { Some(win_sum / wins.len() as f64) },
+            avg_loss_r: if losses.is_empty() { None } else { Some(-loss_sum / losses.len() as f64) },
+            max_drawdown_r: Some(mdd),
+            max_consecutive_losses: Some(worst),
+            mfe_r,
+            mae_r,
+        }
+    }
+
+    /// Rapor satırı — iddia değil ölçüm.
+    pub fn line(&self) -> String {
+        let f = |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
+        format!(
+            "trades={} win_rate={} pf={} E[R]={} avg_win_R={} avg_loss_R={} maxDD_R={} ardışık_kayıp={} MFE_R={} MAE_R={}",
+            self.trades,
+            f(self.win_rate, 3),
+            f(self.profit_factor, 2),
+            f(self.expectancy_r, 3),
+            f(self.avg_win_r, 2),
+            f(self.avg_loss_r, 2),
+            f(self.max_drawdown_r, 2),
+            self.max_consecutive_losses.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+            f(self.mfe_r, 2),
+            f(self.mae_r, 2),
+        )
+    }
+}
 impl StrategyTracker {
     pub fn record_outcomes(&mut self, strategy_names: Vec<String>, ts: u64, win: bool) {
         self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
@@ -278,6 +358,7 @@ impl StrategyTracker {
             self.stats.entry(name).or_default().record_r(ts, r);
         }
     }
+
 
     /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
     ///
@@ -397,6 +478,27 @@ impl StrategyTracker {
         }
         q.sort();
         q.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// I — stratejinin **ölçülebilir metrikleri** (gerçek fill R penceresi).
+    /// Kanıt yok → `trades=0` ve `None`'lar (uydurma sayı yok).
+    pub fn metrics(&self, name: &str) -> PerformanceMetrics {
+        let rs: Vec<f64> = self.stats.get(name).map(|x| x.rs.clone()).unwrap_or_default();
+        PerformanceMetrics::from_rs(&rs, None, None)
+    }
+
+    /// I — portföy geneli (tüm stratejilerin birleşik R penceresi).
+    pub fn portfolio_metrics(&self) -> PerformanceMetrics {
+        let mut all: Vec<(u64, f64)> = Vec::new();
+        for st in self.stats.values() {
+            for (i, r) in st.rs.iter().enumerate() {
+                let ts = st.outcomes.get(i).map(|(t, _)| *t).unwrap_or(0);
+                all.push((ts, *r));
+            }
+        }
+        all.sort_by_key(|(t, _)| *t);
+        let rs: Vec<f64> = all.into_iter().map(|(_, r)| r).collect();
+        PerformanceMetrics::from_rs(&rs, None, None)
     }
 
     /// **PORTFÖY win-rate + k/z oranı** — tracker'daki TÜM canlı kanıttan.

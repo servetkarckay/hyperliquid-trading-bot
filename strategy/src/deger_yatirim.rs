@@ -57,3 +57,37 @@ impl Strategy for DegerYatirim {
         }
     }
 }
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+    use data::market_ctx::CtxState;
+
+    /// A — temel skor yolu: yüksek skor → Long; düşük → Skip.
+    #[test]
+    fn deger_temel_skor_yolu() {
+        let iyi = DegerYatirim.evaluate_with_fundamentals(FundamentalScores { mc_tvl: 0.5, tvl_trend: 0.2, real_yield: 0.2 });
+        match iyi {
+            Signal::Long { strength, .. } => assert!(strength > 0.6 && strength <= 0.9),
+            other => panic!("iyi temeller → Long: {other:?}"),
+        }
+        let kotu = DegerYatirim.evaluate_with_fundamentals(FundamentalScores { mc_tvl: 5.0, tvl_trend: -0.5, real_yield: 0.0 });
+        assert!(matches!(kotu, Signal::Skip { .. }), "value trap → Skip: {kotu:?}");
+        let orta = DegerYatirim.evaluate_with_fundamentals(FundamentalScores { mc_tvl: 2.5, tvl_trend: 0.0, real_yield: 0.1 });
+        assert!(matches!(orta, Signal::Hold { .. }));
+    }
+
+    /// D — HL proxy modu: temel veri YOK → Hold (yön üretmez, SAHTE
+    /// temel skor UYDURULMAZ) + ctx yoksa Skip.
+    #[test]
+    fn deger_proxy_yon_uretmez() {
+        let ctx = CtxState { coin: "T".into(), funding: 0.0, open_interest: 100.0, mark_px: 2.0, oracle_px: 2.0, premium: 0.0, day_ntl_vlm: 500.0, prev_day_px: 2.0, ts: 0 };
+        let input = MarketInput { coin: "T".into(), ctx: Some(ctx), ..Default::default() };
+        match DegerYatirim.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("harici"), "{note}"),
+            other => panic!("proxy Hold beklenirdi: {other:?}"),
+        }
+        assert!(matches!(DegerYatirim.evaluate(&MarketInput::default()), Signal::Skip { .. }));
+    }
+}

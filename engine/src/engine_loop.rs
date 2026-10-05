@@ -449,6 +449,23 @@ pub fn plan_tp_order(
     Some(TpOrderPlan { is_long, sz, tp_px, reduce_only: true })
 }
 
+/// G — **GİRİŞ FİYAT KONTRATI**: Long: SL < entry < TP (hepsi pozitif);
+/// Short: TP < entry < SL. Bozuk kontrat (negatif fiyat — örn. ATR girişin
+/// 50 katı) → emir ÜRETİLMEZ.
+pub fn entry_contract_ok(is_long: bool, entry_eff: f64, sl_px: f64, tp_px: f64) -> bool {
+    if !(entry_eff > 0.0) || !entry_eff.is_finite() {
+        return false;
+    }
+    if !(sl_px > 0.0) || !sl_px.is_finite() || !(tp_px > 0.0) || !tp_px.is_finite() {
+        return false;
+    }
+    if is_long {
+        sl_px < entry_eff && tp_px > entry_eff
+    } else {
+        tp_px < entry_eff && sl_px > entry_eff
+    }
+}
+
 /// Kâr tarafı kapısı: long → TP > entry, short → TP < entry.
 pub fn tp_side_ok(is_long: bool, tp_px: f64, entry_eff: f64) -> bool {
     if !(tp_px > 0.0) || !(entry_eff > 0.0) {
@@ -2227,10 +2244,14 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     // C: dokümante kural — LONG, üst %20'den alt %40'a düştü → Exit
                     let kesit_exit = side_long
                         && strategy::kesit_momentum::rank_shift_exit_long(prev_band, cur_band);
+                    // C: turtle dokümante kural — kapanış 55-bar kanalın altı
+                    // → LONG trend bitti (strateji ölü dal yerine helper üretir)
+                    let turtle_exit = side_long
+                        && strategy::trend_following_turtle::long_exit_signal(&self.agg.history(&e.coin, self.loop_cfg.interval_secs).to_vec());
                     // B: ensemble Exit oyu → gerçek ExitNow (Flat'ta hiçbir emir YOK;
                     // PendingExit'te idempotent — ikinci ExitNow üretmez)
                     let sig_exit = e.cs.exit_requested;
-                    if kesit_exit || sig_exit {
+                    if kesit_exit || turtle_exit || sig_exit {
                         if let Some(m) = self.machines.get_mut(&e.coin) {
                             act = m.force_exit(px_b, px_a);
                         }
@@ -2238,7 +2259,9 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                             tracing::info!(
                                 "[EXIT] {} çıkış kanalı: {} (contributor={:?})",
                                 e.coin,
-                                if kesit_exit { "kesit rank kayması (LONG)" } else { "Signal::Exit" },
+                                if kesit_exit { "kesit rank kayması (LONG)" }
+                                else if turtle_exit { "turtle 55-bar altı (LONG)" }
+                                else { "Signal::Exit" },
                                 e.cs.exit_contributors
                             );
                         }
@@ -2326,7 +2349,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                             }
                         };
                         let (ok, risk_bps, floor_bps) =
-                            crate::allocation_manager::ev_ok(
+                            self.am.cfg.cost.ev_ok(
                                 e.atr_pct,
                                 self.am.cfg.sl_atr_mult,
                                 spread_bps,
@@ -2339,7 +2362,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                                 e.atr_pct * 10_000.0,
                                 risk_bps,
                                 floor_bps,
-                                crate::allocation_manager::round_trip_cost_bps()
+                                self.am.cfg.cost.round_trip_cost_bps(spread_bps)
                             );
                             if let Some(m) = self.machines.get_mut(&e.coin) {
                                 if m.oid_zero_pending() {
@@ -2406,8 +2429,13 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     } else {
                         (cand.sl_px - entry_px, entry_px - cand.tp_px)
                     };
-                    if sl_ok < min_dist || tp_ok < min_dist {
-                        tracing::warn!("{}: SL/TP mesafe koruması (ATR âm) — emir atlandı", e.coin);
+                    // G — KONTRAT KAPISI: negatif SL/TP fiyatı (ATR girişin
+                    // katları) borsada "invalid price" olur → korumasız pozisyon.
+                    if !entry_contract_ok(matches!(cand.dir, Dir::Long), entry_px, cand.sl_px, cand.tp_px)
+                        || sl_ok < min_dist
+                        || tp_ok < min_dist
+                    {
+                        tracing::warn!("{}: SL/TP kontrat/mesafe koruması (ATR âm) — emir atlandı", e.coin);
                         if let Some(m) = self.machines.get_mut(&e.coin) {
                             if m.oid_zero_pending() { m.state = PosState::Flat; }
                         }
@@ -2473,17 +2501,27 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     // emrin 4'ü hiç girmiyordu. Şimdi IOC + %0.2 kayma kapağı.
                     // Testnet defteri çok ince: ask/bid tabanlı dar kapağa hiç erişilemiyor
                     // ("could not immediately match against any resting orders").
-                    // Mark varsa tabanı oracle'a bağla (kayma kapağı %0.5), yoksa
-                    // defter fiyatından %0.2 kapa + %3 oracle bandı.
+                    // F — TEK MALİYET MODELİ: band `CostModel::execution_band_bps`
+                    // (EV kapısıyla AYNI fee+slippage+spread). Ad-hoc ±%0.5/±%0.2
+                    // ikinci maliyet modeli KALDIRILDI; operasyonel taban
+                    // (EXECUTION_BAND_FLOOR_BPS=50 bps) ince testnet defterinde
+                    // dolum kaçışını önler (ölçülen).
+                    let spread_bps_band = {
+                        let mid2 = if e.ask > 0.0 && e.bid > 0.0 { (e.ask + e.bid) / 2.0 } else { 0.0 };
+                        if mid2 > 0.0 { (e.ask - e.bid).abs() / mid2 * 10_000.0 } else { 0.0 }
+                    };
+                    let band = self.am.cfg.cost.execution_band_bps(spread_bps_band);
                     let ord_px = match mark_map.get(&e.coin) {
                         Some(mk) if *mk > 0.0 => {
-                            if side_sm.is_buy() { *mk * 1.005 } else { *mk * 0.995 }
+                            let f = band / 10_000.0;
+                            if side_sm.is_buy() { *mk * (1.0 + f) } else { *mk * (1.0 - f) }
                         }
                         _ => {
+                            let f = band / 10_000.0;
                             let raw = if side_sm.is_buy() {
-                                entry_px * 1.002
+                                entry_px * (1.0 + f)
                             } else {
-                                entry_px * 0.998
+                                entry_px * (1.0 - f)
                             };
                             raw.clamp(entry_px * 0.97, entry_px * 1.03)
                         }
@@ -2594,7 +2632,10 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                         }
                         continue;
                     }
-                    let xpx = o.px * if o.side.is_buy() { 1.005 } else { 0.995 };
+                    // F — çıkış bandı da TEK modelden (IOC exit IOC ile aynı
+                    // maliyet gerçekliği)
+                    let xband = self.am.cfg.cost.execution_band_bps(0.0) / 10_000.0;
+                    let xpx = o.px * if o.side.is_buy() { 1.0 + xband } else { 1.0 - xband };
                     if !(xpx > 1e-9) || !xpx.is_finite() {
                         tracing::warn!("{}: çıkış fiyatı geçersiz — atlandı", e.coin);
                         if let Some(m) = self.machines.get_mut(&e.coin) {
@@ -3850,6 +3891,199 @@ mod exit_engine_tests {
             if !matches!(machines.get_mut("BTC").unwrap().force_exit(100.0, 100.5), Action::Nothing) {
                 panic!("ikinci ExitNow ÜRETİLMEMELİ (idempotent)");
             }
+        }
+    }
+}
+
+/// ── G — SL/TP/RR CONTRACT (property-style deterministik matris) ─────────
+/// Her giriş için: Long: SL < entry < TP; Short: TP < entry < SL;
+/// TP mesafesi ≥ 2×risk. Kontratı bozan tahsis → EMİR ÜRETİLMEZ
+/// (`plan_tp_order` + `tp_side_ok` + EV kapısı aynı modelden).
+#[cfg(test)]
+mod sl_tp_contract_tests {
+    use super::*;
+    use crate::allocation_manager::AllocationConfig;
+
+    #[test]
+    fn sl_tp_rr_contract_matrix() {
+        // G — TP oran toleransı: min kapı yalnız R:R<1 config'de devreye
+        // girer; oran > 2 config'lerinde formül BİREBİR uygulanmalı (mutasyon
+        // G2/G3 bunları yakalar).
+        let configs = [
+            AllocationConfig::default(),                                  // oran 2.0
+            AllocationConfig { tp_atr_mult: 1.0, ..Default::default() },  // oran 0.67 → min kapı
+            AllocationConfig { tp_atr_mult: 5.0, ..Default::default() },  // oran 3.33
+        ];
+        let entries = [100.0f64, 0.0098, 50.0, 12345.6];
+        let atrs = [0.5f64, 2.0, 5.0, 0.05];
+        let slips = [0.0f64, 0.002]; // kayma: TP/SL fiyatlara taşınır
+        for cfg in &configs {
+        for &entry in &entries {
+            for &atr in &atrs {
+                for &slip in &slips {
+                    let entry_eff = if entry > 0.0 { entry * (1.0 + slip) } else { entry };
+                    for dir in [Dir::Long, Dir::Short] {
+                        let am = AllocationManager::new(cfg.clone());
+                        let (sl, tp) = am.sl_tp(dir, entry_eff, atr);
+                        let risk = (entry_eff - sl).abs();
+                        assert!(risk > 0.0, "risk > 0: entry={entry} atr={atr}");
+                        if matches!(dir, Dir::Long) {
+                            assert!(sl < entry_eff, "Long: SL < entry ({sl} < {entry_eff})");
+                            assert!(tp > entry_eff, "Long: TP > entry ({tp} > {entry_eff})");
+                        } else {
+                            assert!(tp < entry_eff, "Short: TP < entry ({tp} < {entry_eff})");
+                            assert!(sl > entry_eff, "Short: SL > entry ({sl} > {entry_eff})");
+                        }
+                        let tp_dist = (tp - entry_eff).abs();
+                        assert!(
+                            tp_dist >= 2.0 * risk - 1e-9,
+                            "TP ≥ 2R: dir={dir:?} entry={entry_eff} atr={atr} tp_dist={tp_dist} risk={risk}"
+                        );
+                        // G — FORMÜL BİREBİR: tp_dist = max((tp/sl)×risk, 2×risk)
+                        let want = ((cfg.tp_atr_mult / cfg.sl_atr_mult) * risk).max(2.0 * risk);
+                        assert!(
+                            (tp_dist - want).abs() < 1e-9,
+                            "formül sapması: dir={dir:?} tp/sl={} risk={risk} tp_dist={tp_dist} want={want}",
+                            cfg.tp_atr_mult / cfg.sl_atr_mult
+                        );
+                        // plan kapısı: kontrat sağlanıyorsa emir ÜRETİLİR;
+                        // kontrat BOZULUYORSA (negatif fiyat/mesafe) EMİR YOK
+                        assert_eq!(
+                            entry_contract_ok(matches!(dir, Dir::Long), entry_eff, sl, tp),
+                            tp > 0.0 && sl > 0.0,
+                            "kontrat kapısı = pozitif fiyat + doğru taraf (dir={dir:?} entry={entry_eff} atr={atr} sl={sl} tp={tp})"
+                        );
+                        if entry_contract_ok(matches!(dir, Dir::Long), entry_eff, sl, tp) {
+                            assert!(plan_tp_order(true, matches!(dir, Dir::Long), entry_eff, 1.0, tp).is_some(),
+                                "kontrat sağlandı → TP plan üretilebilir");
+                        } else {
+                            // bozuk kontrat → GİRİŞ EMİRİ ÜRETİLMEZ (G kabul
+                            // kuralı — run_cycle `entry_contract_ok` kapısı)
+                            assert_eq!(entry_contract_ok(matches!(dir, Dir::Long), entry_eff, sl, tp), false);
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+}
+
+/// ── H — POSITION STATE / EXECUTION CONTRACT (uçtan uca) ─────────────────
+#[cfg(test)]
+mod lifecycle_contract_tests {
+    use crate::state_machine::{Decision, PosState, PositionStateMachine, SmConfig, Action, Side};
+
+    /// Flat → Pending → Filled → InPosition → Exit → Flat — birebir.
+    #[test]
+    fn tam_yasam_dongusu_flat_to_flat() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        assert!(matches!(m.state, PosState::Flat));
+
+        // 1) karar → Pending + Place
+        let a1 = m.on_decision(Decision { score: 0.6 }, 100.0, 100.5, 1);
+        assert!(matches!(a1, Action::Place(_)), "{a1:?}");
+        assert!(matches!(m.state, PosState::Pending { .. }));
+
+        // 2) idempotent: aynı yönde tekrar sinyal → yeni emir YOK
+        assert!(matches!(m.on_decision(Decision { score: 0.7 }, 100.0, 100.5, 2), Action::Nothing));
+
+        // 3) dolum → InPosition
+        m.link_pending_oid(77);
+        let a3 = m.on_order_status(77, 2.0, 0.0, 100.5);
+        assert!(matches!(m.state, PosState::InPosition { .. }), "{a3:?}");
+
+        // 4) ters sinyal → PendingExit + ExitNow (reduce_only)
+        let a4 = m.on_decision(Decision { score: -0.8 }, 99.5, 100.0, 3);
+        match a4 {
+            Action::ExitNow(o) => {
+                assert!(o.reduce_only);
+                assert_eq!(o.side, Side::Short);
+                assert!(o.sz > 0.0, "gerçek boyut");
+            }
+            other => panic!("ExitNow beklenirdi: {other:?}"),
+        }
+        assert!(matches!(m.state, PosState::PendingExit { .. }));
+
+        // 5) idempotent: PendingExit'te ikinci exit → Nothing
+        assert!(matches!(m.on_decision(Decision { score: -0.9 }, 99.0, 99.5, 4), Action::Nothing));
+        assert!(matches!(m.force_exit(99.0, 99.5), Action::Nothing));
+
+        // 6) çıkış dolumu → Flat
+        m.link_pending_oid(88);
+        let a6 = m.on_order_status(88, 2.0, 0.0, 99.2);
+        assert!(matches!(m.state, PosState::Flat), "{a6:?}");
+
+        // 7) Flat'ta tekrar giriş döngüsü (duplicate order yok: aynı oid iki kez işlenmez)
+        let a7 = m.on_order_status(88, 2.0, 0.0, 99.2);
+        assert!(matches!(m.state, PosState::Flat), "{a7:?}");
+    }
+
+    /// UNKNOWN → cloid bulunamadı → Flat yalnız oid==0 pending'de.
+    #[test]
+    fn unknown_bulunamadi_sadece_oid_sifir_pendingde_flat() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        m.on_decision(Decision { score: 0.6 }, 100.0, 100.5, 1);
+        // oid==0 pending → revert serbest
+        assert!(m.oid_zero_pending());
+        // gerçek oid bağlıysa → revert YASAK (pozisyon borsada olabilir)
+        m.link_pending_oid(42);
+        assert!(!m.oid_zero_pending());
+        // InPosition'da da revert yasak
+        let _ = m.on_order_status(42, 2.0, 0.0, 100.5);
+        assert!(matches!(m.state, PosState::InPosition { .. }));
+        assert!(!m.oid_zero_pending());
+    }
+}
+
+/// ── I — ÖLÇÜLEBİLİR METRİKLER (gerçek fill verisi; uydurma yok) ─────────
+#[cfg(test)]
+mod metrics_tests {
+    use crate::track::{PerformanceMetrics, StrategyTracker};
+
+    #[test]
+    fn metrikler_gercek_r_dizisinden_hesaplanir() {
+        // bilinen dizi: +2, −1, −1, +3, −1 → 5 işlem, 2 kazanç
+        let rs = [2.0f64, -1.0, -1.0, 3.0, -1.0];
+        let m = PerformanceMetrics::from_rs(&rs, Some(3.0), Some(-1.5));
+        assert_eq!(m.trades, 5);
+        assert!((m.win_rate.unwrap() - 0.4).abs() < 1e-9);
+        // pf = 5/3
+        assert!((m.profit_factor.unwrap() - 5.0 / 3.0).abs() < 1e-9);
+        assert!((m.expectancy_r.unwrap() - 0.4).abs() < 1e-9);
+        assert!((m.avg_win_r.unwrap() - 2.5).abs() < 1e-9);
+        // kayıp İŞARETLİ raporlanır (−1.0 = işlem başına −1R)
+        assert!((m.avg_loss_r.unwrap() - (-1.0)).abs() < 1e-9);
+        // kümülatif: 2,1,0,3,2 → peak 2,2,2,3,3 → düşüşler 0,1,2,0,1 → MDD 2
+        assert!((m.max_drawdown_r.unwrap() - 2.0).abs() < 1e-9);
+        assert_eq!(m.max_consecutive_losses, Some(2));
+        assert!((m.mfe_r.unwrap() - 3.0).abs() < 1e-9);
+        // rapor satırı iddia değil ölçüm içerir
+        assert!(m.line().contains("trades=5"));
+    }
+
+    /// Kanıt yok → SAYI UYDURULMAZ (None); "%99 kazanır" tipi iddia yok.
+    #[test]
+    fn kanit_yoksa_metrik_uydurulmaz() {
+        let m = PerformanceMetrics::from_rs(&[], None, None);
+        assert_eq!(m.trades, 0);
+        assert_eq!(m.win_rate, None, "win_rate UYDURULMAZ");
+        assert_eq!(m.profit_factor, None);
+        assert_eq!(m.expectancy_r, None);
+        // tracker arayüzü de aynısı
+        let t = StrategyTracker::default();
+        assert_eq!(t.metrics("yok").trades, 0);
+        assert_eq!(t.metrics("yok").win_rate, None);
+        assert_eq!(t.portfolio_metrics().trades, 0);
+        // sabit iddia metinleri KODDA YASAK (I)
+        let src = include_str!("track.rs").split("#[cfg(test)]").next().unwrap_or("");
+        for (i, l) in src.lines().enumerate() {
+            let t2 = l.trim_start();
+            if t2.starts_with("//") || t2.starts_with("///") {
+                continue;
+            }
+            assert!(!t2.contains("%99") && !t2.contains("garantili"),
+                "satır {}: kesin kazanç iddiası yasak: {l}", i + 1);
         }
     }
 }

@@ -76,3 +76,31 @@ fn realized_sigma(returns: &[f64], n: usize) -> f64 {
     let m = w.iter().sum::<f64>() / n as f64;
     (w.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt()
 }
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// A — parent emir planı: plan notu üretilir (parça sayısı/USD).
+    #[test]
+    fn optexec_plan_uretir() {
+        let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 50_000.0, ..Default::default() };
+        match OptimalExecution.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("parça") || note.contains('#'), "{note}"),
+            other => panic!("plan Hold beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — order_size_usd yoksa Skip (ölü strateji yasağı: engine bu alanı
+    /// besleyemez → strateji AUXILIARY işaretli, sessiz ölü değil).
+    #[test]
+    fn optexec_parent_yoksa_skip() {
+        let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 0.0, ..Default::default() };
+        match OptimalExecution.evaluate(&input) {
+            Signal::Skip { reason } => assert!(reason.contains("order_size") || reason.contains("emir"), "{reason}"),
+            other => panic!("Skip beklenirdi: {other:?}"),
+        }
+        assert_eq!(OptimalExecution.status(&input), StratStatus::Auxiliary, "auxiliary işaretli");
+    }
+}

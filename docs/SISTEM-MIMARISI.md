@@ -118,10 +118,10 @@ Trait: `Strategy{name(); evaluate(MarketInput)->Signal}`; `registry()` kayıt de
 | `market_making.rs` | Avellaneda-Stoikov: r=mid−q·γ·σ²·T; quote planı ALO |
 | `optimal_execution.rs` | U-şekilli parçalama planı; vol→Ioc/Alo seçimi |
 | `volatilite_zaman_serisi.rs` | GARCH(1,1) fit→σ_next/σ_long<0.85 sıkışma→genişleme+momentum |
-| `carry_funding_basis.rs` | funding·3·365>+%10→Long carry, <−%10→Short |
+| `carry_funding_basis.rs` | funding(**SAATLİK** — P1-I ölçek denetimi: fundingHistory 1h aralıklı; BTC 1.25e-5=faiz+premium imzası)×24×365=×8760 → >+%10→Short carry, <−%10→Long carry |
 | `oi_likidasyon.rs` | ΔOI×ΔP 4 kadrans; kontra yönler %30 zayıf |
 | `rejim_tespiti.rs` | ADX+Hurst+vol% → TREND/MR/SPIKE/SQUEEZE/GECIS; classify() motor kapısı |
-| `risk_kelly.rs` | boyut katmanı: f*=1.8, %45 örneklem; canlıda tracker besler |
+| `risk_kelly.rs` | boyut katmanı: yalnız tracker kanıtı (sabit %45/1.8 KALDIRILDI — P1-H); kanıt yok→Skip |
 | `dow_teorisi.rs` | HH/HL pivot yapısı + hacim onayı + EMA50; eksikte eleme |
 | `davranissal_finans.rs` | 2σ aşırı hareket + hacim 2× → panik/euphoria kontra fade |
 | `klasik_indikatorler.rs` | RSI/MACD/BB/OBV/VWAP 5-oy skoru (|s|≥2 → sinyal) |
@@ -856,7 +856,7 @@ Mainnet'e geçişte `track_state.json` **taşınır mı** = **kullanıcı karar�
 | data | evren 178 aktif coin, tick kaybı | 6.246 tick/20 sn, 0 kayıp |
 | data | CH/Redis | 12.142 tick + 4.321 mum/coin arşiv + 1.131 mid cache |
 | math | sıfır-sapma | 5.828 değer, maks 5.9e-14 |
-| engine | state machine 10 + alloc 4 + track 22 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 6 + risk-lock 21 + live-weights 8 + recon 4 + tp-entry 3 + **tp-execution 8** + **exit kanalı 4** | 127/127 ✓ |
+| engine | state machine 10 + alloc 4 + track 22 + ensemble 4 + cloid 2 + stop-px 2 + sl-side 4 + trailing 8 + EV 9 + risk-lock 21 + live-weights 8 + recon 4 + tp-entry 3 + tp-execution 8 + exit kanalı 4 + **SL/TP kontrat 1 + yaşam döngüsü 2 + metrik 2** | 135/135 ✓ |
 | api | exchange UNKNOWN politikası: 5xx tek POST, 429 backoff retry, timeout UNKNOWN, 4xx Error | 5/5 ✓ |
 | data | ring-wrap kabul + snapshot yalnız kapanışta | 2/2 ✓ |
 | data | P1-D tek kaynaklı evren: exact/top-N, sessiz kırpma yok, katman doğrulama | 7/7 ✓ |
@@ -888,7 +888,17 @@ TEK PR ile girer.
 - ~~**P0-1**: TP dolum-fiyatı türetimi~~ — **KAPANDI (P1-E)**: `AllocationConfig::tp_from_entry(entry_eff = REST entryPx, risk_mesafesi = EntryAttr::risk_px)`, `EntryAttr::tp_px` üzerinden gerçek akışa bağlı.
 - ~~TP-execution yolu~~ — **KAPANDI (P1-H)**: giriş dolumunda `pending_tp` → reduce-only TP trigger (`place_tp_grid`, cloid'li); TP fill oid eşleşmesi → `ExitReason::TakeProfit`; recon `restore_tp_orders` duplicate etmez.
 - ~~`Signal::Exit` ölü note~~ — **KAPANDI (P1-H)**: `ConsensusSignal.exit_requested` + `exit_contributors`; açık pozisyonda gerçek `ExitNow` (`PositionStateMachine::force_exit`), Flat'ta emir YOK, çoklu oy idempotent.
-- Kesit momentum rank kayması — **BAĞLANDI (P1-H)**: `rank_band`/`rank_shift_exit_long` tek kaynak; LONG pozisyon Top→(alt %40) → Exit (strateji pozisyon tarafını bilmez, engine yönlendirir).
+- **P1-I strateji denetimi** — 18/18 stratejide deterministik unit test; future-leak prefix-replay testleri (Dow/Elliott/Turtle/Breakout/Rejim/Wyckoff); Long/Short simetri testleri (Carry/OI/LOB/Breakout/Davranışsal/Klasik).
+- **BULUNAN VE DÜZELTİLEN BUG'LAR (P1-I):**
+  - `carry_funding_basis`: FUNDING_ANNUALIZATION 3×365=1095 → **8760** (24×365). HL API `funding` alanı SAATLİK (kanıt: fundingHistory 1h aralıklı; BTC 1.25e-5 = faiz+premium saatlik formül imzası). Eski ölçek carry'yi 8× küçültüp sinyalleri susturuyordu.
+  - `breakout_kirilim`: sıkışma ölçümü KIRILIM barında yapılıyordu (kırılım BB'yi patlatır → yüzdelik daima %100 → strateji ölüyordu). Doküman kuralına göre kırılımdan 5 bar önceki genişlikle ölçüldü.
+  - `trend_following_turtle`: `price<ll55 → Exit` dalı ÖLÜYDÜ (ll55 ≤ ll20 ⟹ Short önce yakalardı). Kural pozisyon-farkında `long_exit_signal()` helper'ına taşındı (engine LONG'da Exit yönlendirir).
+  - `dow_teorisi`: `last_ema.unwrap_or(0.0)` EMA boşsa `px>0.0` trivially true → sahte Long onayı. `Option` + Skip.
+  - `breakout_kirilim`: `taker.unwrap_or(0.5)` / `oi.unwrap_or(0.0)` → taker yok Skip, OI onaysız kırılım sinyal ÜRETMEZ.
+  - `klasik_indikatorler`: OBV aşağı kolu yoktu (Short skoru yapısal ulaşılmazdı) → simetrik; RSI aşırı alım cezası −0.5 → −1 (dip ödülüyle simetrik).
+  - `wyckoff`/`turtle`/`volatilite_zaman_serisi`: `unwrap()` panik riskleri → Skip.
+  - **Yürütme/EV tek maliyet modeli**: `CostModel` (fee+expected_slippage+spread) — EV tabanı 3×round-trip(spread'li), giriş/çıkış bandı aynı modelden; ad-hoc ±%0.5 ikinci model kaldırıldı.
+- **Kesit momentum rank kayması — BAĞLANDI (P1-H)**: `rank_band`/`rank_shift_exit_long` tek kaynak; LONG pozisyon Top→(alt %40) → Exit (strateji pozisyon tarafını bilmez, engine yönlendirir).
 - Strateji durum raporu — **EKLENDİ (P1-H)**: `[STRAT]` ACTIVE/AUXILIARY/DATA-MISSING; `Kelly Sizing`/`Optimal Execution`/`Market Making` = AUXILIARY, `Vol Arbitraj (VRP)` IV yokken DATA-MISSING (sahte IV yok).
 - Kelly sabit %45 — **KALDIRILDI (P1-H)**: `MarketInput::portfolio_*` tracker kanıtından; kanıt yok → Skip (sabit değere sizing YOK).
 - **P0-2**: TID dedup ring buffer + `track_state.json` provenance (`origin + schema_version`).
@@ -905,7 +915,7 @@ TEK PR ile girer.
 **D — Doküman Hijyeni (RELEASE BLOCKER):**
 - §8.4.5 [EV] örneği: canlı kanıt 19/75 (ENS) ile güncellendi.
 - §8.1 keşif dağıtımı: koddan gerçek dağıtım yazıldı (kişi başı $10 taban, %5 cap).
-- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 127, api 5, data 9, strategy 15).
+- Test sayıları: `cargo test` çıktısından modül-bazlı gerçek sayı (engine 135, api 5, data 9, strategy 65).
 - **Risk-lock invariant**: `entries_allowed` ARAN DEĞİLDİR — `EntryGate` (`engine_loop.rs`) içinde `health_ok && !risk_locked` denkleminden **türetilir** (`Engine::entries_allowed()`). Hiçbir runtime yolu onu doğrudan yazamaz; `entries_allowed_alan_olarak_saklanmaz` testi kaynak taramasıyla bunu korur. Auto-unlock yalnız **gerçek `sync_positions_from`** ile doğrulanmış flat döngülerde ilerler (`rest_sync_verified`). Kilit açılsa bile `health_ok=false` ise giriş KAPALI kalır.
 - **Canlı ağırlık → ensemble**: `Engine::live_weights: HashMap<String, f64>` (kaydedilmiş canlı snapshot) ile `StrategyTracker` (canlı işlem kanıtı) **ayrı kavramlar**. `trained_weights: HashMap<String, TrainedInfo>` **kaldırıldı** (ölü state — hiç okunmuyordu; `TrainedInfo` de kaldırıldı). Doğrulama: `parse_live_weights()` (origin=live zorunlu, sayısal, finite, ≥0; üst sınır **uygulanmaz** → `1.75` birebir). Birleştirme: `merge_effective_weights()` — tracker kanıtı varsa tracker kazanır, kanıt yoksa canlı snapshot **korunur**. Dosya bozuksa **açılış başarısız** (sessiz cold-start yok); dump **atomik** (tmp+rename).
 - P1-E TP: tek formül `AllocationConfig::tp_from_entry()`; otoriter hedef `EntryAttr::tp_px` (**gerçek dolumdan**). `Candidate.tp_px` yalnız PLAN. `TRAIL_ATR_K`/`TRAIL_MIN_STEP` değiştirilmedi.
@@ -928,4 +938,4 @@ TEK PR ile girer.
 
 ---
 
-*Son güncelleme: 2026-10-05 (P1-H). Derleme: `cargo build --release --workspace` temiz, `cargo test --workspace`: engine 127, api 5, data 9, strategy 15 = **156**, hepsi yeşil (+1 ignored doc-test).*
+*Son güncelleme: 2026-10-05 (P1-I denetim). Derleme: `cargo build --release --workspace` temiz, `cargo test --workspace`: engine 135, api 5, data 9, strategy 65 = **214**, hepsi yeşil (+1 ignored doc-test).*

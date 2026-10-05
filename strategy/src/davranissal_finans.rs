@@ -53,3 +53,57 @@ impl Strategy for DavranissalFinans {
         }
     }
 }
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// A — panik satışı: 6 barda <-%8 (2σ+) + hacim 2x → kontra Long.
+    #[test]
+    fn davranissal_panic_kontra_long() {
+        let mut c = H::flat(114, 100.0);
+        // 6 barda sert düşüş + hacim patlaması
+        for i in 0..6 {
+            let px = 100.0 - (i + 1) as f64 * 2.0;
+            H::set(&mut c, 108 + i, px, px + 0.2, px - 0.5, 400.0);
+        }
+        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        match DavranissalFinans.evaluate(&input) {
+            Signal::Long { strength, note } => {
+                assert!(strength > 0.0 && strength <= 0.8);
+                assert!(note.contains("aşırı tepki"), "{note}");
+            }
+            other => panic!("kontra Long beklenirdi: {other:?}"),
+        }
+    }
+
+    /// C — Short simetrisi: euphoria (6 barda > 2σ + hacim) → kontra Short.
+    #[test]
+    fn davranissal_euphoria_kontra_short() {
+        let mut c = H::flat(114, 100.0);
+        for i in 0..6 {
+            let px = 100.0 + (i + 1) as f64 * 2.0;
+            H::set(&mut c, 108 + i, px, px + 0.5, px - 0.2, 400.0);
+        }
+        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        match DavranissalFinans.evaluate(&input) {
+            Signal::Short { strength, note } => {
+                assert!(strength > 0.0 && strength <= 0.8);
+                assert!(note.contains("euphoria"), "{note}");
+            }
+            other => panic!("kontra Short beklenirdi: {other:?}"),
+        }
+    }
+
+    /// D — anormal hareket yok → Hold (tetik yoksa sinyal yok).
+    #[test]
+    fn davranissal_normal_dongu_hold() {
+        let candles = H::flat(120, 100.0);
+        let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
+        match DavranissalFinans.evaluate(&input) {
+            Signal::Hold { note } => assert!(note.contains("anormal hareket yok"), "{note}"),
+            other => panic!("Hold beklenirdi: {other:?}"),
+        }
+    }
+}
