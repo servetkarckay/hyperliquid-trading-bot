@@ -75,6 +75,39 @@ pub fn cloid_is_tp(coin: &str, row_px: f64, row_sz: f64, row_cloid: Option<&str>
     c.eq_ignore_ascii_case(&expected)
 }
 
+/// RESTART DEVRALMA: bu dinlenen satırın cloid'i botun SL emirlerinden
+/// biriyle deterministik olarak eşleşiyor mu?
+///
+/// SL cloid'i make_cloid(coin, rounded_trigger_px, qty, dec) ile üretilir;
+/// REST openOrders.limitPx ise trigger×1.05 (alışta) veya trigger×0.95
+/// (satışta) olarak gelir. Önce REST fiyatını trigger'a çeviririz, sonra
+/// üretimde kullanılan fiyat ızgarasını deneyerek cloid'i RAM'siz doğrularız.
+pub fn cloid_is_sl(
+    coin: &str,
+    row_px: f64,
+    row_sz: f64,
+    row_is_buy: bool,
+    row_cloid: Option<&str>,
+) -> bool {
+    let Some(c) = row_cloid else { return false };
+    if !(row_px > 0.0) || !(row_sz > 0.0) {
+        return false;
+    }
+    let trigger = if row_is_buy { row_px / 1.05 } else { row_px / 0.95 };
+    if !(trigger > 0.0) || !trigger.is_finite() {
+        return false;
+    }
+    for dec in 1..=32u32 {
+        let rounded = hyperliquid_api::round_px_for(trigger, dec);
+        if rounded > 0.0
+            && make_cloid(coin, rounded, row_sz, dec as u64).eq_ignore_ascii_case(c)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// bu dinlenen reduce-only satır **bizim TP trigger'ımız mı?**
 ///
 /// TP trigger-LIMIT'in REST `limitPx` değeri TP fiyatının KENDİSİDİR
@@ -1179,44 +1212,38 @@ impl Executor {
             }
             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
             if reduce_only {
+                let own_sl = cloid_is_sl(&cn, px, row.sz, is_buy, row.cloid.as_deref());
+                let known = self.sl_last_px.get(&cn).copied().unwrap_or(0.0);
+                let price_matches_known = if known > 0.0 {
+                    let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
+                    let trig = hyperliquid_api::round_px_for(
+                        if is_buy { px / 1.05 } else { px / 0.95 },
+                        d,
+                    );
+                    trig > 0.0 && (trig - known).abs() / known <= 0.001
+                } else {
+                    false
+                };
+
+                if !own_sl && !price_matches_known {
+                    tracing::warn!(
+                        "[SL-WARN] {cn} UNKNOWN reduce-only emir: oid={oid} px={px:.8} cloid={:?} -> dedupe edilmedi, bot emri olarak SAYILMADI",
+                        row.cloid
+                    );
+                    continue;
+                }
+
                 let has_pos = self
                     .positions
                     .get(&cn)
                     .map(|p| p.szi.abs() > 1e-12)
                     .unwrap_or(false);
                 if !cn.is_empty() && has_pos {
- // AYNI COİN İÇİN BİRDEN FAZLA STOP = ARTIK. Çözüm
- // `dedupe_sl`'de: en yeni oid tutulur, eskileri iptal edilir.
- //
- // **TUTARLILIK ASSERT'İ**. `sl_orders[coin].px`'ye
- // (yani `sl_last_px`'e) bak: ters çevrilmiş stop fiyatı
- // %5 sapıyorsa bu emir **bizim stop'umuz değil**
- // (yabancı/körelmiş emir). Not: `limitPx` = trigger ×
- // 1.05/0.95 olduğu için ham karşılaştırma **her zaman**
- // tutarsız döner — bu yüzden `open_orders`'a yazılan
- // ham `px` ile karşılaştırıp TERS çeviriyoruz
- // (bkz. `dedupe_sl`).
-                    let known = self.sl_last_px.get(&cn).copied().unwrap_or(0.0);
-                    if known > 0.0 {
-                        let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
-                        let trig = hyperliquid_api::round_px_for(
-                            if is_buy { px / 1.05 } else { px / 0.95 },
-                            d,
-                        );
-                        let dev = if trig > 0.0 { (trig - known).abs() / known } else { 1.0 };
-                        if dev > 0.001 {
- // sessiz "stop var" SANMA — koruma illüzyonu olurdu
-                            tracing::warn!(
-                                "[SL-WARN] {cn} yabancı/tutarsız reduce-only emir:                                  oid={oid} seviye={:.8} beklenen={:.8} sapma={:.2}%                                  → sl_orders'a SAYILMADI (koruma bu emirden gelmiyor)",
-                                trig, known, dev * 100.0
-                            );
-                            continue;
-                        }
-                    }
+                    // Yalnız botun SL olarak doğruladığı reduce-only adayları dedupe edilir.
                     candidates.push((cn, oid));
                 }
             }
-        }
+
         Ok(candidates)
     }
 
@@ -2032,6 +2059,24 @@ mod senaryo_tests {
 #[cfg(test)]
 mod cloid_tests {
     use super::*;
+    #[test]
+    fn sl_cloid_restarttan_ramsiz_taninir() {
+        let coin = "BTC";
+        let sz = 1.0;
+        let trigger = 100.0;
+        let dec = 6;
+        let rounded = hyperliquid_api::round_px_for(trigger, dec);
+
+        let own_sell_stop = make_cloid(coin, rounded, sz, dec as u64);
+        assert!(cloid_is_sl(coin, rounded * 0.95, sz, false, Some(&own_sell_stop)));
+
+        let own_buy_stop = make_cloid(coin, rounded, sz, dec as u64);
+        assert!(cloid_is_sl(coin, rounded * 1.05, sz, true, Some(&own_buy_stop)));
+
+        let foreign = make_cloid(coin, rounded + 1.0, sz, dec as u64);
+        assert!(!cloid_is_sl(coin, rounded * 0.95, sz, false, Some(&foreign)));
+    }
+
     #[test]
     fn cloid_16_hane_hex_uretir_ve_deterministiktir() {
         let a = make_cloid("BTC", 100.0, 1.0, 3);
