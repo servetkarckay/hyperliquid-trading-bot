@@ -2,9 +2,9 @@
 //!
 //! `WsClient::run(subscriptions, tx)`: abonelikleri açar, her mesajı
 //! `WsEvent { channel, data }` olarak pompalar.
-//! - 50 sn'de bir ping; sessiz bağlantı kopsun diye
-//! - 5 sn'de bir otomatik yeniden bağlanma (reconnect)
-//! - alıcı kapatılırsa görev sonlanır (leak yok)
+//! 50 sn'de bir ping; sessiz bağlantı kopsun diye
+//! 5 sn'de bir otomatik yeniden bağlanma (reconnect)
+//! alıcı kapatılırsa görev sonlanır (leak yok)
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -31,8 +31,8 @@ impl WsClient {
         Self { cfg }
     }
 
-    /// Bağlanır, abonelik açar, mesajları kanala pompalar; otomatik ping (50 sn) + reconnect (5 sn).
-    /// Kalıcı görev olarak çalışır; drop edilen receiver temiz kapanir.
+ /// Bağlanır, abonelik açar, mesajları kanala pompalar; otomatik ping (50 sn) + reconnect (5 sn).
+ /// Kalıcı görev olarak çalışır; drop edilen receiver temiz kapanir.
     pub async fn run(
         &self,
         subs: Vec<Value>,
@@ -69,7 +69,7 @@ impl WsClient {
             sink.send(Message::text(msg.to_string())).await?;
         }
 
-        // 50 sn'de bir ping (server 60 sn sessizlikte kapatır)
+ // 50 sn'de bir ping (server 60 sn sessizlikte kapatır)
         let mut ping = tokio::time::interval(Duration::from_secs(50));
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 

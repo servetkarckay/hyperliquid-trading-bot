@@ -36,7 +36,7 @@ pub fn adf_tstat(y: &[f64]) -> Option<f64> {
     if y.len() < 10 {
         return None;
     }
-    // regresyon: Δy_t = α + β y_{t-1}
+ // regresyon: Δy_t = α + β y_{t-1}
     let dy: Vec<f64> = y.windows(2).map(|w| w[1] - w[0]).collect();
     let lag: Vec<f64> = y[..y.len() - 1].to_vec();
     let x: Vec<Vec<f64>> = lag.iter().map(|v| vec![1.0, *v]).collect();
@@ -114,7 +114,7 @@ pub fn hurst(series: &[f64], min_window: usize) -> Option<f64> {
     if sizes.len() < 2 {
         return None;
     }
-    // log-log regresyon eğimi = H
+ // log-log regresyon eğimi = H
     let lxs: Vec<f64> = sizes.iter().map(|s| s.ln()).collect();
     let lys: Vec<f64> = rs_values.iter().map(|r| r.ln()).collect();
     let (_, h) = crate::linalg::linreg(&lys, &lxs)?;

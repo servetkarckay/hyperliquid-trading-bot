@@ -23,7 +23,7 @@ impl Strategy for MarketMaking {
             return Signal::Skip { reason: ">=50 mum gerekli (σ tahmini)".into() };
         }
         let r = indicators::log_returns(&c);
-        // 1h bar -> yıllıklaştırmasız bar-bazı σ (AS T=1 bar)
+ // 1h bar -> yıllıklaştırmasız bar-bazı σ (AS T=1 bar)
         let sigma = realized_sigma(&r, 50);
         if sigma <= 0.0 {
             return Signal::Skip { reason: "σ hesaplanamadı".into() };
@@ -47,7 +47,7 @@ impl Strategy for MarketMaking {
         }
     }
 
-    /// Kote/quote planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
+ /// Kote/quote planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
     fn status(&self, _input: &MarketInput) -> StratStatus {
         StratStatus::Auxiliary
     }
@@ -74,10 +74,10 @@ mod tests {
         i
     }
 
-    /// MM'nin ALO (maker) olma gereksinimi ile executor'ın global IOC kararı
-    /// arasında bugün **çelişki yok** — çünkü MM hiçbir zaman yönlü sinyal
-    /// üretmiyor. MM bir gün Long/Short dönmeye başlarsa bu test KIRMIZI olur
-    /// ve o gün `prefer_alo` taşıyıcısı gerekir.
+ /// MM'nin ALO (maker) olma gereksinimi ile executor'ın global IOC kararı
+ /// arasında bugün **çelişki yok** — çünkü MM hiçbir zaman yönlü sinyal
+ /// üretmiyor. MM bir gün Long/Short dönmeye başlarsa bu test KIRMIZI olur
+ /// ve o gün `prefer_alo` taşıyıcısı gerekir.
     #[test]
     fn hicbir_kosulda_yonlu_sinyal_uretmez() {
         let cases = [
@@ -94,13 +94,13 @@ mod tests {
         }
     }
 
-    /// Avellaneda-Stoikov: `r = mid − q·γ·σ²·T`.
-    /// **Uzun envanter → r aşağı** (satışa teşvik: eldeki uzun pozisyonu
-    /// bitirmek istersin) — sezgisel olarak ters görünür ama doğrudur.
-    ///
-    /// NOT: `q = envanter/10k USD`, bu yüzden tipik bir $500 envanterin
-    /// skew'i bps'in 3. ondalığına düşer ve logda `-0.0` görünür. Test
-    /// ölçülebilir olsun diye büyük envanter kullanılır.
+ /// Avellaneda-Stoikov: `r = mid − q·γ·σ²·T`.
+ /// **Uzun envanter → r aşağı** (satışa teşvik: eldeki uzun pozisyonu
+ /// bitirmek istersin) — sezgisel olarak ters görünür ama doğrudur.
+ ///
+ /// NOT: `q = envanter/10k USD`, bu yüzden tipik bir $500 envanterin
+ /// skew'i bps'in 3. ondalığına düşer ve logda `-0.0` görünür. Test
+ /// ölçülebilir olsun diye büyük envanter kullanılır.
     #[test]
     fn envanter_skew_isareti_dogru() {
         let big = 20_000_000.0; // q = 2000 → skew görünür bps

@@ -64,7 +64,7 @@ pub fn rsi(closes: &[f64], n: usize) -> Vec<Option<f64>> {
         gains.push(d.max(0.0));
         losses.push((-d).max(0.0));
     }
-    // seed: ilk n değişimin ortalaması (index n-1'e denk gelir)
+ // seed: ilk n değişimin ortalaması (index n-1'e denk gelir)
     let avg_gain: f64 = gains[..n].iter().sum::<f64>() / n as f64;
     let avg_loss: f64 = losses[..n].iter().sum::<f64>() / n as f64;
     out[n] = Some(rsi_from(avg_gain, avg_loss));
@@ -185,7 +185,7 @@ pub fn adx(
     if len < 2 * n + 1 || n == 0 {
         return (pdi, mdi, adx_out);
     }
-    // +DM / -DM / TR
+ // +DM / -DM / TR
     let mut plus_dm = vec![0.0; len - 1];
     let mut minus_dm = vec![0.0; len - 1];
     for i in 1..len {
@@ -196,7 +196,7 @@ pub fn adx(
     }
     let tr = true_range(high, low, close);
     let tr1 = &tr[1..];
-    // seed: ilk n ortalaması
+ // seed: ilk n ortalaması
     let str1: f64 = tr1[..n].iter().sum::<f64>() / n as f64;
     let spdm: f64 = plus_dm[..n].iter().sum::<f64>() / n as f64;
     let smdm: f64 = minus_dm[..n].iter().sum::<f64>() / n as f64;
@@ -205,7 +205,7 @@ pub fn adx(
     let p_rest = wilder_ema_from(&plus_dm[n..], n, spdm);
     let m_rest = wilder_ema_from(&minus_dm[n..], n, smdm);
     let tr_rest = wilder_ema_from(&tr1[n..], n, str1);
-    // DX serisi
+ // DX serisi
     let mut dx: Vec<f64> = Vec::new();
     for i in 0..p_rest.len() {
         let p = 100.0 * p_rest[i] / tr_rest[i];
@@ -326,7 +326,7 @@ pub fn twap(close: &[f64], n: usize) -> Vec<Option<f64>> {
     sma(close, n)
 }
 
-// ---- Volatilite modelleri ----
+// --- Volatilite modelleri ----
 
 /// Log getiriler
 pub fn log_returns(closes: &[f64]) -> Vec<f64> {

@@ -1,13 +1,13 @@
 //! DEĞER YATIRIM — temel analiz PROXY modu.
 //!
 //! 1. **SINIR (dürüst)**: gerçek temel skorlar (MC/TVL, TVL trend, net
-//!    real yield) HL API'de YOK — harici feed bekliyor.
+//! real yield) HL API'de YOK — harici feed bekliyor.
 //! 2. `evaluate_with_fundamentals`: feed geldiğinde doküman skoru
-//!    (0.30 MC/TVL + 0.25 trend + 0.25 yield); >0.6 Long, <0.3 Skip
-//!    (value trap), arası Hold.
+//! (0.30 MC/TVL + 0.25 trend + 0.25 yield); >0.6 Long, <0.3 Skip
+//! (value trap), arası Hold.
 //! 3. `evaluate` (şu anki canlı yol): HL proxy — günlük hacim/OI oranı
-//!    raporu; Hold — YÖN ÜRETMEZ (SAHTE temel skor UYDURULMAZ);
-//!    ctx yok → Skip.
+//! raporu; Hold — YÖN ÜRETMEZ (SAHTE temel skor UYDURULMAZ);
+//! ctx yok → Skip.
 use crate::{MarketInput, Signal, Strategy};
 use data::market_ctx::CtxState;
 
@@ -16,7 +16,7 @@ pub struct DegerYatirim;
 /// Harici temel skorlar (indexleyiciden beslenir)
 #[derive(Debug, Clone, Copy)]
 pub struct FundamentalScores {
-    /// MC/TVL (düşük = ucuz), TVL trendi (+/-), net real yield (oran)
+ /// MC/TVL (düşük = ucuz), TVL trendi (+/-), net real yield (oran)
     pub mc_tvl: f64,
     pub tvl_trend: f64,
     pub real_yield: f64,
@@ -24,7 +24,7 @@ pub struct FundamentalScores {
 
 impl DegerYatirim {
     pub fn evaluate_with_fundamentals(&self, s: FundamentalScores) -> Signal {
-        // doküman skoru: 0.30 MC/TVL + TVL trend + real yield
+ // doküman skoru: 0.30 MC/TVL + TVL trend + real yield
         let score = 0.30 * (5.0 - s.mc_tvl).clamp(0.0, 5.0) / 5.0
             + 0.25 * (s.tvl_trend + 0.2).clamp(0.0, 0.4) / 0.4
             + 0.25 * s.real_yield.clamp(0.0, 0.2) / 0.2;
@@ -44,7 +44,7 @@ impl Strategy for DegerYatirim {
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
-        // HL'den hesaplanabilen tek proxy: likidite kalitesi (dayNtlVlm, OI)
+ // HL'den hesaplanabilen tek proxy: likidite kalitesi (dayNtlVlm, OI)
         match &input.ctx {
             Some(CtxState { day_ntl_vlm, open_interest, mark_px, .. }) => {
                 let oi_usd = open_interest * mark_px;
@@ -66,7 +66,7 @@ mod audit_tests {
     use crate::strat_test_helpers::helpers as H;
     use data::market_ctx::CtxState;
 
-    /// A — temel skor yolu: yüksek skor → Long; düşük → Skip.
+ /// A — temel skor yolu: yüksek skor → Long; düşük → Skip.
     #[test]
     fn deger_temel_skor_yolu() {
         let iyi = DegerYatirim.evaluate_with_fundamentals(FundamentalScores { mc_tvl: 0.5, tvl_trend: 0.2, real_yield: 0.2 });
@@ -80,8 +80,8 @@ mod audit_tests {
         assert!(matches!(orta, Signal::Hold { .. }));
     }
 
-    /// D — HL proxy modu: temel veri YOK → Hold (yön üretmez, SAHTE
-    /// temel skor UYDURULMAZ) + ctx yoksa Skip.
+ /// D — HL proxy modu: temel veri YOK → Hold (yön üretmez, SAHTE
+ /// temel skor UYDURULMAZ) + ctx yoksa Skip.
     #[test]
     fn deger_proxy_yon_uretmez() {
         let ctx = CtxState { coin: "T".into(), funding: 0.0, open_interest: 100.0, mark_px: 2.0, oracle_px: 2.0, premium: 0.0, day_ntl_vlm: 500.0, prev_day_px: 2.0, ts: 0 };

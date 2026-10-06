@@ -1,12 +1,12 @@
 //! REJİM TESPİTİ — piyasa modu sınıflandırma (strateji + motor kapısı).
 //!
 //! 1. Karar ağacı: ADX>25∧Hurst>0.55 → TREND; ADX<20∧Hurst<0.45 → MR;
-//!    vol yüzdeliği >%90 → VOL_SPIKE; <%10 → SQUEEZE; değilse GEÇİŞ.
+//! vol yüzdeliği >%90 → VOL_SPIKE; <%10 → SQUEEZE; değilse GEÇİŞ.
 //! 2. TREND dalı yön sinyali (son 25 bar yönü, 0.5); MR/SPIKE/SQUEEZE
-//!    yönsüz Hold.
+//! yönsüz Hold.
 //! 3. `RegimeLabel::gate` → motor RegimeGate (Squeeze/Spike = Blocked —
-//!    yeni giriş yasak); `classify` stratejiyle AYNI hesabı kullanır
-//!    (çift mantık yasak); <200 mum → None.
+//! yeni giriş yasak); `classify` stratejiyle AYNI hesabı kullanır
+//! (çift mantık yasak); <200 mum → None.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 use math::stats;
@@ -29,7 +29,7 @@ impl Strategy for RejimTespiti {
         let adx = indicators::adx(&h, &l, &c, 14).2.last().and_then(|v| *v).unwrap_or(0.0);
         let hurst = stats::hurst(&c, 20).unwrap_or(0.5);
 
-        // vol yüzdelik: son 30 bar vol'un son 200 bar içindeki yeri
+ // vol yüzdelik: son 30 bar vol'un son 200 bar içindeki yeri
         let r = indicators::log_returns(&c);
         let vol30 = |end: usize| -> f64 {
             let w = &r[end - 30..end];
@@ -39,7 +39,7 @@ impl Strategy for RejimTespiti {
         let hist: Vec<f64> = (30..r.len()).step_by(10).map(|i| vol30(i)).collect();
         let pct = hist.iter().filter(|v| **v <= cur).count() as f64 / hist.len() as f64;
 
-        // rejim karar ağacı (doküman matrisi)
+ // rejim karar ağacı (doküman matrisi)
         let regime = if adx > 25.0 && hurst > 0.55 {
             "TREND"
         } else if adx < 20.0 && hurst < 0.45 {
@@ -52,7 +52,7 @@ impl Strategy for RejimTespiti {
             "GECIS"
         };
 
-        // yön: trend rejiminde EMA eğimi
+ // yön: trend rejiminde EMA eğimi
         let trend_dir = if c[c.len() - 1] > c[c.len() - 25] { 1.0 } else { -1.0 };
 
         match regime {
@@ -131,23 +131,23 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// Deterministik seri: adx/hurst gerçek hesap; bu test karar ağacının
-    /// YAPISINI doğrular (rejim etiketi → gate/sinyal).
+ /// Deterministik seri: adx/hurst gerçek hesap; bu test karar ağacının
+ /// YAPISINI doğrular (rejim etiketi → gate/sinyal).
     #[test]
     fn rejim_skip_siniri_dogru() {
-        // <200 mum → Skip (veri yoksa karar yok)
+ // <200 mum → Skip (veri yoksa karar yok)
         let input = MarketInput { coin: "T".into(), candles: H::flat(150, 100.0), ..Default::default() };
         assert!(matches!(RejimTespiti.evaluate(&input), Signal::Skip { .. }));
     }
 
-    /// A — trend rejimi yönü: fiyat son 25 barın üstündeyse Long,
-    /// altındaysa Short (TREND dalında yön simetrisi).
+ /// A — trend rejimi yönü: fiyat son 25 barın üstündeyse Long,
+ /// altındaysa Short (TREND dalında yön simetrisi).
     #[test]
     fn rejim_trend_yonu_simetrik() {
-        // yükselen trend: son 25 barlık rampa — adx>25 && hurst>0.55 ihtimali
-        // deterministik olarak belli değildir; o yüzden karar ağacını
-        // classify() arayüzüyle değil, davranışla sınarız: aynı seri iki
-        // yönde de işlendiğinde yön ETİKETİ fiyat yönünü izler.
+ // yükselen trend: son 25 barlık rampa — adx>25 && hurst>0.55 ihtimali
+ // deterministik olarak belli değildir; o yüzden karar ağacını
+ // classify arayüzüyle değil, davranışla sınarız: aynı seri iki
+ // yönde de işlendiğinde yön ETİKETİ fiyat yönünü izler.
         let up = H::linear(220, 100.0, 0.2);
         let down = H::linear(220, 144.0, -0.2);
         let (su, sd) = (RejimTespiti.evaluate(&MarketInput { coin: "T".into(), candles: up, ..Default::default() }),
@@ -157,15 +157,15 @@ mod audit_tests {
             (Signal::Long { .. }, _) => panic!("aşağı seride Long?"),
             (_, Signal::Short { .. }) => panic!("yukarı seride Short?"),
             (a, b) => {
-                // adx/hurst TREND eşiğine ulaşmadı → Hold; yönlü sinyal YOK
+ // adx/hurst TREND eşiğine ulaşmadı → Hold; yönlü sinyal YOK
                 assert!(matches!(a, Signal::Hold { .. }) && matches!(b, Signal::Hold { .. }),
                     "yönsüz rejimde Hold: {a:?} / {b:?}");
             }
         }
     }
 
-    /// B — FUTURE LEAKAGE: rejim kararı prefix'te sabit (gelecek barlar
-    /// geçmiş rejim etiketini değiştirmez).
+ /// B — FUTURE LEAKAGE: rejim kararı prefix'te sabit (gelecek barlar
+ /// geçmiş rejim etiketini değiştirmez).
     #[test]
     fn rejim_future_leak_prefix_sabit() {
         let mut full = H::flat(200, 100.0);
@@ -174,12 +174,12 @@ mod audit_tests {
         let ia = MarketInput { coin: "T".into(), candles: a.clone(), ..Default::default() };
         let sa = RejimTespiti.evaluate(&ia);
         assert_eq!(sa, RejimTespiti.evaluate(&ia), "prefix karar sabit (saf fonksiyon)");
-        // ek: SQUEEZE rejimi motorun RegimeGate::Blocked'ına bağlanır —
-        // giriş yasak; bu yansıma classify().gate() ile test edilir (aşağıda).
+ // ek: SQUEEZE rejimi motorun RegimeGate::Blocked'ına bağlanır —
+ // giriş yasak; bu yansıma classify.gate ile test edilir (aşağıda).
         let _ = sa;
     }
 
-    /// `classify` — motor kapısı: rejim etiketi → RegimeGate eşleşmesi.
+ /// `classify` — motor kapısı: rejim etiketi → RegimeGate eşleşmesi.
     #[test]
     fn rejim_gate_eslesmesi() {
         use crate::ensemble::RegimeGate as G;

@@ -1,6 +1,6 @@
 //! LOGGER — tracing subscriber kurulumu.
 //!
-//! `init()`: LOG_LEVEL > RUST_LOG > "info" önceliğiyle tek seferlik
+//! `init`: LOG_LEVEL > RUST_LOG > "info" önceliğiyle tek seferlik
 //! (`Once`) subscriber kurar; .env'i kendisi yüklemeyi dener.
 //! İkinci çağrı no-op — çift subscriber yasak.
 use std::sync::Once;
@@ -11,7 +11,7 @@ static INIT: Once = Once::new();
 /// Öncelik: LOG_LEVEL (.env) > RUST_LOG > "info"
 pub fn init() {
     INIT.call_once(|| {
-        // config'den önce çağrılabilirse de .env'i dene
+ // config'den önce çağrılabilirse de .env'i dene
         if dotenvy::dotenv().is_err() {
             let _ = dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../.env"));
         }

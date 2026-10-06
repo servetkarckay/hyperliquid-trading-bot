@@ -3,8 +3,8 @@
 //! 1. `Storage` trait: trades / candles / ctx / funding kaydetme-okuma.
 //! 2. `MemoryStorage`: test ve düşük-konfig fallback.
 //! 3. `ClickHouseStorage` (CLICKHOUSE_URL): üretim arşivi — hl_trades /
-//!    hl_candles / hl_funding / hl_ctx / hl_strategy_performance;
-//!    JSONEachRow toplu yazım, ReplacingMergeTree dedup, resume imleci.
+//! hl_candles / hl_funding / hl_ctx / hl_strategy_performance;
+//! JSONEachRow toplu yazım, ReplacingMergeTree dedup, resume imleci.
 //! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li).
 //! URL'ler boşsa sistem Memory ile ÇALIŞMAYA devam eder (indirimli mod —
 //! arşiv/backtest kaybı loglanır).
@@ -30,7 +30,7 @@ pub trait Storage: Send {
     async fn save_candles(&mut self, coin: &str, interval_secs: u64, candles: &[Candle]) -> Result<usize>;
     async fn load_candles(&mut self, coin: &str, interval_secs: u64, limit: usize) -> Result<Vec<Candle>>;
     async fn trade_count(&self) -> Result<u64>;
-    /// Piyasa bağlamı snapshot'ları (funding/OI/mark serileri) — desteklemeyen backend no-op
+ /// Piyasa bağlamı snapshot'ları (funding/OI/mark serileri) — desteklemeyen backend no-op
     async fn save_ctx(&mut self, _ctxs: &[crate::market_ctx::CtxState]) -> Result<usize> {
         Ok(0)
     }
@@ -100,7 +100,7 @@ impl ClickHouseStorage {
         Ok(self.http.post(&self.url).body(sql.to_string()).send().await?.text().await?)
     }
 
-    /// Tabloları oluştur (varsa no-op) — ClickHouse kullanımı için public.
+ /// Tabloları oluştur (varsa no-op) — ClickHouse kullanımı için public.
     pub async fn ensure_tables(&self) -> Result<()> {
         self.exec("CREATE TABLE IF NOT EXISTS hl_trades (coin String, px Float64, sz Float64, ts Int64, is_buy Bool) ENGINE = MergeTree ORDER BY (coin, ts)").await?;
         self.exec("CREATE TABLE IF NOT EXISTS hl_candles (coin String, interval UInt64, t Int64, o Float64, h Float64, l Float64, c Float64, v Float64, n UInt64) ENGINE = ReplacingMergeTree ORDER BY (coin, interval, t)").await?;
@@ -110,14 +110,14 @@ impl ClickHouseStorage {
         Ok(())
     }
 
-    /// İmza veri ekleme (Gerçek zamandan veriler; public yardımcı)
+ /// İmza veri ekleme (Gerçek zamandan veriler; public yardımcı)
     pub async fn exec_insert(&self, sql: &str) -> Result<()> {
         self.exec(sql).await.ok();
         Ok(())
     }
 
-    /// canlı/backtest strateji performansı → hl_strategy_performance
-    /// Eğitim sonrası: strateji başına birleşik IS/OOS satırı (tam alan).
+ /// canlı/backtest strateji performansı → hl_strategy_performance
+ /// Eğitim sonrası: strateji başına birleşik IS/OOS satırı (tam alan).
     pub async fn save_performance_row(&self, p: &StrategyPerformanceRow) -> Result<usize> {
         let row = serde_json::json!({
             "strategy": p.strategy, "interval": p.interval, "sample": p.sample,
@@ -156,7 +156,7 @@ impl ClickHouseStorage {
         Ok(1)
     }
 
-    /// funding tablosuna kayıt (backtest Kelly katmanı)
+ /// funding tablosuna kayıt (backtest Kelly katmanı)
     pub async fn save_funding(
         &self,
         coin: &str,
@@ -274,7 +274,7 @@ impl Storage for ClickHouseStorage {
     }
 
     async fn trade_count(&self) -> Result<u64> {
-        // TSV: düz sayı döner (JSONEachRow {"count()":...} objesi döndürür)
+ // TSV: düz sayı döner (JSONEachRow {"count":...} objesi döndürür)
         let r = self.exec("SELECT count() FROM hl_trades FORMAT TSV").await?;
         Ok(r.trim().parse().unwrap_or(0))
     }
@@ -288,7 +288,7 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
-    /// REDIS_URL .env'de tanımlıysa bağlanır, yoksa None.
+ /// REDIS_URL .env'de tanımlıysa bağlanır, yoksa None.
     pub async fn from_env() -> Result<Option<Self>> {
         let url = std::env::var("REDIS_URL").unwrap_or_default();
         if url.is_empty() {
@@ -302,7 +302,7 @@ impl RedisCache {
         Ok(Some(Self { conn }))
     }
 
-    /// Son mids haritasını JSON olarak yaz (TTL saniye)
+ /// Son mids haritasını JSON olarak yaz (TTL saniye)
     pub async fn set_mids(&mut self, mids: &HashMap<String, f64>, ttl: u64) -> Result<()> {
         let payload = serde_json::to_string(mids)?;
         redis::cmd("SETEX")
@@ -319,7 +319,7 @@ impl RedisCache {
         Ok(v.and_then(|s| serde_json::from_str(&s).ok()))
     }
 
-    /// Son ctx state'i coin başına yaz (TTL saniye)
+ /// Son ctx state'i coin başına yaz (TTL saniye)
     pub async fn set_ctx(&mut self, c: &crate::market_ctx::CtxState, ttl: u64) -> Result<()> {
         let payload = serde_json::to_string(c)?;
         redis::cmd("SETEX")

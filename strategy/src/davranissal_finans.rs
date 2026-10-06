@@ -1,9 +1,9 @@
 //! DAVRANIŞSAL FİNANS — aşırı tepki (overreaction) geri alımı.
 //!
 //! 1. 6-bar getiri, 100-bar σ ile normalize (<−2σ / >+2σ) + hacim
-//!    2× spike'ı tetik koşulu; tetik yok → Hold.
+//! 2× spike'ı tetik koşulu; tetik yok → Hold.
 //! 2. Panik satışı → kontra Long; euphoria → kontra Short; güç
-//!    (|σ|/4).min(0.8).
+//! (|σ|/4).min(0.8).
 //! 3. <100 mum → Skip; bölenler max(1e-9) korumalı (panik yok).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
@@ -25,7 +25,7 @@ impl Strategy for DavranissalFinans {
         let v_last = vols[vols.len() - 1];
         let vol_spike = v_last / v_avg.max(1e-12);
 
-        // 6 barlık aşırı hareket (z-score benzeri normalize)
+ // 6 barlık aşırı hareket (z-score benzeri normalize)
         let move6 = c[c.len() - 1] / c[c.len() - 7] - 1.0;
         let r = indicators::log_returns(&c);
         let sd = {
@@ -34,7 +34,7 @@ impl Strategy for DavranissalFinans {
         };
         let normalized = move6 / (sd * 6.0f64.sqrt()).max(1e-9);
 
-        // panik: 6 barda <-%8 (2σ+ üstü) + hacim 2x -> kontra LONG
+ // panik: 6 barda <-%8 (2σ+ üstü) + hacim 2x -> kontra LONG
         if normalized < -2.0 && vol_spike > 2.0 {
             Signal::Long {
                 strength: ((-normalized) / 4.0).min(0.8),
@@ -56,11 +56,11 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// A — panik satışı: 6 barda <-%8 (2σ+) + hacim 2x → kontra Long.
+ /// A — panik satışı: 6 barda <-%8 (2σ+) + hacim 2x → kontra Long.
     #[test]
     fn davranissal_panic_kontra_long() {
         let mut c = H::flat(114, 100.0);
-        // 6 barda sert düşüş + hacim patlaması
+ // 6 barda sert düşüş + hacim patlaması
         for i in 0..6 {
             let px = 100.0 - (i + 1) as f64 * 2.0;
             H::set(&mut c, 108 + i, px, px + 0.2, px - 0.5, 400.0);
@@ -75,7 +75,7 @@ mod audit_tests {
         }
     }
 
-    /// C — Short simetrisi: euphoria (6 barda > 2σ + hacim) → kontra Short.
+ /// C — Short simetrisi: euphoria (6 barda > 2σ + hacim) → kontra Short.
     #[test]
     fn davranissal_euphoria_kontra_short() {
         let mut c = H::flat(114, 100.0);
@@ -93,7 +93,7 @@ mod audit_tests {
         }
     }
 
-    /// D — anormal hareket yok → Hold (tetik yoksa sinyal yok).
+ /// D — anormal hareket yok → Hold (tetik yoksa sinyal yok).
     #[test]
     fn davranissal_normal_dongu_hold() {
         let candles = H::flat(120, 100.0);

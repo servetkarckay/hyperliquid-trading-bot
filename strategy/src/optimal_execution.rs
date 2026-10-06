@@ -30,14 +30,14 @@ impl Strategy for OptimalExecution {
             .map(|_| 50_000.0) // tahmini ilk seviye derinliği; canlıda l2Book'tan
             .unwrap_or(50_000.0);
 
-        // parça sayısı: büyük emir + yüksek vol -> daha çok parça
+ // parça sayısı: büyük emir + yüksek vol -> daha çok parça
         let urgency = (sigma * 100.0).clamp(0.5, 5.0); // vol ne kadar yüksek o kadar hızlı
         let slices = ((input.order_size_usd / depth_usd.max(1.0f64)).sqrt().ceil() as usize)
             .clamp(3, 20);
         let slice_usd = input.order_size_usd / slices as f64;
         let tif = if urgency > 2.5 { "Ioc" } else { "Alo (post-only)" };
 
-        // U-şekilli: başta hızlı, ortada yavaş, sonda hızlı (Almgren-Chriss rehberi)
+ // U-şekilli: başta hızlı, ortada yavaş, sonda hızlı (Almgren-Chriss rehberi)
         let weights: Vec<f64> = (0..slices)
             .map(|i| {
                 let x = i as f64 / (slices - 1).max(1) as f64;
@@ -60,7 +60,7 @@ impl Strategy for OptimalExecution {
         }
     }
 
-    /// Parent-emir planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
+ /// Parent-emir planlayıcı — yönlü giriş sinyali üretmez → `AUXILIARY`.
     fn status(&self, _input: &MarketInput) -> StratStatus {
         StratStatus::Auxiliary
     }
@@ -77,7 +77,7 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// A — parent emir planı: plan notu üretilir (parça sayısı/USD).
+ /// A — parent emir planı: plan notu üretilir (parça sayısı/USD).
     #[test]
     fn optexec_plan_uretir() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 50_000.0, ..Default::default() };
@@ -87,8 +87,8 @@ mod audit_tests {
         }
     }
 
-    /// D — order_size_usd yoksa Skip (ölü strateji yasağı: engine bu alanı
-    /// besleyemez → strateji AUXILIARY işaretli, sessiz ölü değil).
+ /// D — order_size_usd yoksa Skip (ölü strateji yasağı: engine bu alanı
+ /// besleyemez → strateji AUXILIARY işaretli, sessiz ölü değil).
     #[test]
     fn optexec_parent_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(60, 100.0), order_size_usd: 0.0, ..Default::default() };

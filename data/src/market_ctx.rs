@@ -2,9 +2,9 @@
 //!
 //! Görevler:
 //! 1. `apply_event / apply_stream / apply_rest_snapshot`: WS + REST
-//!    verisini tek `CtxState` haritasında birleştirir.
+//! verisini tek `CtxState` haritasında birleştirir.
 //! 2. Türetilen seriler: `delta_oi` (OI değişimi — likidasyon kadransı
-//!    girdisi), `oi_series`, `funding_series`, `basis` (perp-spot sapması).
+//! girdisi), `oi_series`, `funding_series`, `basis` (perp-spot sapması).
 //! Ölçek notu: HL API `funding` alanı **saatlik** orandır (fundingHistory
 //! 1h aralıklı; yıllıklaştırma ×24×365) — burada dönüşüm YAPILMAZ, ham
 //! değer taşınır (dönüşüm strateji katmanındadır).
@@ -22,7 +22,7 @@ pub struct CtxState {
     pub oracle_px: f64,
     pub premium: f64,
     pub day_ntl_vlm: f64,
-    /// dünkü kapanış (kesit momentum: mark/prevDay - 1)
+ /// dünkü kapanış (kesit momentum: mark/prevDay - 1)
     pub prev_day_px: f64,
     pub ts: i64,
 }
@@ -30,11 +30,11 @@ pub struct CtxState {
 #[derive(Debug, Clone)]
 pub struct MarketCtx {
     ctx_history_len: usize,
-    /// coin -> en güncel ctx
+ /// coin -> en güncel ctx
     latest: HashMap<String, CtxState>,
-    /// coin -> OI serisi (ts, oi) — ΔOI hesabı (strateji 09)
+ /// coin -> OI serisi (ts, oi) — ΔOI hesabı (strateji 09)
     oi_history: HashMap<String, VecDeque<(i64, f64)>>,
-    /// coin -> funding serisi (ts, funding)
+ /// coin -> funding serisi (ts, funding)
     funding_history: HashMap<String, VecDeque<(i64, f64)>>,
 }
 
@@ -61,7 +61,7 @@ impl MarketCtx {
         self.latest.insert(coin, c);
     }
 
-    /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır)
+ /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır)
     pub fn apply_stream(&mut self, ev: &StreamEvent) {
         if let StreamEvent::Ctx { coin, funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, ts } = ev {
             self.apply_event(CtxState {
@@ -72,7 +72,7 @@ impl MarketCtx {
         }
     }
 
-    /// REST metaAndAssetCtxs tam taraması — ctx index = universe sırası
+ /// REST metaAndAssetCtxs tam taraması — ctx index = universe sırası
     pub fn apply_rest_snapshot(
         &mut self,
         universe: &[String],
@@ -110,7 +110,7 @@ impl MarketCtx {
         self.latest.values()
     }
 
-    /// ΔOI: son iki ölçüm arasındaki open interest değişimi (strateji 09)
+ /// ΔOI: son iki ölçüm arasındaki open interest değişimi (strateji 09)
     pub fn delta_oi(&self, coin: &str) -> Option<f64> {
         let h = self.oi_history.get(coin)?;
         if h.len() < 2 {
@@ -124,18 +124,18 @@ impl MarketCtx {
         Some(oi1 - oi0)
     }
 
-    /// Son N ölçümün OI serisi
+ /// Son N ölçümün OI serisi
     pub fn oi_series(&self, coin: &str) -> Vec<(i64, f64)> {
         self.oi_history.get(coin).map(|d| d.iter().copied().collect()).unwrap_or_default()
     }
 
-    /// Funding serisi
+ /// Funding serisi
     pub fn funding_series(&self, coin: &str) -> Vec<(i64, f64)> {
         self.funding_history.get(coin).map(|d| d.iter().copied().collect()).unwrap_or_default()
     }
 
-    /// Spot-perp basis (strateji 08): (perp mark - spot mid) / spot mid
-    /// spot mid allMids'te `@<index>` anahtarıyla gelir.
+ /// Spot-perp basis (strateji 08): (perp mark - spot mid) / spot mid
+ /// spot mid allMids'te `@<index>` anahtarıyla gelir.
     pub fn basis(&self, coin: &str, spot_mids: &HashMap<String, f64>, spot_key: &str) -> Option<f64> {
         let mark = self.get(coin)?.mark_px;
         let spot = spot_mids.get(spot_key)?;

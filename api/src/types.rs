@@ -46,9 +46,9 @@ pub struct AssetCtx {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Candle {
-    /// Açılış zamanı (unix ms)
+ /// Açılış zamanı (unix ms)
     pub t: i64,
-    /// Kapanış zamanı (unix ms)
+ /// Kapanış zamanı (unix ms)
     #[serde(rename = "T")]
     pub close_t: i64,
     pub s: String,
@@ -72,7 +72,7 @@ pub struct Level {
 pub struct L2Book {
     pub coin: String,
     pub time: i64,
-    /// levels[0] = bids, levels[1] = asks
+ /// levels[0] = bids, levels[1] = asks
     pub levels: Vec<Vec<Level>>,
 }
 
@@ -101,7 +101,7 @@ pub struct FundingEntry {
 }
 
 impl PerpMeta {
-    /// Fiyat için izin verilen maksimum ondalık hane (perp: 6 - szDecimals, max 5 significant figure)
+ /// Fiyat için izin verilen maksimum ondalık hane (perp: 6 - szDecimals, max 5 significant figure)
     pub fn max_px_decimals(&self) -> u32 {
         6u32.saturating_sub(self.szDecimals)
     }

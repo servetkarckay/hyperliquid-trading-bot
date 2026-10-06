@@ -17,9 +17,9 @@ pub const MAX_BARS_PER_REQUEST: usize = 5000;
 pub struct PumpConfig {
     pub coins: Vec<String>,
     pub interval_secs: u64,
-    /// kaç gün geçmiş
+ /// kaç gün geçmiş
     pub days: u64,
-    /// istekler arası uyku ms
+ /// istekler arası uyku ms
     pub request_pause_ms: u64,
 }
 
@@ -104,7 +104,7 @@ pub async fn pump_candles_from(
     let mut cursor = start;
     while cursor < end {
         let req_end = (cursor + step).min(end);
-        // 429 KIYAMET KORUMASI: hız sınırı → bekle + TEKRAR (ниче kayıp yok)
+ // 429 KIYAMET KORUMASI: hız sınırı → bekle + TEKRAR (ниче kayıp yok)
         match info.candle_snapshot(coin, iv_name, cursor, req_end).await {
             Ok(c) if !c.is_empty() => {
                 sink.write(coin, interval_secs, &c).await?;
@@ -172,7 +172,7 @@ pub async fn pump_funding(
 }
 
 impl ClickHouseStorage {
-    /// coin+interval için depolanmış en son mum zamanı (resume noktası)
+ /// coin+interval için depolanmış en son mum zamanı (resume noktası)
     pub async fn last_candle_ms(&self, coin: &str, interval_secs: u64) -> Option<i64> {
         let sql = format!(
             "SELECT max(t) FROM hl_candles WHERE coin='{coin}' AND interval={interval_secs} FORMAT TSV"
@@ -198,7 +198,7 @@ pub async fn pump_candles_resumable(
     sink: &mut dyn CandleSink,
 ) -> Result<(usize, bool)> {
     let interval_ms = interval_secs as i64 * 1000;
-    // yeni pencere başlangıcı: depolanmış son t'den sonraki mum
+ // yeni pencere başlangıcı: depolanmış son t'den sonraki mum
     let fresh_from = ch
         .last_candle_ms(coin, interval_secs)
         .await

@@ -2,13 +2,13 @@
 //!
 //! Tek görev: borsa I/O'sunu tipli, test edilebilir yüzeylere indirmek;
 //! bot mantığı İÇERMEZ. Alt modüller:
-//! - `config`   — .env yükleme/doğrulama (`Config`)
-//! - `signing`  — EIP-712 phantom-agent imzası + HTTP istemci
-//! - `exchange_endpoint` — emir/iptal iletimi + fiyat/lot yuvarlama
-//! - `info_endpoint`     — market/hesap okuma metotları
-//! - `error_responses`   — `ApiError` hata taksonomisi
-//! - `types`    — info endpoint wire şemaları
-//! - `websocket`— canlı akış (ping + otomatik yeniden bağlanma)
+//! `config` — .env yükleme/doğrulama (`Config`)
+//! `signing` — EIP-712 phantom-agent imzası + HTTP istemci
+//! `exchange_endpoint` — emir/iptal iletimi + fiyat/lot yuvarlama
+//! `info_endpoint` — market/hesap okuma metotları
+//! `error_responses` — `ApiError` hata taksonomisi
+//! `types` — info endpoint wire şemaları
+//! `websocket`— canlı akış (ping + otomatik yeniden bağlanma)
 pub mod error_responses;
 pub mod config;
 pub mod exchange_endpoint;

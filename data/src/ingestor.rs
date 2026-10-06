@@ -2,12 +2,12 @@
 //!
 //! Görevler:
 //! 1. Evreni abonelik listelerine böler (shard başına ~160 kanal) ve
-//!    her shard için ayrı WS bağlantısı açar.
+//! her shard için ayrı WS bağlantısı açar.
 //! 2. Ham WS kanallarını (trades / l2Book / activeAssetCtx / orderUpdates /
-//!    userEvents) `StreamEvent`'e çevirir (`translate`).
+//! userEvents) `StreamEvent`'e çevirir (`translate`).
 //! 3. `IngestorConfig`: shard_count, min_day_volume_usd (düşük hacimli
-//!    coin filtresi), l2book_top_n, ctx_enabled.
-//! P1-D: evren DIŞARIDAN verilir (`with_universe`) — sessiz kırpma yok;
+//! coin filtresi), l2book_top_n, ctx_enabled.
+//! evren DIŞARIDAN verilir (`with_universe`) — sessiz kırpma yok;
 //! abonelik listesi `TradingUniverse`'den üretilir.
 use std::collections::HashMap;
 
@@ -21,13 +21,13 @@ use hyperliquid_api::{Config, Info, WsClient};
 
 #[derive(Debug, Clone)]
 pub struct IngestorConfig {
-    /// WS bağlantı sayısı (coinler buna bölünür)
+ /// WS bağlantı sayısı (coinler buna bölünür)
     pub shard_count: usize,
-    /// Günlük hacmi bunun altındaki coinler atlanır (USD); 0 = tümü
+ /// Günlük hacmi bunun altındaki coinler atlanır (USD); 0 = tümü
     pub min_day_volume_usd: f64,
-    /// l2Book aboneliği açılacak coin sayısı (günlük hacme göre ilk N); 0 = kapalı
+ /// l2Book aboneliği açılacak coin sayısı (günlük hacme göre ilk N); 0 = kapalı
     pub l2book_top_n: usize,
-    /// activeAssetCtx aboneliği: canlı funding/OI/mark/oracle (tüm aktif coinler)
+ /// activeAssetCtx aboneliği: canlı funding/OI/mark/oracle (tüm aktif coinler)
     pub ctx_enabled: bool,
     pub include_trades: bool,
     pub include_all_mids: bool,
@@ -75,7 +75,7 @@ pub enum StreamEvent {
     Trade { coin: String, px: f64, sz: f64, ts: i64, is_buy: bool },
     Book { coin: String, bids: Vec<(f64, f64)>, asks: Vec<(f64, f64)>, ts: i64 },
     Mids { mids: HashMap<String, f64>, ts: i64 },
-    /// WS activeAssetCtx: canlı piyasa bağlamı (funding, OI, mark/oracle...)
+ /// WS activeAssetCtx: canlı piyasa bağlamı (funding, OI, mark/oracle...)
     Ctx { coin: String, funding: f64, open_interest: f64, mark_px: f64, oracle_px: f64, premium: f64, day_ntl_vlm: f64, prev_day_px: f64, ts: i64 },
 }
 
@@ -103,29 +103,29 @@ pub async fn load_universe(info: &Info, cfg: &IngestorConfig) -> Result<Universe
             day_volume_usd: vol,
         });
     }
-    // P1-D: burada KIRPMA YAPILMAZ. Evren bir kez `TradingUniverse::build`
-    // içinde çözülür; ingestor `max_coins` ile kendi TOP-N'ini seçerse
-    // engine listesiyle AYRIŞIR (ayni sayi, farkli set).
+ // burada KIRPMA YAPILMAZ. Evren bir kez `TradingUniverse::build`
+ // içinde çözülür; ingestor `max_coins` ile kendi TOP-N'ini seçerse
+ // engine listesiyle AYRIŞIR (ayni sayi, farkli set).
     coins.sort_by(|a, b| b.day_volume_usd.total_cmp(&a.day_volume_usd));
     Ok(Universe { coins })
 }
 
 pub struct Ingestor {
     pub cfg: IngestorConfig,
-    /// P1-D: evren tek kaynaktan gelir (`TradingUniverse`), `Universe` DEĞİL.
+ /// evren tek kaynaktan gelir (`TradingUniverse`), `Universe` DEĞİL.
     pub universe: TradingUniverse,
 }
 
 impl Ingestor {
-    /// P1-D: evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
-    /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
+ /// evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
+ /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
     pub async fn with_universe(
         _cfg: Config,
         icfg: IngestorConfig,
         universe: TradingUniverse,
     ) -> Result<Self> {
-        // Katman doğrulaması: engine listesi ile abonelik listesi birebir aynı
-        // olmalı. Uyuşmazlıkta burada hata verir -> bot başlamaz.
+ // Katman doğrulaması: engine listesi ile abonelik listesi birebir aynı
+ // olmalı. Uyuşmazlıkta burada hata verir -> bot başlamaz.
         universe.verify_layers(&icfg)?;
         tracing::info!(
             "evren: {} coin (min hacim ${:.0}, l2book ilk {})",
@@ -134,22 +134,22 @@ impl Ingestor {
         Ok(Self { cfg: icfg, universe })
     }
 
-    /// Shard'lı WS bağlantılarını başlatır; birleşik StreamEvent akışı döner.
-    /// Her shard kopunca kendi kendine yeniden bağlanır (WsClient.run);
-    /// ham WsEvent'ler tek noktada StreamEvent'e çevrilir.
+ /// Shard'lı WS bağlantılarını başlatır; birleşik StreamEvent akışı döner.
+ /// Her shard kopunca kendi kendine yeniden bağlanır (WsClient.run);
+ /// ham WsEvent'ler tek noktada StreamEvent'e çevrilir.
     pub fn start(&self, api_cfg: Config) -> mpsc::Receiver<StreamEvent> {
         let (tx_out, rx) = mpsc::channel(8192);
         let (tx_raw, mut rx_raw) = mpsc::channel(8192);
         let shards = self.cfg.shard_count.max(1);
-        // P1-D: abonelik listesi TEK KAYNAKTAN (`TradingUniverse`) üretilir.
+ // abonelik listesi TEK KAYNAKTAN (`TradingUniverse`) üretilir.
         let all_subs = self.universe.subscription_list(&self.cfg);
         let mut per_shard: Vec<Vec<Value>> = vec![Vec::new(); shards];
         for v in all_subs {
             match v["type"].as_str() {
-                // allMids coin-bağımsız: ilk shard'a konur
+ // allMids coin-bağımsız: ilk shard'a konur
                 Some("allMids") => per_shard[0].push(v),
                 _ => {
-                    // coin'e göre shard dağıtımı — evren sırasından türetilir
+ // coin'e göre shard dağıtımı — evren sırasından türetilir
                     let i = self
                         .universe
                         .names()
@@ -172,10 +172,10 @@ impl Ingestor {
                 }
             });
         }
-        // tx_raw'un son kopyasını bırak -> tüm shardlar bittiğinde pump da biter
+ // tx_raw'un son kopyasını bırak -> tüm shardlar bittiğinde pump da biter
         drop(tx_raw);
 
-        // Pump: WsEvent -> StreamEvent (trades dizisi tek tek iletilir)
+ // Pump: WsEvent -> StreamEvent (trades dizisi tek tek iletilir)
         tokio::spawn(async move {
             while let Some(ev) = rx_raw.recv().await {
                 for se in Self::translate(&ev) {
@@ -188,8 +188,8 @@ impl Ingestor {
         rx
     }
 
-    /// Ham WsEvent -> birleşik StreamEvent'ler (trades dizisi -> her tick ayrı).
-    /// Boş vec: ilgisiz/bozuk mesaj.
+ /// Ham WsEvent -> birleşik StreamEvent'ler (trades dizisi -> her tick ayrı).
+ /// Boş vec: ilgisiz/bozuk mesaj.
     pub fn translate(ev: &hyperliquid_api::websocket::WsEvent) -> Vec<StreamEvent> {
         match ev.channel.as_str() {
             "trades" => ev

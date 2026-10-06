@@ -4,8 +4,8 @@
 //! 2. Trend: EMA20/EMA50 işareti; efor = son bar hacmi / 20-bar ortalama.
 //! 3. Sonuç: son 20 barlık aralıkta konum (0=alt, 1=üst).
 //! 4. Divergence: trend↑ + hacim onayı + zirveye yakın değil → Long;
-//!    ayna Short; yeni zirve + hacim kurusu → dağıtım Short [0.3];
-//!    yeni dip + hacim patlaması → birikim Long [0.5]; karışık → Hold.
+//! ayna Short; yeni zirve + hacim kurusu → dağıtım Short [0.3];
+//! yeni dip + hacim patlaması → birikim Long [0.5]; karışık → Hold.
 use crate::{closes, last, volumes, MarketInput, Signal, Strategy};
 use math::indicators;
 
@@ -24,8 +24,8 @@ impl Strategy for Wyckoff {
             return Signal::Skip { reason: ">=60 mum gerekli".into() };
         }
         let vols = volumes(&input.candles);
-        // D: EMA boş/NaN → Skip (panik yerine; engine zaten panik-izole eder
-        // ama deterministik davranış üretimde Skip olmalı)
+ // D: EMA boş/NaN → Skip (panik yerine; engine zaten panik-izole eder
+ // ama deterministik davranış üretimde Skip olmalı)
         let (Some(e20), Some(e50)) = (
             last(&indicators::ema(&c, 20)).filter(|x| x.is_finite()),
             last(&indicators::ema(&c, 50)).filter(|x| x.is_finite()),
@@ -34,21 +34,21 @@ impl Strategy for Wyckoff {
         };
         let price = c[c.len() - 1];
 
-        // trend yönü
+ // trend yönü
         let trend = if e20 > e50 { 1.0 } else { -1.0 };
 
-        // efor (hacim) / sonuç (fiyat): son barın hacmi 20-bar ortalamanın kaç katı
+ // efor (hacim) / sonuç (fiyat): son barın hacmi 20-bar ortalamanın kaç katı
         let v_avg: f64 = vols[vols.len() - VOL_AVG..].iter().sum::<f64>() / VOL_AVG as f64;
         let v_last = vols[vols.len() - 1];
         let effort = v_last / v_avg.max(1e-12);
 
-        // 20 barlık aralık pozisyonu (0=alt, 1=üst)
+ // 20 barlık aralık pozisyonu (0=alt, 1=üst)
         let hh = highs_of(&input.candles);
         let ll = lows_of(&input.candles);
         let range = (hh - ll).abs().max(1e-12);
         let pos = (price - ll) / range;
 
-        // yeni zirve + hacim kurusu = dağıtım (short); yeni dip + hacim patlaması = birikim (long)
+ // yeni zirve + hacim kurusu = dağıtım (short); yeni dip + hacim patlaması = birikim (long)
         let at_high = pos > 0.95;
         let at_low = pos < 0.05;
         let dry_up = effort < 0.7;
@@ -88,7 +88,7 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// A — Long koşulu: trend yukarı (E20>E50) + hacim onayı + zirvede değil.
+ /// A — Long koşulu: trend yukarı (E20>E50) + hacim onayı + zirvede değil.
     #[test]
     fn wyckoff_trend_up_hacim_onayli_long_uretir() {
         let mut candles = H::linear(80, 100.0, 0.1); // yükselen
@@ -103,7 +103,7 @@ mod audit_tests {
         }
     }
 
-    /// C — Short simetrisi: trend aşağı + hacim onayı.
+ /// C — Short simetrisi: trend aşağı + hacim onayı.
     #[test]
     fn wyckoff_trend_down_hacim_onayli_short_uretir() {
         let mut candles = H::linear(80, 108.0, -0.1);
@@ -115,28 +115,28 @@ mod audit_tests {
         }
     }
 
-    /// D — EMA hesaplanamadı → Skip (panik/unwrap yok).
+ /// D — EMA hesaplanamadı → Skip (panik/unwrap yok).
     #[test]
     fn wyckoff_ema_yoksa_skip() {
-        // 60 mum ama hepsi aynı — ema yine değer üretir; Skip yolu için
-        // NaN mum kullan (ema NaN üretir → filtre Skip'e düşmeli)
+ // 60 mum ama hepsi aynı — ema yine değer üretir; Skip yolu için
+ // NaN mum kullan (ema NaN üretir → filtre Skip'e düşmeli)
         let mut candles = H::flat(80, 100.0);
         H::set_last(&mut candles, f64::NAN, 100.0, 99.0, 100.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         assert!(matches!(Wyckoff.evaluate(&input), Signal::Skip { .. }), "NaN son bar → Skip");
     }
 
-    /// B — FUTURE LEAKAGE: kırılım/karar sinyali onay verisi OLMADAN üretilmez.
-    /// Veri A = t anına kadar; t'ten ÖNCE sinyal yok, t'te var.
+ /// B — FUTURE LEAKAGE: kırılım/karar sinyali onay verisi OLMADAN üretilmez.
+ /// Veri A = t anına kadar; t'ten ÖNCE sinyal yok, t'te var.
     #[test]
     fn wyckoff_prefix_replay_erken_sinyal_uretmez() {
         let candles = H::linear(80, 100.0, 0.1);
-        // son bar hariç: EMA'lar benzer ama hacim onayı son barda geldi
+ // son bar hariç: EMA'lar benzer ama hacim onayı son barda geldi
         let early = candles[..candles.len() - 1].to_vec();
         let input = MarketInput { coin: "T".into(), candles: early, ..Default::default() };
         let sig = Wyckoff.evaluate(&input);
-        // erken sinyal hacim patlaması olmadan KONTRAYSA (Short/Hold/Skip) doğru;
-        // kritik olan: son barın bilgisine bakmadan Long ÜRETMEZ (hacim onayı yok)
+ // erken sinyal hacim patlaması olmadan KONTRAYSA (Short/Hold/Skip) doğru;
+ // kritik olan: son barın bilgisine bakmadan Long ÜRETMEZ (hacim onayı yok)
         assert!(
             !matches!(&sig, Signal::Long { note, .. } if note.contains("hacim onaylı")),
             "hacim patlaması olmadan hacim-onaylı Long üretilmez: {sig:?}"

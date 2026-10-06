@@ -1,10 +1,10 @@
 //! OI LİKİDASYON — ΔOI × ΔP kadrans matrisi.
 //!
 //! 1. OI↑ + P↑ → Long (trend devam); OI↑ + P↓ → Short; OI↓ + P↓ →
-//!    kontra Long (likidasyon kaskadı, ×0.7); OI↓ + P↑ → kontra Short
-//!    (squeeze, ×0.7).
+//! kontra Long (likidasyon kaskadı, ×0.7); OI↓ + P↑ → kontra Short
+//! (squeeze, ×0.7).
 //! 2. Güç: |ΔOI|/px göreliliği [0.2–0.8]; ΔOI yok veya <13 mum → Skip
-//!    (HL'de ayrı likidasyon feed'i yok — OI'dan çıkarımsal; sahte kadrans yok).
+//! (HL'de ayrı likidasyon feed'i yok — OI'dan çıkarımsal; sahte kadrans yok).
 use crate::{closes, MarketInput, Signal, Strategy};
 
 pub struct OiLikidasyon;
@@ -26,7 +26,7 @@ impl Strategy for OiLikidasyon {
         let oi_up = d_oi > 0.0;
         let px_up = d_px > 0.0;
 
-        // görece büyüklük: |ΔOI| son fiyatın kaç bini — küçük değişim sinyal değil
+ // görece büyüklük: |ΔOI| son fiyatın kaç bini — küçük değişim sinyal değil
         let strength = ((d_oi.abs() / c[c.len() - 1].max(1.0)) * 1e4).min(0.8).max(0.2);
 
         match (oi_up, px_up) {
@@ -43,7 +43,7 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// A — OI↑ + P↑ → Long (trend devam).
+ /// A — OI↑ + P↑ → Long (trend devam).
     #[test]
     fn oi_up_px_up_long() {
         let mut candles = H::linear(20, 100.0, 0.5); // fiyat yükseliyor
@@ -57,15 +57,15 @@ mod audit_tests {
         }
     }
 
-    /// C — 4 kadrans simetrisi: OI↑+P↓ → Short; OI↓+P↓ → kontra Long (%30
-    /// zayıf); OI↓+P↑ → kontra Short (%30 zayıf).
+ /// C — 4 kadrans simetrisi: OI↑+P↓ → Short; OI↓+P↓ → kontra Long (%30
+ /// zayıf); OI↓+P↑ → kontra Short (%30 zayıf).
     #[test]
     fn oi_dort_kadrans_yonleri() {
         let mk = |candles: Vec<data::Candle>, d: f64| MarketInput { coin: "T".into(), candles, oi_delta: Some(d), ..Default::default() };
-        // OI↑ + P↓ → Short
+ // OI↑ + P↓ → Short
         let down = H::linear(20, 110.0, -0.5);
         assert!(matches!(OiLikidasyon.evaluate(&mk(down, 2.0)), Signal::Short { strength, .. } if strength >= 0.2));
-        // OI↓ + P↓ → kontra Long (×0.7)
+ // OI↓ + P↓ → kontra Long (×0.7)
         let down2 = H::linear(20, 110.0, -0.5);
         let trend_long = match OiLikidasyon.evaluate(&mk(H::linear(20, 100.0, 0.5), 2.0)) {
             Signal::Long { strength, .. } => strength,
@@ -78,12 +78,12 @@ mod audit_tests {
             }
             other => panic!("{other:?}"),
         }
-        // OI↓ + P↑ → kontra Short (×0.7)
+ // OI↓ + P↑ → kontra Short (×0.7)
         let up = H::linear(20, 100.0, 0.5);
         assert!(matches!(OiLikidasyon.evaluate(&mk(up, -2.0)), Signal::Short { strength, .. } if strength >= 0.14));
     }
 
-    /// D — ΔOI yoksa Skip (sahte kadrans yasağı).
+ /// D — ΔOI yoksa Skip (sahte kadrans yasağı).
     #[test]
     fn oi_veri_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(20, 100.0), oi_delta: None, ..Default::default() };

@@ -2,13 +2,13 @@
 //!
 //! Görevler:
 //! 1. `Exchange::place_limit / place_ioc / place_trigger / batch_place /
-//!    batch_cancel`: tek ve toplu emir iletimi (cloid'li idempotency).
+//! batch_cancel`: tek ve toplu emir iletimi (cloid'li idempotency).
 //! 2. `OrderStatuses`: yanıt durum ayrıştırma — `resting_oid` (dinledi),
-//!    `filled` (anında doldu), `error`.
+//! `filled` (anında doldu), `error`.
 //! 3. `WireOrder / BatchPlace / Tif`: wire şemaları.
 //! 4. Yuvarlama yardımcıları: `round_5sig / round_px_wire / round_px_for /
-//!    round_sz_up` — borsanın 5-anlamlı-basamak fiyat ve szDecimals lot
-//!    kuralları.
+//! round_sz_up` — borsanın 5-anlamlı-basamak fiyat ve szDecimals lot
+//! kuralları.
 use serde_json::{json, Value};
 
 use crate::signing::{float_to_wire, HyperliquidClient, ExchangeOutcome};
@@ -17,11 +17,11 @@ use crate::error_responses::{ApiError, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Tif {
-    /// post-only: anında eşleşirse iptal
+ /// post-only: anında eşleşirse iptal
     Alo,
-    /// immediate-or-cancel
+ /// immediate-or-cancel
     Ioc,
-    /// good-til-canceled
+ /// good-til-canceled
     Gtc,
 }
 
@@ -85,15 +85,15 @@ pub fn round_px_wire(x: f64) -> f64 {
 }
 
 /// Fiyatı coin'in TICK'Ine oturt (`max_decimals` = tick'in azami hane sayısı).
-/// Testnet'te ölçüldü (probe_px): ME (szDecimals=1) 0.073706'ı REDDEDİYOR,
+/// Testnet'te Not: (probe_px): ME (szDecimals=1) 0.073706'ı REDDEDİYOR,
 /// 0.073710'u KABUL ediyor; MEME (szDecimals=0) 6 haneyi kabul ediyor.
 /// 5 anlamlı hane sınırı da korunur.
 pub fn round_px_for(x: f64, max_decimals: u32) -> f64 {
     if !(x > 0.0) || !x.is_finite() {
         return 0.0;
     }
-    // SIRA ÖNEMLİ: önce 5 anlamlı hane, sonra tick ızgarası. Ters sırada
-    // 84730.9 -> 84731.0 olur ve grid bozulur.
+ // SIRA ÖNEMLİ: önce 5 anlamlı hane, sonra tick ızgarası. Ters sırada
+ // 84730.9 -> 84731.0 olur ve grid bozulur.
     let f = 10f64.powi((max_decimals as i32).clamp(0, 8));
     let snapped = (round_5sig(x) * f).round() / f;
     if snapped > 0.0 {
@@ -118,18 +118,18 @@ pub struct WireOrder {
     pub px: f64,
     pub tif: Tif,
     pub reduce_only: bool,
-    /// İstemci tarafı idempotency anahtarı (16 haneli hex).
-    ///
-    /// `signing::post` 429/5xx'te isteği **yeniden gönderiyor**. 5xx'te
-    /// istek borsada İŞLENMİŞ olabilir ama yanıt kaybolmuştur; retry aynı
-    /// emri ikinci kez yollar ve bot pozisyonu ikiye katlar. Bu, S5'in
-    /// ("borsada emir var, bizde yok") çözdüğü senaryonun bir ikizi — üstelik
-    /// retry yüzünden BİLİNÇLİ olarak üretiliyor.
-    ///
-    /// Hyperliquid aynı `c` (cloid) ile ikinci emri **reddeder**
-    /// ("Resting maker orders must have at least one of cloid or oid"), yani
-    /// idempotency bedavaya geliyor. `None` ise alan hiç gönderilmez (eski
-    /// davranış, geriye dönük uyum).
+ /// İstemci tarafı idempotency anahtarı (16 haneli hex).
+ ///
+ /// `signing::post` 429/5xx'te isteği **yeniden gönderiyor**. 5xx'te
+ /// istek borsada İŞLENMİŞ olabilir ama yanıt kaybolmuştur; retry aynı
+ /// emri ikinci kez yollar ve bot pozisyonu ikiye katlar. Bu, 'in
+ /// ("borsada emir var, bizde yok") çözdüğü senaryonun bir ikizi — üstelik
+ /// retry yüzünden BİLİNÇLİ olarak üretiliyor.
+ ///
+ /// Hyperliquid aynı `c` (cloid) ile ikinci emri **reddeder**
+ /// ("Resting maker orders must have at least one of cloid or oid"), yani
+ /// idempotency bedavaya geliyor. `None` ise alan hiç gönderilmez (eski
+ /// davranış, geriye dönük uyum).
     pub cloid: Option<String>,
 }
 
@@ -139,20 +139,20 @@ impl Exchange {
     }
 }
 
-/// P1-C: `batch_place` sonucu. UNKNOWN ayrı bir değerdir — `Err` değil,
+/// `batch_place` sonucu. UNKNOWN ayrı bir değerdir — `Err` değil,
 /// çünkü "emir borsada mı" sorusu hâlâ açıktır ve çağıran taraf
 /// reconciliation yapmak ZORUNDADIR.
 pub enum BatchPlace {
-    /// Borsa yanıtı geldi (status'lar okunabilir).
+ /// Borsa yanıtı geldi (status'lar okunabilir).
     Known(OrderStatuses),
-    /// 5xx/timeout: istek gönderildi, sonuç bilinmiyor.
+ /// 5xx/timeout: istek gönderildi, sonuç bilinmiyor.
     Unknown,
-    /// İstek hiç gönderilemedi (imza hatası, 4xx, ağ hatası) — UNKNOWN DEĞİL.
+ /// İstek hiç gönderilemedi (imza hatası, 4xx, ağ hatası) — UNKNOWN DEĞİL.
     Error(ApiError),
 }
 
 impl Exchange {
-    /// ÇOKLU EMİR TEK ÇAĞRI — UNKNOWN korunur (caller reconciliation yapar).
+ /// ÇOKLU EMİR TEK ÇAĞRI — UNKNOWN korunur (caller reconciliation yapar).
     pub async fn batch_place_full(&self, orders: &[WireOrder]) -> BatchPlace {
         if orders.is_empty() {
             return BatchPlace::Known(OrderStatuses { raw: json!({}) });
@@ -179,9 +179,9 @@ impl Exchange {
         }
     }
 
-    /// ÇOKLU EMİR TEK ÇAĞRI (batching — rate limit dostu).
-    /// UNKNOWN burada hata olarak yutulur; UNKNOWN'a ihtiyacı olan çağıranlar
-    /// [`Self::batch_place_full`] kullanmalı.
+ /// ÇOKLU EMİR TEK ÇAĞRI (batching — rate limit dostu).
+ /// UNKNOWN burada hata olarak yutulur; UNKNOWN'a ihtiyacı olan çağıranlar
+ /// [`Self::batch_place_full`] kullanmalı.
     pub async fn batch_place(&self, orders: &[WireOrder]) -> Result<OrderStatuses> {
         match self.batch_place_full(orders).await {
             BatchPlace::Known(s) => Ok(s),
@@ -190,7 +190,7 @@ impl Exchange {
         }
     }
 
-    /// ÇOKLU İPTAL TEK ÇAĞRI
+ /// ÇOKLU İPTAL TEK ÇAĞRI
     pub async fn batch_cancel(&self, cancels: &[(u32, i64)]) -> Result<OrderStatuses> {
         if cancels.is_empty() {
             return Ok(OrderStatuses { raw: json!({}) });
@@ -220,10 +220,10 @@ impl Exchange {
             .await
     }
 
-    /// `place_limit` + **açık `cloid`** (idempotency anahtarı).
-    ///
-    /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x..."}` olarak gider (128 bit
-    /// hex, `0x` + 32 hane — 16 hane API 422 döndürür).
+ /// `place_limit` + **açık `cloid`** (idempotency anahtarı).
+ ///
+ /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x..."}` olarak gider (128 bit
+ /// hex, `0x` + 32 hane — 16 hane API 422 döndürür).
     pub async fn place_limit_cloid(
         &self,
         asset: u32,
@@ -253,7 +253,7 @@ impl Exchange {
         }
     }
 
-    /// IOC piyasa benzeri emir: fiyata agresif limit + IOC
+ /// IOC piyasa benzeri emir: fiyata agresif limit + IOC
     pub async fn place_ioc(
         &self,
         asset: u32,
@@ -264,7 +264,7 @@ impl Exchange {
         self.place_limit(asset, is_buy, sz, limit_px, Tif::Ioc, false).await
     }
 
-    /// Trigger (TP/SL) emri
+ /// Trigger (TP/SL) emri
     pub async fn place_trigger(
         &self,
         asset: u32,
@@ -295,7 +295,7 @@ impl Exchange {
         }
     }
 
-    /// oid ile emir iptali (SDK bulk_cancel formati)
+ /// oid ile emir iptali (SDK bulk_cancel formati)
     pub async fn cancel(&self, asset: u32, oid: i64) -> Result<OrderStatuses> {
         let action = json!({ "type": "cancel", "cancels": [{ "a": asset, "o": oid }] });
         match self.c.exchange_action(action).await {
@@ -305,7 +305,7 @@ impl Exchange {
         }
     }
 
-    /// cloid ile iptal
+ /// cloid ile iptal
     pub async fn cancel_by_cloid(&self, asset: u32, cloid: &str) -> Result<OrderStatuses> {
         let action =
             json!({ "type": "cancelByCloid", "cancels": [{ "asset": asset, "cloid": cloid }] });
@@ -316,7 +316,7 @@ impl Exchange {
         }
     }
 
-    /// Emir duzenleme (batchModify)
+ /// Emir duzenleme (batchModify)
     pub async fn modify(
         &self,
         asset: u32,
@@ -342,7 +342,7 @@ impl Exchange {
         }
     }
 
-    /// Kaldirac ayari (cross/isolated + leverage)
+ /// Kaldirac ayari (cross/isolated + leverage)
     pub async fn update_leverage(
         &self,
         asset: u32,
@@ -362,7 +362,7 @@ impl Exchange {
         }
     }
 
-    /// Isolated margin ekleme/çekme (ntli = USD * 1e6)
+ /// Isolated margin ekleme/çekme (ntli = USD * 1e6)
     pub async fn update_isolated_margin(&self, asset: u32, usd: f64) -> Result<Value> {
         let ntli = (usd * 1e6).round() as i64;
         let action = json!({
@@ -378,7 +378,7 @@ impl Exchange {
         }
     }
 
-    /// Tum emirleri belirli zamanda iptal et (None: mevcut plani temizle)
+ /// Tum emirleri belirli zamanda iptal et (None: mevcut plani temizle)
     pub async fn schedule_cancel(&self, time_ms: Option<i64>) -> Result<Value> {
         let mut action = json!({ "type": "scheduleCancel" });
         if let Some(t) = time_ms {
@@ -391,7 +391,7 @@ impl Exchange {
         }
     }
 
-    /// Guvenli test emri boyutu: min $10 notional guvence altina alinir
+ /// Guvenli test emri boyutu: min $10 notional guvence altina alinir
     pub fn min_test_sz(&self, px: f64, sz_decimals: u32) -> f64 {
         round_sz_up(12.0 / px, sz_decimals)
     }

@@ -2,10 +2,10 @@
 //!
 //! 1. Girdi: evren **1g** getirileri (`mark/prevDay − 1`); <20 coin → Skip.
 //! 2. `rank_band` (tek kaynak — strateji + engine): üst %20 Top /
-//!    alt %20 BottomShort / %40-60 Mid.
+//! alt %20 BottomShort / %40-60 Mid.
 //! 3. Long/Short [0.6] dilim üyeliği; orta dilim Hold.
 //! 4. `rank_shift_exit_long`: LONG, Top'tan alt %40'a düştü → Exit
-//!    (stratija pozisyon tarafını bilmez; intent ENGINE'den yönlendirilir).
+//! (stratija pozisyon tarafını bilmez; intent ENGINE'den yönlendirilir).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
@@ -15,13 +15,13 @@ pub struct KesitMomentum;
 /// aynı fonksiyonu kullanır; engine pozisyon tarafını bilerek exit yönlendirir).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankBand {
-    /// üst %20 (long dilimi)
+ /// üst %20 (long dilimi)
     Top,
-    /// %40 ile %60 arası (orta)
+ /// %40 ile %60 arası (orta)
     Mid,
-    /// alt %40 — kesit momentum LONG pozisyonu için ÇIKIŞ bölgesi
+ /// alt %40 — kesit momentum LONG pozisyonu için ÇIKIŞ bölgesi
     Bottom,
-    /// alt %20 (short dilimi)
+ /// alt %20 (short dilimi)
     BottomShort,
 }
 
@@ -81,7 +81,7 @@ impl Strategy for KesitMomentum {
         let in_longs = longs.iter().any(|(c, _)| c == &input.coin);
         let in_shorts = shorts.iter().any(|(c, _)| c == &input.coin);
 
-        // sıralama kayması: coin uzun listedeyken alt %40'a düşerse EXIT (doküman kuralı)
+ // sıralama kayması: coin uzun listedeyken alt %40'a düşerse EXIT (doküman kuralı)
         let rank = ranked.iter().position(|(c, _)| c == &input.coin);
         let pct = rank.map(|r| r as f64 / ranked.len() as f64);
 
@@ -120,43 +120,43 @@ fn _ref() {
 mod exit_tests {
     use super::*;
 
-    /// 30 coinlik evren: coin üst %20'deyken (doküman kuralı: LONG dilimi)
-    /// alt %40'a düşerse Exit KURALI tetiklenir.
+ /// 30 coinlik evren: coin üst %20'deyken (doküman kuralı: LONG dilimi)
+ /// alt %40'a düşerse Exit KURALI tetiklenir.
     #[test]
     fn kesit_momentum_rank_kaymasinda_exit_uret() {
-        // evren: i → getiri (i büyükse daha iyi)
+ // evren: i → getiri (i büyükse daha iyi)
         let universe: Vec<(String, f64)> =
             (0..30).map(|i| (format!("C{i:02}"), i as f64 / 100.0)).collect();
-        // C29 = en iyi (üst %20), C14 = orta (%40-60 bandı), C01 = alt %40
+ // C29 = en iyi (üst %20), C14 = orta (%40-60 bandı), C01 = alt %40
         assert_eq!(rank_band(&universe, "C29"), Some(RankBand::Top));
         assert_eq!(rank_band(&universe, "C05"), Some(RankBand::BottomShort));
         let mid = rank_band(&universe, "C14");
         assert!(mid.is_some(), "orta band coin listede");
 
-        // DOKÜMANTE KURAL: Top → (alt %40 / alt %20) = EXIT
+ // DOKÜMANTE KURAL: Top → (alt %40 / alt %20) = EXIT
         assert!(rank_shift_exit_long(Some(RankBand::Top), Some(RankBand::Bottom)));
         assert!(rank_shift_exit_long(Some(RankBand::Top), Some(RankBand::BottomShort)));
-        // sıçrama da sayılır: Top → doğrudan Bottom
+ // sıçrama da sayılır: Top → doğrudan Bottom
         assert!(rank_shift_exit_long(Some(RankBand::Top), rank_band(&universe, "C01")));
 
-        // POSİTİF OLMAYAN DURUMLAR — exit üretmemeli:
-        // Mid/Bottom'dan aşağı inmek zaten Top'tan değildi
+ // POSİTİF OLMAYAN DURUMLAR — exit üretmemeli:
+ // Mid/Bottom'dan aşağı inmek zaten Top'tan değildi
         assert!(!rank_shift_exit_long(mid, Some(RankBand::Bottom)), "Mid'den düşmek Top kayması değil");
         assert!(!rank_shift_exit_long(None, Some(RankBand::Bottom)), "önceki band yok → exit YOK (false-positive yasağı)");
-        // Top'ta kalıyorsa exit yok
+ // Top'ta kalıyorsa exit yok
         assert!(!rank_shift_exit_long(Some(RankBand::Top), Some(RankBand::Top)));
-        // Top'tan Mid'e inmek henüz alt %40 değil → exit yok (kural: alt %40)
+ // Top'tan Mid'e inmek henüz alt %40 değil → exit yok (kural: alt %40)
         assert!(!rank_shift_exit_long(Some(RankBand::Top), mid), "Top→Mid: kural alt %40 diyor");
-        // SHORT bandine düşmek de alt %40'tır (long pozisyon için çıkış)
+ // SHORT bandine düşmek de alt %40'tır (long pozisyon için çıkış)
         assert!(rank_shift_exit_long(Some(RankBand::Top), Some(RankBand::BottomShort)));
-        // evren < 20 → band YOK (veri yoksa karar yok)
+ // evren < 20 → band YOK (veri yoksa karar yok)
         assert_eq!(rank_band(&universe[..10.min(universe.len())], "C29"), None);
-        // listede olmayan coin
+ // listede olmayan coin
         assert_eq!(rank_band(&universe, "XX"), None);
     }
 
-    /// Tek kaynak: `rank_band` stratejinin Long/Short dilim kararıyla TUTARLI —
-    /// Top bandındaki coin strateji tarafından Long (0.6) sinyali alır.
+ /// Tek kaynak: `rank_band` stratejinin Long/Short dilim kararıyla TUTARLI —
+ /// Top bandındaki coin strateji tarafından Long (0.6) sinyali alır.
     #[test]
     fn rank_band_strateji_oyuyla_tutarli() {
         let universe: Vec<(String, f64)> =
@@ -174,7 +174,7 @@ mod exit_tests {
             }
             other => panic!("üst dilim Long beklenirdi: {other:?}"),
         }
-        // alt dilim → Short + band BottomShort
+ // alt dilim → Short + band BottomShort
         let input2 = crate::MarketInput {
             coin: "C00".into(),
             universe_returns: universe.clone(),

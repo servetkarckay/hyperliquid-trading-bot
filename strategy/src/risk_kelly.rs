@@ -1,11 +1,11 @@
 //! RİSK KELLY — işlem boyutu hesabı (yön üretmez, AUXILIARY).
 //!
 //! 1. f* = p − (1−p)/b — p ve b YALNIZ tracker'ın GERÇEK canlı kanıtından
-//!    (`MarketInput::portfolio_*`); kanıt yok → Skip
-//!    ("sabit %45 KULLANILMADI" — eski kod örnek istatistiği canlı veri
-//!    gibi gösteriyordu).
+//! (`MarketInput::portfolio_*`); kanıt yok → Skip
+//! ("sabit %45 KULLANILMADI" — eski kod örnek istatistiği canlı veri
+//! gibi gösteriyordu).
 //! 2. Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle kanıtlı);
-//!    not yalnız boyut ÖNERİSİdir.
+//! not yalnız boyut ÖNERİSİdir.
 use crate::{MarketInput, Signal, StratStatus, Strategy};
 use math::portfolio;
 
@@ -21,13 +21,13 @@ impl Strategy for RiskKelly {
             return Signal::Skip { reason: "equity yok".into() };
         }
         let (Some(p), Some(b)) = (input.portfolio_win_rate, input.portfolio_wl_ratio) else {
-            // Sabit win-rate YOK: kanıt olmadan Kelly sayısı uydurulmaz.
+ // Sabit win-rate YOK: kanıt olmadan Kelly sayısı uydurulmaz.
             return Signal::Skip {
                 reason: "canlı Kelly istatistiği yok (tracker kanıtı boş) — sabit %45 KULLANILMADI".into(),
             };
         };
         let kelly = portfolio::kelly_binary(p, b).unwrap_or(0.0);
-        // yarım Kelly (pratik kural)
+ // yarım Kelly (pratik kural)
         let half = kelly * 0.5;
         let max_usd = input.equity * half;
 
@@ -39,7 +39,7 @@ impl Strategy for RiskKelly {
         }
     }
 
-    /// Boyut ÖNERİSİ üretir, yönlü giriş sinyali üretmez → `AUXILIARY`.
+ /// Boyut ÖNERİSİ üretir, yönlü giriş sinyali üretmez → `AUXILIARY`.
     fn status(&self, _input: &MarketInput) -> StratStatus {
         StratStatus::Auxiliary
     }
@@ -50,9 +50,9 @@ mod kelly_tests {
     use super::*;
     use crate::ensemble::{Dir, Ensemble, EnsembleConfig};
 
-    /// Sabit win-rate ile canlı sizing YOK: kanıt yoksa Skip + notta
-    /// "KULLANILMADI" yazısı. (Eski kod %45 sabitini canlı veri gibi
-    /// gösteriyordu.)
+ /// Sabit win-rate ile canlı sizing YOK: kanıt yoksa Skip + notta
+ /// "KULLANILMADI" yazısı. (Eski kod %45 sabitini canlı veri gibi
+ /// gösteriyordu.)
     #[test]
     fn kelly_does_not_use_hardcoded_live_win_rate() {
         let input = MarketInput {
@@ -64,8 +64,8 @@ mod kelly_tests {
         match RiskKelly.evaluate(&input) {
             Signal::Skip { reason } => {
                 assert!(reason.contains("KULLANILMADI"), "yasağı belgelemeli: {reason}");
-                // sabit değerin KALDIRILDIĞININ kanıtı: kaynakta 0.45 yok
-                // yalnız ÜRETİM kodu taranır (test modülünün kendi kalıpları değil)
+ // sabit değerin KALDIRILDIĞININ kanıtı: kaynakta 0.45 yok
+ // yalnız ÜRETİM kodu taranır (test modülünün kendi kalıpları değil)
                 let src = include_str!("risk_kelly.rs")
                     .split("#[cfg(test)]")
                     .next()
@@ -91,7 +91,7 @@ mod kelly_tests {
         }
     }
 
-    /// GERÇEK tracker kanıtı geldiğinde not o veriyi TAŞIR (uydurma değil).
+ /// GERÇEK tracker kanıtı geldiğinde not o veriyi TAŞIR (uydurma değil).
     #[test]
     fn kelly_not_dan_gelen_gercek_istatistigi_kullanir() {
         let input = MarketInput {
@@ -102,11 +102,11 @@ mod kelly_tests {
         };
         match RiskKelly.evaluate(&input) {
             Signal::Hold { note } => {
-                // not GERÇEK p ve b'yi gösterir (sabit %45 DEĞİL)
+ // not GERÇEK p ve b'yi gösterir (sabit %45 DEĞİL)
                 assert!(note.contains("p=0.55"), "gerçek win-rate: {note}");
                 assert!(note.contains("b=1.35"), "gerçek k/z: {note}");
                 assert!(!note.contains("0.45"), "sabit değer izleri YOK: {note}");
-                // f* = 0.55 - 0.45/1.35 = 0.2167 → yarı = 0.1083 → $32.5
+ // f* = 0.55 - 0.45/1.35 = 0.2167 → yarı = 0.1083 → $32.5
                 let f = math::portfolio::kelly_binary(0.55, 1.35).unwrap();
                 assert!((f - (0.55 - 0.45 / 1.35)).abs() < 1e-12);
                 assert!(note.contains(&format!("${:.0}", 300.0 * f * 0.5)));
@@ -115,8 +115,8 @@ mod kelly_tests {
         }
     }
 
-    /// Kelly çıktısı H âlde Hold/Skip → ACTUAL ALLOCATION'A ETKİSİ SIFIR:
-    /// ensemble skoruna katkı vermez (auxiliary, yönlü sinyal yok).
+ /// Kelly çıktısı H âlde Hold/Skip → ACTUAL ALLOCATION'A ETKİSİ SIFIR:
+ /// ensemble skoruna katkı vermez (auxiliary, yönlü sinyal yok).
     #[test]
     fn kelly_allocationa_etki_etmez() {
         let e = Ensemble::new(EnsembleConfig::default());
@@ -130,9 +130,9 @@ mod kelly_tests {
         ]);
         assert!(matches!(cs.dir, Dir::Neutral), "Kelly tek başına giriş KARARI üretmez");
         assert!(cs.contributors.is_empty(), "Kelly skora KATKI YAZMAZ: {cs:?}");
-        // durum: AUXILIARY
+ // durum: AUXILIARY
         assert_eq!(RiskKelly.status(&MarketInput::default()), StratStatus::Auxiliary);
-        // Optimal Execution ve Market Making de AUXILIARY; VRP IV'süz DATA-MISSING
+ // Optimal Execution ve Market Making de AUXILIARY; VRP IV'süz DATA-MISSING
         use crate::{optimal_execution::OptimalExecution, market_making::MarketMaking, volatilite_arbitraj::VolatiliteArbitraj};
         assert_eq!(OptimalExecution.status(&MarketInput::default()), StratStatus::Auxiliary);
         assert_eq!(MarketMaking.status(&MarketInput::default()), StratStatus::Auxiliary);

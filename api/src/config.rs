@@ -2,10 +2,10 @@
 //!
 //! Görevler:
 //! 1. `dotenvy` ile .env'i süreç ENV'ine yükler (secret export gereksinimi yok).
-//! 2. `Config::from_env()`: NETWORK / API_URL / WS_URL / PRIVATE_KEY /
-//!    API_WALLET_ADDRESS zorunlu; https/wss ön ekleri ve 32 bayt hex-anahtar
-//!    DOĞRULANIR — hatalı konfig süreci anında düşürür.
-//! 3. `pk_hex()`: imza anahtarını ham bayt olarak döner.
+//! 2. `Config::from_env`: NETWORK / API_URL / WS_URL / PRIVATE_KEY /
+//! API_WALLET_ADDRESS zorunlu; https/wss ön ekleri ve 32 bayt hex-anahtar
+//! DOĞRULANIR — hatalı konfig süreci anında düşürür.
+//! 3. `pk_hex`: imza anahtarını ham bayt olarak döner.
 //! Not: bot'un diğer ENV'leri (ENGINE_*, TRAIL_*, LEARN_*) burada DEĞİL,
 //! kendi modüllerinde okunur.
 use anyhow::{bail, Context, Result};
@@ -16,15 +16,15 @@ pub struct Config {
     pub network: String,
     pub api_url: String,
     pub ws_url: String,
-    /// API wallet (agent) private key, 0x'siz 32 byte hex
+ /// API wallet (agent) private key, 0x'siz 32 byte hex
     pub private_key: String,
     pub agent_address: String,
 }
 
 impl Config {
-    /// .env'den yukler; private key formatini dogrular.
+ /// .env'den yukler; private key formatini dogrular.
     pub fn from_env() -> Result<Self> {
-        // once calisma dizini, sonra workspace koku dene
+ // once calisma dizini, sonra workspace koku dene
         if dotenvy::dotenv().is_err() {
             let _ = dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../.env"));
         }
@@ -56,7 +56,7 @@ impl Config {
         Ok(())
     }
 
-    /// 0x'siz, temiz 32 byte hex private key
+ /// 0x'siz, temiz 32 byte hex private key
     pub fn pk_hex(&self) -> String {
         self.private_key.trim().trim_start_matches("0x").to_ascii_lowercase()
     }

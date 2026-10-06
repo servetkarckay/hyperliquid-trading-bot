@@ -24,15 +24,15 @@ impl Strategy for KlasikIndikatorler {
         let mut score: f64 = 0.0;
         let mut notes = Vec::new();
 
-        // 1) RSI14: 30<RSI<50 -> +1 (dip alım bölgesi), 50<RSI<70 -> -0.5 (aşırı)
-        // I — SİMETRİ DÜZELTMESİ: dip alım ödülü (+1) ile aşırı alım cezası
-        // eşit ağırlıkta (eski kod: aşırı alım −0.5, OBV aşağı kolü YOK →
-        // Short skoru yapısal ulaşılmazdı = gizli Long yanlılığı).
+ // 1) RSI14: 30<RSI<50 -> +1 (dip alım bölgesi), 50<RSI<70 -> -0.5 (aşırı)
+ // I — SİMETRİ DÜZELTMESİ: dip alım ödülü (+1) ile aşırı alım cezası
+ // eşit ağırlıkta (eski kod: aşırı alım −0.5, OBV aşağı kolü YOK →
+ // Short skoru yapısal ulaşılmazdı = gizli Long yanlılığı).
         let rsi = indicators::rsi(&c, 14).last().and_then(|v| *v).unwrap_or(50.0);
         if (30.0..50.0).contains(&rsi) { score += 1.0; notes.push(format!("RSI {rsi:.0} dip bölge")); }
         else if rsi > 70.0 { score -= 1.0; notes.push(format!("RSI {rsi:.0} aşırı")); }
 
-        // 2) MACD histogram işareti
+ // 2) MACD histogram işareti
         let (_, _, hist) = indicators::macd(&c, 12, 26, 9);
         let h_last = hist.last().and_then(|v| *v);
         match h_last {
@@ -41,14 +41,14 @@ impl Strategy for KlasikIndikatorler {
             None => {}
         }
 
-        // 3) Bollinger: alt banda temas -> +1
+ // 3) Bollinger: alt banda temas -> +1
         let bb = indicators::bollinger(&c, 20, 2.0);
         if let (Some(_), Some(up), Some(lo)) = bb.last().copied().unwrap() {
             if price <= lo { score += 1.0; notes.push("BB alt banda temas".into()); }
             if price >= up { score -= 1.0; notes.push("BB üst banda temas".into()); }
         }
 
-        // 4) OBV eğimi (son 10 bar) — SİMETRİ (aşağı kol eklendi)
+ // 4) OBV eğimi (son 10 bar) — SİMETRİ (aşağı kol eklendi)
         let obv = indicators::obv(&c, &vol_of(&input.candles));
         if obv.len() >= 10 {
             if obv[obv.len() - 1] > obv[obv.len() - 10] {
@@ -58,7 +58,7 @@ impl Strategy for KlasikIndikatorler {
             }
         }
 
-        // 5) VWAP konumu
+ // 5) VWAP konumu
         let vwap = last(&indicators::rolling_vwap(
             &input.candles.iter().map(|x| x.h).collect::<Vec<_>>(),
             &input.candles.iter().map(|x| x.l).collect::<Vec<_>>(),
@@ -71,7 +71,7 @@ impl Strategy for KlasikIndikatorler {
             else { score -= 0.5; notes.push("fiyat VWAP altı".into()); }
         }
 
-        // skor -> sinyal (maks ~4)
+ // skor -> sinyal (maks ~4)
         if score >= 2.0 {
             Signal::Long { strength: (score / 4.0).min(0.8), note: format!("skor {score:+.1}: {}", notes.join("; ")) }
         } else if score <= -2.0 {
@@ -92,7 +92,7 @@ mod audit_tests {
     use crate::strat_test_helpers::helpers as H;
     use std::f64::consts::PI;
 
-    /// Deterministik sinüs serisi: döngüsel deneysel metrikler.
+ /// Deterministik sinüs serisi: döngüsel deneysel metrikler.
     fn sine(n: usize, period: f64, amp: f64, v: f64) -> Vec<data::Candle> {
         (0..n)
             .map(|i| {
@@ -102,11 +102,11 @@ mod audit_tests {
             .collect()
     }
 
-    /// A — dip noktasında çoklu onay → Long (skor ≥ +2).
+ /// A — dip noktasında çoklu onay → Long (skor ≥ +2).
     #[test]
     fn klasik_coklu_onay_long() {
         let full = sine(200, 60.0, 2.0, 150.0);
-        // sinüsün DİP noktası: i = 3T/4 = 45 (i mod 60)
+ // sinüsün DİP noktası: i = 3T/4 = 45 (i mod 60)
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
             let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
@@ -122,12 +122,12 @@ mod audit_tests {
         eprintln!("klasik long: cut={cut} {info}");
     }
 
-    /// C — Short simetrisi: zirve noktasında Short (skor ≤ −2).
+ /// C — Short simetrisi: zirve noktasında Short (skor ≤ −2).
     #[test]
     fn klasik_asiri_short() {
         let full = sine(200, 60.0, 2.0, 150.0);
-        // zirve + DÖNÜŞ sonrası kısa inişte MACD hist − olur; zirve barında
-        // hist hâlâ + olabilir → dönüşü izleyen barlarda ara
+ // zirve + DÖNÜŞ sonrası kısa inişte MACD hist − olur; zirve barında
+ // hist hâlâ + olabilir → dönüşü izleyen barlarda ara
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
             let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
@@ -140,7 +140,7 @@ mod audit_tests {
         eprintln!("klasik short: cut={cut} {info}");
     }
 
-    /// D — mum yoksa Skip.
+ /// D — mum yoksa Skip.
     #[test]
     fn klasik_veri_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(30, 100.0), ..Default::default() };

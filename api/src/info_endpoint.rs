@@ -24,19 +24,19 @@ impl Info {
         Ok(Self { c: HyperliquidClient::new(cfg)? })
     }
 
-    /// Perp evreni + margin tabloları (szDecimals, maxLeverage, isDelisted)
+ /// Perp evreni + margin tabloları (szDecimals, maxLeverage, isDelisted)
     pub async fn meta(&self) -> Result<Meta> {
         let v = self.c.info(json!({ "type": "meta", "dex": "" })).await?;
         Ok(serde_json::from_value(v)?)
     }
 
-    /// Tek çağrıda evren + asset ctx (OI, funding, premium, dayNtlVlm, markPx...)
+ /// Tek çağrıda evren + asset ctx (OI, funding, premium, dayNtlVlm, markPx...)
     pub async fn meta_and_asset_ctxs(&self) -> Result<(Meta, Vec<crate::types::AssetCtx>)> {
         let v = self
             .c
             .info(json!({ "type": "metaAndAssetCtxs", "dex": "" }))
             .await?;
-        // 2026 formatı: [meta, ctxs] — ctx index = universe sırası
+ // 2026 formatı: [meta, ctxs] — ctx index = universe sırası
         let arr = v.as_array().filter(|a| a.len() == 2).cloned().ok_or_else(|| {
             crate::error_responses::ApiError::Api("metaAndAssetCtxs: [meta, ctxs] bekleniyordu".into())
         })?;
@@ -45,19 +45,19 @@ impl Info {
         Ok((meta, ctxs))
     }
 
-    /// Tüm coin'lerin mid fiyatları ({"BTC": "...", "#<oid>": ...})
+ /// Tüm coin'lerin mid fiyatları ({"BTC": "...", "#<oid>": ...})
     pub async fn all_mids(&self) -> Result<HashMap<String, String>> {
         let v = self.c.info(json!({ "type": "allMids", "dex": "" })).await?;
         Ok(serde_json::from_value(v)?)
     }
 
-    /// Emir defteri snapshot'u (tarafta 20 seviye)
+ /// Emir defteri snapshot'u (tarafta 20 seviye)
     pub async fn l2_book(&self, coin: &str) -> Result<L2Book> {
         let v = self.c.info(json!({ "type": "l2Book", "coin": coin })).await?;
         Ok(serde_json::from_value(v)?)
     }
 
-    /// OHLCV mumları (max 5000; endTime GERÇEK timestamp olmalı — 0 => HTTP 500)
+ /// OHLCV mumları (max 5000; endTime GERÇEK timestamp olmalı — 0 => HTTP 500)
     pub async fn candle_snapshot(
         &self,
         coin: &str,
@@ -72,7 +72,7 @@ impl Info {
         Ok(serde_json::from_value(v)?)
     }
 
-    /// Tarihsel funding oranları (coin, fundingRate, premium, time)
+ /// Tarihsel funding oranları (coin, fundingRate, premium, time)
     pub async fn funding_history(
         &self,
         coin: &str,
@@ -85,44 +85,44 @@ impl Info {
         Ok(serde_json::from_value(v)?)
     }
 
-    /// Hesap durumu (pozisyonlar, margin, nonce) — user: GERÇEK hesap adresi (agent değil!)
+ /// Hesap durumu (pozisyonlar, margin, nonce) — user: GERÇEK hesap adresi (agent değil!)
     pub async fn clearinghouse_state(&self, user: &str) -> Result<Value> {
         self.c.info(json!({ "type": "clearinghouseState", "user": user.to_ascii_lowercase() }))
             .await
     }
 
-    /// Kullanıcı fee'leri (maker/taker) — user: gerçek hesap adresi
+ /// Kullanıcı fee'leri (maker/taker) — user: gerçek hesap adresi
     pub async fn user_fees(&self, user: &str) -> Result<Value> {
         self.c.info(json!({ "type": "userFees", "user": user.to_ascii_lowercase() })).await
     }
 
-    /// Açık emirler — user: gerçek hesap adresi
+ /// Açık emirler — user: gerçek hesap adresi
     pub async fn open_orders(&self, user: &str) -> Result<Value> {
         self.c.info(json!({ "type": "openOrders", "user": user.to_ascii_lowercase() })).await
     }
 
-    /// İşlem geçmişi — user: gerçek hesap adresi
+ /// İşlem geçmişi — user: gerçek hesap adresi
     pub async fn user_fills(&self, user: &str) -> Result<Value> {
         self.c.info(json!({ "type": "userFills", "user": user.to_ascii_lowercase() })).await
     }
 
-    /// Emir durumu (oid veya cloid) — user: gerçek hesap adresi
+ /// Emir durumu (oid veya cloid) — user: gerçek hesap adresi
     pub async fn order_status(&self, user: &str, oid: i64) -> Result<Value> {
         self.c.info(json!({ "type": "orderStatus", "user": user.to_ascii_lowercase(), "oid": oid }))
             .await
     }
 
-    /// Tahmini funding oranları
+ /// Tahmini funding oranları
     pub async fn predicted_fundings(&self) -> Result<Value> {
         self.c.info(json!({ "type": "predictedFundings" })).await
     }
 
-    /// Spot meta (spot evreni + token'lar)
+ /// Spot meta (spot evreni + token'lar)
     pub async fn spot_meta(&self) -> Result<Value> {
         self.c.info(json!({ "type": "spotMeta" })).await
     }
 
-    /// Coin adı -> perp asset ID (universe index). Meta'dan çözülür.
+ /// Coin adı -> perp asset ID (universe index). Meta'dan çözülür.
     pub async fn name_to_asset(&self, coin: &str) -> Result<(u32, PerpMeta)> {
         let meta = self.meta().await?;
         meta.universe

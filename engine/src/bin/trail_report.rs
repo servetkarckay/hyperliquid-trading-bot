@@ -71,7 +71,7 @@ fn main() -> anyhow::Result<()> {
     println!("=== TRAIL RAPOR: epoch={} n={} ===",
         epoch_filter.unwrap_or_else(|| "ALL".into()), n);
 
-    // 1) MFE/MAE quartile'lar
+ // 1) MFE/MAE quartile'lar
     let mfe: Vec<f64> = exits.iter().map(|e| e.mfe_r).collect();
     let mae: Vec<f64> = exits.iter().map(|e| e.mae_r).collect();
     println!("\n--- MFE/MAE (R cinsinden) ---");
@@ -88,18 +88,18 @@ fn main() -> anyhow::Result<()> {
         percentile(mae.clone(), 0.9).unwrap_or(0.0),
         mae.iter().fold(f64::INFINITY, |a, &b| a.min(b)));
 
-    // 2) Çıkış sebebi kırılımı
+ // 2) Çıkış sebebi kırılımı
     let mut by_exit: HashMap<String, usize> = HashMap::new();
     for e in &exits { *by_exit.entry(e.cikis.clone()).or_default() += 1; }
     println!("\n--- Çıkış Sebebi ---");
     for (k, v) in by_exit { println!("  {}: {} ({:.1}%)", k, v, v as f64 / n as f64 * 100.0); }
 
-    // 3) İlk-stop oranı (MFE < 0.5R)
+ // 3) İlk-stop oranı (MFE < 0.5R)
     let first_stop = exits.iter().filter(|e| e.mfe_r < 0.5).count();
     println!("\n--- İlk-Stop Oranı (MFE<0.5R) ---");
     println!("  {}/{} = {:.1}%", first_stop, n, first_stop as f64 / n as f64 * 100.0);
 
-    // 4) Ratchet dağılımı
+ // 4) Ratchet dağılımı
     let mut ratchet_hist: HashMap<u32, usize> = HashMap::new();
     for e in &exits { *ratchet_hist.entry(e.ratchet).or_default() += 1; }
     println!("\n--- Ratchet Dağılımı ---");
@@ -107,7 +107,7 @@ fn main() -> anyhow::Result<()> {
     rats.sort_by_key(|(r, _)| *r);
     for (r, v) in rats { println!("  ratchet={}: {} ({:.1}%)", r, v, v as f64 / n as f64 * 100.0); }
 
-    // 5) Geri-verme oranı (MFE≥1R alt kümesinde)
+ // 5) Geri-verme oranı (MFE≥1R alt kümesinde)
     let mfe_ge_1: Vec<f64> = exits.iter()
         .filter(|e| e.mfe_r >= 1.0)
         .map(|e| 1.0 - e.r_kapanis / e.mfe_r.max(f64::EPSILON))
@@ -123,19 +123,19 @@ fn main() -> anyhow::Result<()> {
         println!("\n--- Geri-Veri Oranı --- (MFE≥1R yok)");
     }
 
-    // 6) TP oranı
+ // 6) TP oranı
     let tp_count = exits.iter().filter(|e| e.cikis == "tp").count();
     println!("\n--- TP Oranı ---");
     println!("  {}/{} = {:.1}%", tp_count, n, tp_count as f64 / n as f64 * 100.0);
 
-    // 7) k değeri
+ // 7) k değeri
     let k_vals: Vec<f64> = exits.iter().map(|e| e.k).collect();
     if let Some(k) = k_vals.first() {
         println!("\n--- k Değeri ---");
         println!("  k = {:.2} (epoch içinde sabit)", k);
     }
 
-    // KARAR KURALLARI (Section C) — bilgilendirme
+ // KARAR KURALLARI (Section C) — bilgilendirme
     println!("\n=== KARAR KURALLARI (bilgilendirme) ===");
     if n < 30 {
         println!("n={} < 30 → KARAR YOK (yetersiz örneklem)", n);

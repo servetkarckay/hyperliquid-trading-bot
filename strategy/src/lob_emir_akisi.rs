@@ -1,7 +1,7 @@
 //! LOB EMİR AKIŞI — defter dengesi + taker akışı ÇİFT teyidi.
 //!
 //! 1. Girdi: book_imbalance (5 seviye) + taker_ratio (300 sn pencere) +
-//!    ≥30 mum; herhangi biri yok → Skip (SAHTE sinyal yok).
+//! ≥30 mum; herhangi biri yok → Skip (SAHTE sinyal yok).
 //! 2. Long: imb>+0.15 VE taker>%55 VE momentum −%1 üstü; Short ayna.
 //! 3. Tek onay yeterli DEĞİL — çift onay kuralı (nötr → Hold).
 use crate::{closes, MarketInput, Signal, Strategy};
@@ -21,7 +21,7 @@ impl Strategy for LobEmirAkisi {
         if c.len() < 30 {
             return Signal::Skip { reason: ">=30 mum gerekli".into() };
         }
-        // momentum onayı: son 12 barın net değişimi
+ // momentum onayı: son 12 barın net değişimi
         let chg = (c[c.len() - 1] / c[c.len() - 13] - 1.0).clamp(-0.2, 0.2);
 
         let strength = (imb.abs() * 0.5 + (taker - 0.5).abs() * 1.0).min(0.8);
@@ -50,7 +50,7 @@ mod audit_tests {
         H::flat(n, 100.0)
     }
 
-    /// A — imb>+0.15 VE taker>%55 VE momentum −%1 üstü → Long.
+ /// A — imb>+0.15 VE taker>%55 VE momentum −%1 üstü → Long.
     #[test]
     fn lob_cift_onay_long_uretir() {
         let input = MarketInput {
@@ -69,7 +69,7 @@ mod audit_tests {
         }
     }
 
-    /// C — Short simetrisi: imb<−0.15 VE taker<%45.
+ /// C — Short simetrisi: imb<−0.15 VE taker<%45.
     #[test]
     fn lob_cift_onay_short_uretir() {
         let input = MarketInput {
@@ -82,8 +82,8 @@ mod audit_tests {
         assert!(matches!(LobEmirAkisi.evaluate(&input), Signal::Short { strength, .. } if strength > 0.0));
     }
 
-    /// C — ASİMETRİ ONAY YASAĞI: tek onay yeterli değil (imb pozitif ama
-    /// taker nötr → Long ÜRETİLMEZ; tersi de).
+ /// C — ASİMETRİ ONAY YASAĞI: tek onay yeterli değil (imb pozitif ama
+ /// taker nötr → Long ÜRETİLMEZ; tersi de).
     #[test]
     fn lob_tek_onay_yeterli_degil() {
         let imb_only = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: Some(0.5), taker_ratio: Some(0.5), ..Default::default() };
@@ -92,7 +92,7 @@ mod audit_tests {
         assert!(matches!(LobEmirAkisi.evaluate(&taker_only), Signal::Hold { .. }), "taker tek başına Long ÜRETMEZ");
     }
 
-    /// D — defter/taker yoksa Skip.
+ /// D — defter/taker yoksa Skip.
     #[test]
     fn lob_veri_yoksa_skip() {
         let i1 = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: None, taker_ratio: Some(0.7), ..Default::default() };

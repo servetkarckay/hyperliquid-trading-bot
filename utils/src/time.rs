@@ -55,7 +55,7 @@ pub fn sync(servers: &[&str], timeout: Duration) -> Option<i64> {
 }
 
 /// Tek sunucuya SNTP sorgusu -> ofset (unix ms).
-/// ofset = ((t2 - t1) + (t3 - t4)) / 2  (t1: gönderim, t2: sunucu alımı,
+/// ofset = ((t2 - t1) + (t3 - t4)) / 2 (t1: gönderim, t2: sunucu alımı,
 /// t3: sunucu gönderimi, t4: yerel alım)
 pub fn ntp_offset_ms(server: &str, timeout: Duration) -> anyhow::Result<i64> {
     let sock = UdpSocket::bind("0.0.0.0:0")?;
@@ -101,7 +101,7 @@ fn read_ntp_ts(b: &[u8]) -> i64 {
     (secs - NTP_UNIX_EPOCH_DELTA) * 1000 + ((frac * 1000) >> 32)
 }
 
-// ---- Gecikme ölçümü ----
+// --- Gecikme ölçümü ----
 
 /// Senkron işlem süresi ölçümü
 pub fn measure<T>(f: impl FnOnce() -> T) -> (T, Duration) {

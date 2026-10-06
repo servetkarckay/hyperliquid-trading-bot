@@ -67,7 +67,7 @@ pub fn solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
         .collect();
 
     for col in 0..n {
-        // pivot seç
+ // pivot seç
         let mut pivot = col;
         for r in col + 1..n {
             if m[r][col].abs() > m[pivot][col].abs() {
@@ -88,7 +88,7 @@ pub fn solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             }
         }
     }
-    // geri substitüsyon
+ // geri substitüsyon
     let mut x = vec![0.0; n];
     for i in (0..n).rev() {
         let mut s = m[i][n];
@@ -179,7 +179,7 @@ pub fn ols(x: &[Vec<f64>], y: &[f64]) -> Option<OlsResult> {
         .collect();
     let beta = solve(&xtx, &xty)?;
 
-    // fitted + residuals
+ // fitted + residuals
     let mut rss = 0.0;
     let mut tss = 0.0;
     let ybar = y.iter().sum::<f64>() / n as f64;
@@ -191,7 +191,7 @@ pub fn ols(x: &[Vec<f64>], y: &[f64]) -> Option<OlsResult> {
     let df = (n - k) as i64;
     let sigma2 = if df > 0 { rss / df as f64 } else { 0.0 };
     let xtx_inv = inverse(&xtx)?;
-    // SE(beta_j) = sqrt(sigma2 * diag((X'X)^-1)_jj)
+ // SE(beta_j) = sqrt(sigma2 * diag((X'X)^-1)_jj)
     let se: Vec<f64> = (0..k)
         .map(|j| (sigma2 * xtx_inv[j][j]).sqrt())
         .collect();

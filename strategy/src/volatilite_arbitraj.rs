@@ -1,9 +1,9 @@
 //! VOLATİLİTE ARBİTRAJI — VRP (vol risk premium) katmanı.
 //!
 //! 1. IV feed bağlıyken GERÇEK VRP = IV − RV30: VRP>0 → Short (vol
-//!    satışı lehine), VRP<0 → Long; güç (|VRP|/(IV·0.5)).min(0.7).
+//! satışı lehine), VRP<0 → Long; güç (|VRP|/(IV·0.5)).min(0.7).
 //! 2. IV yok: yerel RV terim yapısı proxy (10-bar/100-bar) — yalnız
-//!    Hold NOTU, yön üretmez; **SAHTE IV ÜRETİLMEZ**.
+//! Hold NOTU, yön üretmez; **SAHTE IV ÜRETİLMEZ**.
 //! 3. Durum: IV'süz → DATA-MISSING (raporda ayrışır); IV'li → ACTIVE.
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
@@ -16,7 +16,7 @@ impl Strategy for VolatiliteArbitraj {
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
-        // harici IV varsa gerçek VRP
+ // harici IV varsa gerçek VRP
         if let Some(iv) = input.iv {
             let c = closes(&input.candles);
             if c.len() < 60 {
@@ -34,7 +34,7 @@ impl Strategy for VolatiliteArbitraj {
             return Signal::Long { strength: ((-vrp) / (iv * 0.5)).min(0.7), note: format!("VRP negatif: IV < RV — vol alışı lehine") };
         }
 
-        // IV yoksa yerel terim yapısı proxy (RV kısa/uzun oranı)
+ // IV yoksa yerel terim yapısı proxy (RV kısa/uzun oranı)
         let c = closes(&input.candles);
         if c.len() < 120 {
             return Signal::Skip { reason: ">=120 mum gerekli (RV terim yapısı)".into() };
@@ -55,8 +55,8 @@ impl Strategy for VolatiliteArbitraj {
         }
     }
 
-    /// IV feed bağlı değilken GERÇEK VRP üretilemez → `DATA-MISSING`.
-    /// (SAHTE IV ÜRETMEZ: yerel RV proxy yalnız bilgi notudur, skor üretmez.)
+ /// IV feed bağlı değilken GERÇEK VRP üretilemez → `DATA-MISSING`.
+ /// (SAHTE IV ÜRETMEZ: yerel RV proxy yalnız bilgi notudur, skor üretmez.)
     fn status(&self, input: &MarketInput) -> StratStatus {
         if input.iv.is_none() {
             StratStatus::DataMissing
@@ -71,7 +71,7 @@ mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
 
-    /// Salınımlı seri (RV > 0 gerçekçi)
+ /// Salınımlı seri (RV > 0 gerçekçi)
     fn osc(n: usize, a: f64) -> Vec<data::Candle> {
         (0..n)
             .map(|i| {
@@ -81,10 +81,10 @@ mod audit_tests {
             .collect()
     }
 
-    /// A — VRP: IV > RV30 → vol satışı lehine → Short; IV < RV → Long.
+ /// A — VRP: IV > RV30 → vol satışı lehine → Short; IV < RV → Long.
     #[test]
     fn vrp_iv_varken_yon_dogru() {
-        // RV ~%70 yıllık (a=0.7, 1h barlar), IV %65 → VRP<0 → Long
+ // RV ~%70 yıllık (a=0.7, 1h barlar), IV %65 → VRP<0 → Long
         let iv = MarketInput { coin: "T".into(), candles: osc(70, 0.7), iv: Some(0.65), ..Default::default() };
         match VolatiliteArbitraj.evaluate(&iv) {
             Signal::Long { strength, note } => {
@@ -93,7 +93,7 @@ mod audit_tests {
             }
             other => panic!("IV< RV → Long beklenirdi: {other:?}"),
         }
-        // IV %300 > RV %70 → VRP>0 → Short (vol satışı lehine)
+ // IV %300 > RV %70 → VRP>0 → Short (vol satışı lehine)
         let iv2 = MarketInput { coin: "T".into(), candles: osc(70, 0.7), iv: Some(3.0), ..Default::default() };
         match VolatiliteArbitraj.evaluate(&iv2) {
             Signal::Short { strength, note } => {
@@ -104,8 +104,8 @@ mod audit_tests {
         }
     }
 
-    /// D — IV yok → yönlü VRP ÜRETİLMEZ (yerel proxy yalnız Hold notu;
-    /// SAHTE IV ÜRETİLMEZ) + durum DATA-MISSING.
+ /// D — IV yok → yönlü VRP ÜRETİLMEZ (yerel proxy yalnız Hold notu;
+ /// SAHTE IV ÜRETİLMEZ) + durum DATA-MISSING.
     #[test]
     fn vrp_iv_yokken_sahte_vrp_uretmez() {
         let c = osc(130, 0.7);
