@@ -179,6 +179,11 @@ impl AllocationManager {
         atr_pct: f64,
         score_abs: f64,
     ) -> f64 {
+// **NORMALİZASYON NOTU (bilinçli ayrım)**: ensemble skoru YALNIZ oy
+                // verenlerin ağırlıklarıyla normalize eder ("sinyal ne kadar
+                // güçlü?"); tahsisin `share`'i TÜM strateji ağırlıklarını
+                // denominator yapar ("sermayenin yüzde kaçı bu yönde?").
+                // İki farklı SORU — kasıtlı katman ayrımı.
  // ensemble sermayesinin ne kadarı bu yöne oy veriyor (0..1)
         let share = (w_sum / w_total.max(1e-9)).clamp(0.0, 1.0);
  // kaç strateji katılıyor: tek güçlü oy = 1.0, 6+ oyuncu = 1.5 (tavan)
@@ -227,7 +232,17 @@ impl AllocationManager {
             .filter(|v| v.dir != Dir::Neutral && v.mid > 0.0)
             .map(|v| {
  // oy ağırlıkları: açık keşif kümesi vs kurulmuş
-                let n_voters = v.voters.len();
+                // BAĞIMSIZLIK DÜZELTMESİ: genişlik ödülü HAM oy sayısına değil,
+                // oyların BİLGİ KÜMESİ sayısına göre — aynı kümeden 5 strateji =
+                // aynı faktörün 5 formülasyonu = 1 bağımsız kanıt.
+                let n_voters_raw = v.voters.len();
+                let distinct_clusters = {
+                    let mut cs = std::collections::HashSet::new();
+                    for n in &v.voters {
+                        cs.insert(strategy::info_cluster(n));
+                    }
+                    cs.len()
+                };
                 let mut kw_sum = 0.0;
                 let mut n_explore = 0usize;
                 for n in &v.voters {
@@ -237,11 +252,11 @@ impl AllocationManager {
                     }
                     kw_sum += w;
                 }
-                let kw = if n_voters == 0 { 0.0 } else { kw_sum / n_voters as f64 };
-                let explorer_share = n_explore as f64 / n_voters.max(1) as f64;
+                let kw = if n_voters_raw == 0 { 0.0 } else { kw_sum / n_voters_raw as f64 };
+                let explorer_share = n_explore as f64 / n_voters_raw.max(1) as f64;
                 let w_total: f64 = v.weights.values().sum::<f64>();
                 let mut conv =
-                    self.conviction(kw_sum, w_total, n_voters, v.atr_pct, v.score.abs());
+                    self.conviction(kw_sum, w_total, distinct_clusters, v.atr_pct, v.score.abs());
  // karıştırıcılık cezası: keşif oyu inandırıcılığı düşürür
                 conv *= 1.0 - self.cfg.explore_discount * explorer_share;
                 let atr_usd = v.atr_pct * v.mid;
@@ -912,5 +927,53 @@ mod ev_tests {
  // tp_dist = 2*1 = 2, min = 2*1 = 2 → TP daima 2×risk
         let tp = am.tp_from_entry(Dir::Long, 100.0, 1.0);
         assert!((tp - 102.0).abs() < 1e-9, "TP = entry + 2×risk = 102");
+    }
+}
+
+
+#[cfg(test)]
+mod cluster_tests {
+    use super::*;
+
+    /// BAĞIMSIZLIK DÜZELTMESİ: aynı bilgi kümesinden gelen oylar genişlik
+    /// ödülünü ÇOĞALTMAZ (aynı faktörün farklı formülasyonları).
+    #[test]
+    fn ayni_kume_genislik_odulu_cogaltmaz() {
+        let am = AllocationManager::new(AllocationConfig::default());
+        let mk = |coin: &str, voters: Vec<&str>| Vote {
+            coin: coin.into(),
+            dir: Dir::Long,
+            score: 0.5,
+            voters: voters.iter().map(|v| v.to_string()).collect(),
+            weights: voters.iter().map(|v| (v.to_string(), 1.0)).collect(),
+            explore: std::collections::HashSet::new(),
+            atr_pct: 0.01,
+            mid: 100.0,
+        };
+        // 3 oy — AYNI küme (Trend): Wyckoff, Dow, Turtle
+        let ayni = am.allocate(vec![mk("BTC", vec!["Wyckoff", "Dow", "Turtle"])], &|_, _| 0.0, 300.0);
+        // 3 oy — AYRI kümeler: Wyckoff (Trend), LOB (OrderFlow), Carry
+        let ayri = am.allocate(vec![mk("BTC", vec!["Wyckoff", "LOB Emir Akışı", "Carry"])], &|_, _| 0.0, 300.0);
+        assert_eq!(ayni[0].votes, 3);
+        assert_eq!(ayri[0].votes, 3);
+        // AYRI küme daha YÜKSEK conviction (bağımsız kanıt daha değerli):
+        // breadth = 1 + 0.1×(küme sayısı − 1) → aynı küme 3 oy = 1.0, ayrı = 1.2
+        assert!(
+            ayri[0].conviction > ayni[0].conviction,
+            "aynı kümeden oylar genişlik ödülü almamalı: aynı={:.4} vs ayrı={:.4}",
+            ayni[0].conviction, ayri[0].conviction
+        );
+        // küme haritası tutarlı + DÜRÜST: 18 stratejinin hepsi eşlenmeli VE
+        // haritalar dokümante edilmiş kümelerle birebir (harita bozulursa —
+        // hepsi tek kümeye eşlenirse — bağımsızlık düzeltmesi sessizce ölü olur)
+        let distinct: std::collections::HashSet<strategy::InfoCluster> =
+            strategy::registry_names().iter().map(|n| strategy::info_cluster(n)).collect();
+        assert!(
+            distinct.len() >= 7,
+            "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi ölü olur): {}",
+            distinct.len()
+        );
+        assert_eq!(strategy::info_cluster("Kelly Sizing"), strategy::InfoCluster::Sizing);
+        assert_eq!(strategy::info_cluster("Carry"), strategy::InfoCluster::Carry);
     }
 }

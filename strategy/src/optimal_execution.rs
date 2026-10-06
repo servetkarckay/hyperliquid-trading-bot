@@ -5,6 +5,11 @@
 //! notta. `order_size_usd ≤ 0` → Skip (engine tahsis sonrası planladığı
 //! için evaluation'a beslenemez — strateji AUXILIARY işaretli, sessiz
 //! ölü değil).
+//!
+//! **BİLİNCİ Lİ SINIR (ölü entegrasyon yolu)**: etkin yol (a) parent-order
+//! planner'ının motor sonrası bağlanması veya (b) modülün araştırma
+//! ayrımına taşınmasıdır; bugün registry'de AUXILIARY + raporda öyle
+//! görünür — sahte alpha kanıtı ÜRETMEZ.
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 

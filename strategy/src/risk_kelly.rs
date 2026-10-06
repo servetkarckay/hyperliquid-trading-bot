@@ -6,6 +6,8 @@
 //! gibi gösteriyordu).
 //! 2. Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle kanıtlı);
 //! not yalnız boyut ÖNERİSİdir.
+//! 3. Kapsam: **PORTFÖY-DÜZEY advisory** — coin/strateji-özel Kelly
+//! DEĞİLDİR; tracker'ın toplam canlı kanıt pencerisinden okunur.
 use crate::{MarketInput, Signal, StratStatus, Strategy};
 use math::portfolio;
 

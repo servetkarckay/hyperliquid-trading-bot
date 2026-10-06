@@ -28,9 +28,13 @@ impl Strategy for KlasikIndikatorler {
  // I — SİMETRİ DÜZELTMESİ: dip alım ödülü (+1) ile aşırı alım cezası
  // eşit ağırlıkta (eski kod: aşırı alım −0.5, OBV aşağı kolü YOK →
  // Short skoru yapısal ulaşılmazdı = gizli Long yanlılığı).
-        let rsi = indicators::rsi(&c, 14).last().and_then(|v| *v).unwrap_or(50.0);
-        if (30.0..50.0).contains(&rsi) { score += 1.0; notes.push(format!("RSI {rsi:.0} dip bölge")); }
-        else if rsi > 70.0 { score -= 1.0; notes.push(format!("RSI {rsi:.0} aşırı")); }
+        // KONTRAT: None göstergeler oy KATMAZ. RSI hesaplanamazsa (None)
+        // nötr 50 İLE SAHTE oy yazılmaz — gösterge yok = katkı yok.
+        match indicators::rsi(&c, 14).last().and_then(|v| *v).filter(|v| v.is_finite()) {
+            Some(rsi) if (30.0..50.0).contains(&rsi) => { score += 1.0; notes.push(format!("RSI {rsi:.0} dip bölge")); }
+            Some(rsi) if rsi > 70.0 => { score -= 1.0; notes.push(format!("RSI {rsi:.0} aşırı")); }
+            _ => {}
+        }
 
  // 2) MACD histogram işareti
         let (_, _, hist) = indicators::macd(&c, 12, 26, 9);
@@ -43,7 +47,8 @@ impl Strategy for KlasikIndikatorler {
 
  // 3) Bollinger: alt banda temas -> +1
         let bb = indicators::bollinger(&c, 20, 2.0);
-        if let (Some(_), Some(up), Some(lo)) = bb.last().copied().unwrap() {
+        // PANİK YASAK: seri boşsa oy yok (unwrap yerine Option akışı)
+        if let Some((Some(_), Some(up), Some(lo))) = bb.last().copied() {
             if price <= lo { score += 1.0; notes.push("BB alt banda temas".into()); }
             if price >= up { score -= 1.0; notes.push("BB üst banda temas".into()); }
         }

@@ -8,7 +8,7 @@
 //! 3. `evaluate` (şu anki canlı yol): HL proxy — günlük hacim/OI oranı
 //! raporu; Hold — YÖN ÜRETMEZ (SAHTE temel skor UYDURULMAZ);
 //! ctx yok → Skip.
-use crate::{MarketInput, Signal, Strategy};
+use crate::{MarketInput, Signal, StratStatus, Strategy};
 use data::market_ctx::CtxState;
 
 pub struct DegerYatirim;
@@ -57,6 +57,13 @@ impl Strategy for DegerYatirim {
             }
             None => Signal::Skip { reason: "ctx yok".into() },
         }
+    }
+
+    /// Rapor dürüstlüğü: canlı yol temel feed'i BEKLIYOR (proxy yalnız
+    /// Hold notu) → DATA-MISSING. Aksi halde rapor "ACTIVE" der ama
+    /// strateji gerçek hayatta oy üretmez.
+    fn status(&self, _input: &MarketInput) -> StratStatus {
+        StratStatus::DataMissing
     }
 }
 

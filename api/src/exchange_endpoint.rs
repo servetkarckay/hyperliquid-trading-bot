@@ -118,7 +118,7 @@ pub struct WireOrder {
     pub px: f64,
     pub tif: Tif,
     pub reduce_only: bool,
- /// İstemci tarafı idempotency anahtarı (16 haneli hex).
+ /// İstemci tarafı idempotency anahtarı (0x + 32 hane hex (128-bit)).
  ///
  /// `signing::post` 429/5xx'te isteği **yeniden gönderiyor**. 5xx'te
  /// istek borsada İŞLENMİŞ olabilir ama yanıt kaybolmuştur; retry aynı

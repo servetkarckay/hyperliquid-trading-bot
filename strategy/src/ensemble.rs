@@ -148,6 +148,11 @@ impl Ensemble {
     }
 
  /// Rejim filtresi: engelli rejimde Long/Short kararı nötr'e düşer.
+ ///
+ /// TrendBoost — **yalnız skor çarpanıdır**: `dir`/eşik kararı combine'da
+ /// verilmiştir ve burada YENİDEN HESAPLANMAZ (0.24 skor × 1.2 = 0.288
+ /// olur ama dir nötr KALIR — boost eşiği geçirmez; bilinçli sınır,
+ /// "trendde eşiği düşür" anlamı YOKTUR).
     pub fn apply_regime(&self, cs: ConsensusSignal, gate: RegimeGate) -> ConsensusSignal {
         match gate {
             RegimeGate::Open => cs,

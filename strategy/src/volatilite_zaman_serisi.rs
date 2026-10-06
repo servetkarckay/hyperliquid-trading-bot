@@ -1,7 +1,9 @@
 //! VOLATİLİTE ZAMAN SERİSİ — GARCH(1,1) koşullu vol sıkışması.
 //!
 //! 1. GARCH(1,1) deterministik fit → σ_next / σ_long-run oranı.
-//! 2. Oran <0.85 (sıkışma) + kısa momentum işareti → Long/Short
+//! 2. **METODOLOJİ NOTU**: bu saf GARCH stratejisi DEĞİL — vol sıkışması
+//!    + 24-bar momentum KOMPOZİTİDİR; tracker'da ayrı alpha kümesi.
+//! 3. Oran <0.85 (sıkışma) + kısa momentum işareti → Long/Short
 //! [(0.85−ratio)×2, ≤0.7] — genişleme + yön.
 //! 3. <200 mum veya varyans bozuk → Skip (SAHTE tahmin yok).
 use crate::{closes, MarketInput, Signal, Strategy};

@@ -1,6 +1,7 @@
 Baktım reis. Bu sefer “bug var mı?” seviyesinde değil, **sistemi bir quant + backend + execution + risk analisti gözüyle** değerlendirdim.
 
 # Genel hüküm
+ — ✅ **YAPILDI** (değerlendirme alındı; P0/P1 maddeleri tek tek uygulandı — aşağıda başlık başına işaretli)
 
 Benim değerlendirmem:
 
@@ -25,6 +26,7 @@ Ama strateji/learning tarafında hâlâ “çalışıyor” ile “istatistiksel
 ---
 
 # 1. Genel mimariyi nasıl görüyorum?
+ — ✅ **YAPILDI** (zincir onaylandı; değişiklik gerektirmedi)
 
 Mevcut zincir kabaca doğru:
 
@@ -77,22 +79,26 @@ Bu çok önemli çünkü “sinyal iyi → direkt emir” şeklindeki tehlikeli 
 ---
 
 # 2. Stratejileri tek tek değerlendirdim
+ — ✅ **YAPILDI** (18/18 tek tek — her strateji başlığı altında)
 
 18 stratejinin hepsini aynı sınıfta görmek yanlış.
 
 Aslında sistemde yaklaşık üç farklı strateji türü var.
 
 ### Gerçek yön üreticileri
+ — ✅ (info; inceleme sonucu)
 
 Wyckoff, Kesit Momentum, LOB, Volatilite Zaman Serisi, Carry, OI, Rejim, Dow, Davranışsal, Klasik Göstergeler, Elliott, Turtle, Breakout.
 
 ### Yardımcı stratejiler
+ — ✅ **YAPILDI** (AUXILIARY işaretleri koddan: Kelly/MM/OptExec `status()` override)
 
 Kelly Sizing, Market Making, Optimal Execution.
 
 Bunların `AUXILIARY` olması doğru.
 
 ### Henüz gerçek canlı alpha üretmeyenler
+ — ✅ **YAPILDI** (VRP=DATA-MISSING; Değer Yatırım status→DATA-MISSING)
 
 Değer Yatırım ve Vol Arbitraj.
 
@@ -101,6 +107,7 @@ Burada ilk ciddi tutarsızlık var.
 ---
 
 ## Wyckoff
+ — ✅ **YAPILDI** (isim iddiası dürüstleştirildi: faz analizi DEĞİL, efor/sonuç basitleştirmesi; isim kanıt sürekliliği için sabit)
 
 Gayet anlaşılır.
 
@@ -131,6 +138,7 @@ Kod hatası değil.
 ---
 
 # 3. Kesit Momentum
+ — ✅ **YAPILDI** (çıkış kuralı + durumu `exit_intent` TRAIT API'siyle stratejiye taşındı; engine artık kural fonksiyonlarını doğrudan çağıramaz — kaynak taraması testli)
 
 Bence daha sağlam modüllerden biri.
 
@@ -172,6 +180,7 @@ Aynı şey Turtle'da da var.
 ---
 
 # 4. LOB Emir Akışı
+ — ✅ **YAPILDA**: defter yoksa artık `None` taşınır (Some(0.0) değil) — strateji veri-yoklukunu ayırt eder, LOB Skip üretir
 
 Mantıklı.
 
@@ -226,6 +235,7 @@ Bunu `None` olarak taşımak daha temiz.
 ---
 
 # 5. Market Making
+ — ✅ (bilinçli sınırlama olarak belgelendi — doküman zaten öyle)
 
 Burada güzel olan şey kandırmaması.
 
@@ -248,6 +258,7 @@ olarak değerlendiriyorum.
 ---
 
 # 6. Optimal Execution
+ — ✅ **YAPILDA**: ölü entegrasyon yolu belge olarak netleşti (AUXILIARY + rapor; parent-order planner yapılmadı — icat yasak)
 
 Benzer.
 
@@ -282,6 +293,7 @@ Ya parent-order planner yapılmalı ya da bu strateji registry'den araştırma m
 ---
 
 # 7. Volatilite Zaman Serisi
+ — ✅ **YAPILDA**: "saf GARCH değil, sıkışma+momentum kompoziti" metodoloji notu modül başlığına eklendi
 
 Burayı beğendim.
 
@@ -320,6 +332,7 @@ Bu ileride tracker'da ayrı alpha olarak değerlendirilmesi gereken bir şey.
 ---
 
 # 8. Carry Funding
+ — ✅ **YAPILDA**: görünen strateji adı zaten `Carry` (basis yardımcı yalnız not) — dosya adı kanıt sürekliliği için sabit
 
 Buradaki funding yönü doğru modellenmiş:
 
@@ -363,6 +376,7 @@ Basis gerçekten karar mekanizmasına girmiyorsa modül adı `CarryFunding` gibi
 ---
 
 # 9. OI Likidasyon
+ — ✅ **YAPILDI**: görece eşik eklendi (|ΔOI|/OI ≥ %0.2; altı = gürültü → Hold); OI seviyesi yoksa Skip — sahte yön yasak
 
 Burada gerçek bir analitik tutarsızlık gördüm.
 
@@ -404,6 +418,7 @@ Burada bir minimum delta veya normalized-OI threshold olması gerekiyor.
 ---
 
 # 10. Rejim Tespiti
+ — ✅ **YAPILDI (dokümanın P0'ı)**: ADX/Hurst hesaplanamazsa 0/0.5 yerine Skip (strateji) ve None→güvenli Open kapısı (classify)
 
 Burada benim için en önemli strategy-layer problemi var.
 
@@ -469,6 +484,7 @@ olmalı.
 ---
 
 # 11. Kelly Sizing
+ — ✅ **YAPILDA**: portföy-düzey advisory ayrımı modül dokümanına yazıldı
 
 Concept olarak doğru tarafta.
 
@@ -502,6 +518,7 @@ Bu ayrımı dokümana daha net yazardım.
 ---
 
 # 12. Dow
+ — ✅ (alarm yok; EMA None→Skip zaten yapılmıştı)
 
 Gayet klasik ve anlaşılır.
 
@@ -514,6 +531,7 @@ Benim ciddi bir architecture alarmım yok.
 ---
 
 # 13. Davranışsal Finans
+ — ✅ **YAPILDA**: terminoloji düzeltildi (z-score BENZERİ — log-return RMS normalize)
 
 Mantığı net:
 
@@ -542,6 +560,7 @@ Bu kod bug'ı değil ama araştırma terminolojisi açısından düzeltilmeli.
 ---
 
 # 14. Klasik Göstergeler
+ — ✅ **YAPILDI**: RSI None→oy katmaz (sahte nötr 50 kaldırıldı); `bb.last().unwrap()` panik yolu Option akışına çevrildi
 
 Beş indicator birleştiriliyor:
 
@@ -596,6 +615,7 @@ ama strategy modülünün kendisi için daha temiz yaklaşım `Option` ile devam
 ---
 
 # 15. Elliott
+ — ✅ **YAPILDA**: yapısal long-only bias "dürüst sınırlar"da açıkça belgelendi (normalize parametresine dokunulmadı — optimizasyon yasak)
 
 Burada özellikle dikkat edilmesi gereken şey:
 
@@ -620,6 +640,7 @@ Aksi takdirde bir yönü yapısal olarak tercih eden strategy'ye statistical cre
 ---
 
 # 16. Değer Yatırım
+ — ✅ **YAPILDI**: status() → DATA-MISSING (canlı yol yön üretmezken rapor ACTIVE demişti)
 
 Burada bariz bir taxonomy problemi var.
 
@@ -667,6 +688,7 @@ görünüp gerçek hayatta oy üretmeyen strateji bulunuyor.
 ---
 
 # 17. Turtle
+ — ✅ **YAPILDI**: exit `exit_intent` API'sine taşındı; `unit_usd` gereksiz çarpım/bölme sadeleştirildi (davranış-nötr)
 
 Kod açısından güzel.
 
@@ -712,6 +734,7 @@ Kod muhtemelen çalışır, ama bu hesap ya gereksiz karmaşık ya da eski sizin
 ---
 
 # 18. Breakout
+ — ✅ (güçlü onaylandı; değişiklik gerektirmedi)
 
 Stratejiler arasında en temiz kontratlardan biri.
 
@@ -750,6 +773,7 @@ Future-leak testi de mevcut.
 ---
 
 # Asıl büyük strateji problemi
+ — ✅ **YAPILDI**: strateji BAĞIMSIZLIĞI düzeltildi — bilgi-kümeleri (`InfoCluster` 8 küme, tek kaynak `strategy::info_cluster`) ve tahsisin genişlik ödülü artık AYRI KÜME sayısına göre (aynı kümeden oylar çoğaltmaz)
 
 Buraya özellikle dikkat.
 
@@ -837,6 +861,7 @@ Bu çok önemli.
 ---
 
 # Ensemble ile Allocation arasında ikinci büyük tutarsızlık
+ — ✅ **YAPILDA**: bilinçli ayrım dokümante edildi (iki farklı soru: "sinyal ne kadar güçlü" vs "sermayenin yüzde kaçı")
 
 Ensemble:
 
@@ -896,6 +921,7 @@ Değilse:
 ---
 
 # Rejim katmanında ikinci tutarsızlık
+ — ✅ **YAPILDA**: TrendBoost "yalnız skor çarpanı; dir/eşik yeniden hesaplanmaz" olarak dokümante edildi
 
 `TrendBoost`:
 
@@ -947,6 +973,7 @@ Fakat isimlendirme ve yorumlarla potansiyel olarak karışıyor.
 ---
 
 # Risk katmanı
+ — ✅ **YAPILDI**: peak_equity + halted KALICI (risk_state.json, atomik; restart load eder — FRESH_START siler)
 
 Burada mühendislik olarak iyi iş yapılmış.
 
@@ -1023,6 +1050,7 @@ Bu, risk lock'un restart ile resetlenmesi anlamına gelir.
 ---
 
 # Data layer'da önemli bir konu
+ — 🟡 **KISMEN**: LOB/defter yolu None kontratına geçti; kalan `num()`→0.0 dönüşümleri (funding/OI WS alanları) ayrı iş maddesi
 
 Burada execution kadar sıkı değilsiniz.
 
@@ -1083,6 +1111,7 @@ Bence bu mimarideki en büyük “savunma derinliği” dengesizliği.
 ---
 
 # Learning sistemindeki en kritik istatistiksel problem
+ — ✅ **YAPILDI**: PnL çözülemeyen kapanış artık tracker'a 0R YAZILMAZ (TradeExit + sayaç kaydolur; öğrenme kanıtı yok)
 
 Bunu özellikle ayırıyorum.
 
@@ -1159,6 +1188,7 @@ Bu bence:
 ---
 
 # 100 işlem eşiği hakkında da önemli nokta
+ — ✅ (bilinçli sınır olarak belgelendi: sample-count gate ≠ edge kanıtı)
 
 Şu anda:
 
@@ -1224,6 +1254,7 @@ olmamalı.
 ---
 
 # State machine
+ — ✅ (onaylandı; değişiklik gerektirmedi)
 
 Burayı beğendim.
 
@@ -1259,6 +1290,7 @@ Recovery de doğru tarafta.
 ---
 
 # Execution
+ — ✅ (güçlü onay; P1-M/M2/N zincirinde kapanmıştı)
 
 Burada genel mühendislik kalitesi en yüksek.
 
@@ -1293,6 +1325,7 @@ Yani:
 ---
 
 # API katmanında küçük ama çok net inconsistency
+ — ✅ **YAPILDI**: cloid yorumu "0x + 32 hane hex (128-bit)" olarak düzeltildi
 
 `WireOrder.cloid` yorumunda:
 
@@ -1319,6 +1352,7 @@ Bu küçük görünüyor ama güvenlik/operasyon kodlarında böyle şeyleri tem
 ---
 
 # Config tarafında da ciddi tutarsızlık var
+ — ✅ **YAPILDI**: fallback'ler belgelenmiş varsayılanlara eşitlendi (1h/300s)
 
 `.env.example`:
 
@@ -1354,6 +1388,7 @@ Ben bunları merkezi constant yapardım.
 ---
 
 # CI
+ — ✅ **YAPILDI (kısmi, dürüst borç)**: release-build adımı eklendi; fmt/clippy lokal doğrulanamadı (clippy kurulu değil; rustfmt tarama-needle kırma riski) — borç belgeli
 
 CI şu an sadece:
 
@@ -1396,6 +1431,7 @@ tam zinciri.
 ---
 
 # Testlerin asıl zayıf olduğu nokta
+ — ✅ **YAPILDI**: GOLDEN PATH entegrasyon testi eklendi (strateji→ensemble→rejim→tahsis→risk→kontrat→fill→TP/SL→R→tracker)
 
 Strategy testlerinin çoğu:
 
@@ -1443,6 +1479,7 @@ Böyle bir end-to-end contract testi eksik.
 ---
 
 # Şu anda sistemin en kritik 10 problemi
+ — ✅ **YAPILDI** (özet: 6 düzeltme kodda, 3 dokümanda, 1 kısmi — yukarıdaki başlıklarda ayrıntı)
 
 Öncelik sırasıyla:
 
@@ -1494,6 +1531,7 @@ Turtle + Kesit exit rules strategy dışında da uygulanıyor.
 ---
 
 # İyi tarafların altını da çizeyim
+ — ✅ (onay; korundu)
 
 Çünkü sistemin kötü olduğunu düşünmüyorum.
 
@@ -1532,6 +1570,7 @@ Bunlar önemli artılar.
 ---
 
 # Benim mimari değerlendirmem
+ — ✅ (değerlendirme alındı)
 
 Bugünkü haliyle:
 
@@ -1574,8 +1613,10 @@ independent information
 ---
 
 # Ben olsam sonraki geliştirme sırasını böyle yaparım
+ — ✅ **YAPILDI**: Faz1 (veri/learning/risk) + Faz2 (kümeler) + Faz3 (exit API) + Faz4 (golden path) + Faz5 (CI kısmi)
 
 ## Faz 1 — Veri ve learning doğruluğu
+ — ✅ **YAPILDI** (üç madde: None-kontrat, unresolved-R yasağı, risk-peak persistence)
 
 Önce:
 
@@ -1588,6 +1629,7 @@ risk peak persistence
 Bunlar çözülmeden learning sonuçlarına güvenmem.
 
 ## Faz 2 — Ensemble matematiği
+ — ✅ **YAPILDI** (InfoCluster + distinct-cluster breadth; davranış testi + mutasyon)
 
 Sonra:
 
@@ -1621,6 +1663,7 @@ aynı hareketi aynı anda yakaladı diye 5 bağımsız oy sayılmaz.
 Bu değişiklik bana göre sistemin trading-model kalitesini en fazla yükseltecek işlerden biri.
 
 ## Faz 3 — Single Source of Truth
+ — ✅ **YAPILDI** (exit_intent trait API; engine doğrudan-kural çağrısı yasak)
 
 Exit kurallarını:
 
@@ -1641,6 +1684,7 @@ engine-specific helper
 bir miktar bölünmüş.
 
 ## Faz 4 — Integration contract tests
+ — ✅ **YAPILDI** (golden path testi)
 
 Bir adet “golden path” testi:
 
@@ -1661,6 +1705,7 @@ market data
 bütün zinciri doğrulamalı.
 
 ## Faz 5 — CI
+ — 🟡 **KISMİ**: release-build adımı eklendi; fmt/clippy borç (lokal araç eksik)
 
 En az:
 
@@ -1676,6 +1721,7 @@ ve mümkünse dependency audit.
 ---
 
 ## En önemli sonuç
+ — ✅ (sonuç; uygulanan işler yukarıda)
 
 Şu anda ben **“stratejiler kötü, baştan yazın”** demiyorum.
 

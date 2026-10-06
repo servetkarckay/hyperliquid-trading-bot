@@ -23,3 +23,7 @@ jobs:
       # bir `cargo test` çalıştırılmaz.
       - name: Run tests
         run: cargo test --workspace
+      # Release build kanıtı: üretim binary'si derlenebilir (cargo test
+      # debug'a bakar; release optimize/LTO yolu ayrı kanıt ister).
+      - name: Release build
+        run: cargo build --release --workspace

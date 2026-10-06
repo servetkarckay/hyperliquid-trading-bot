@@ -53,6 +53,12 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => anyhow::bail!("[TESTNET] tracker state silinemedi: {e}"),
             }
+            // 1b) risk hafızası — silinir (yeni deney = yeni drawdown hafızası)
+            match std::fs::remove_file("/root/hyperliquid/config/risk_state.json") {
+                Ok(()) => tracing::info!("[TESTNET] eski risk hafızası temizlendi"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => anyhow::bail!("[TESTNET] risk hafızası silinemedi: {e}"),
+            }
  // 2) eski canlı ağırlık snapshot — silinir (look-ahead'den temiz)
             match std::fs::remove_file(&weights_path) {
                 Ok(()) => tracing::info!("[TESTNET] eski canlı ağırlık snapshot temizlendi: {weights_path}"),
@@ -116,8 +122,10 @@ async fn main() -> anyhow::Result<()> {
         coins.len(),
         universe.spec().describe()
     );
+    // FALLBACK = BELGELENMİŞ varsayılan (1h mum): .env kaybolursa bot
+    // sessizce farklı bir bot (1m/5s) OLMAZ.
     let interval: u64 = std::env::var("ENGINE_INTERVAL")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(3600);
     let min_score: f64 = std::env::var("ENGINE_MIN_SCORE")
         .ok().and_then(|v| v.parse().ok()).unwrap_or(0.30);
     let top_n: usize = std::env::var("ENGINE_TOP_N")
@@ -132,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
  // Döngü periyodu. `ENGINE_INTERVAL` MUM interval'idır (1h stratejisi için
  // 3600) ve döngü periyodunu KONTROL ETMEZ — daha önce 5 sn sabitti.
     let cycle_secs: u64 = std::env::var("ENGINE_CYCLE_SECS")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(300);
     tracing::info!(
         "BOT başlıyor: coins={} bar_interval={interval}s döngü={cycle_secs}s hist_bars={hist_bars} min_score={min_score}",
         coins.len()
@@ -173,6 +181,17 @@ async fn main() -> anyhow::Result<()> {
         trail_min_step,
     };
     let mut engine = Engine::new(cfg.clone(), lc).await?;
+
+    // Risk hafızası KALICI: peak_equity + halted restart'ta yüklenir.
+    // (Yüklenmezse 100→80'de halt eden hesap, restart'ta 80'i yeni peak
+    // kabul ederek drawdown korumasını sıfırlamış olur.)
+    let risk_state_path = std::env::var("RISK_STATE_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/risk_state.json".into());
+    if engine.risk.load_state(&risk_state_path) {
+        tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
+    } else {
+        tracing::info!("[RISK] risk hafızası yok — fresh başlangıç (ilk koşu normal)");
+    }
 
  // WIPE modunda temiz taban — TÜM pozisyonlar kapatılır ve açık
  // emirler iptal edilir (ENGINE_FLATTEN'den bağımsız; bu bir deney

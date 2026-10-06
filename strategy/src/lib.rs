@@ -188,6 +188,17 @@ pub struct ExitIntent {
     pub note: String,
 }
 
+/// Registry stratejilerinin adları (test/rapor için; `registry()`nin
+/// ağırlıksız karşılığı).
+pub fn registry_names() -> Vec<&'static str> {
+    vec![
+        "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
+        "Optimal Execution", "Volatilite Zaman Serisi", "Carry", "OI Likidasyon",
+        "Rejim Tespiti", "Kelly Sizing", "Dow", "Davranışsal", "Klasik Göstergeler",
+        "Elliott", "Değer Yatırım", "Turtle", "Breakout", "Vol Arbitraj (VRP)",
+    ]
+}
+
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(wyckoff::Wyckoff),
@@ -211,6 +222,48 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(volatilite_arbitraj::VolatiliteArbitraj),
         
     ]
+}
+
+/// **BİLGİ KÜMESİ** — stratejilerin aynı temel girdiden türetilmesi
+/// ("18 bağımsız alpha" İLLÜZYONU): fiyat/trend/volume aynı kaynak olan
+/// stratejiler aynı anda aynı yöne oy verdiğinde bu 6 bağımsız kanıt
+/// DEĞİL, aynı faktörün 6 formülasyonudur. Tahsis genişlik ödülü bu
+/// yüzden küme sayısına göre verir (aynı küme = çift sayılmaz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InfoCluster {
+    /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle, Breakout,
+    /// Elliott, Klasik Göstergeler, Rejim Tespiti
+    Trend,
+    /// kontra/ortalama-dönüş: Davranışsal, Değer Yatırım
+    MeanReversion,
+    /// defter/akış: LOB, Market Making, Optimal Execution
+    OrderFlow,
+    /// evren geneli göreli güç: Kesit Momentum
+    CrossSectional,
+    /// funding/basis taşıma: Carry
+    Carry,
+    /// vol modelleri: GARCH, VRP
+    Volatility,
+    /// OI/likidasyon kadransı
+    Liquidation,
+    /// boyut önerisi (yön yok): Kelly
+    Sizing,
+}
+
+/// strateji adı → bilgi kümesi (registry ile birebir; tek kaynak)
+pub fn info_cluster(name: &str) -> InfoCluster {
+    match name {
+        "Kelly Sizing" => InfoCluster::Sizing,
+        "Kesit Momentum" => InfoCluster::CrossSectional,
+        "LOB Emir Akışı" | "Market Making" | "Optimal Execution" => InfoCluster::OrderFlow,
+        "Volatilite Zaman Serisi" | "Vol Arbitraj (VRP)" => InfoCluster::Volatility,
+        "Carry" => InfoCluster::Carry,
+        "OI Likidasyon" => InfoCluster::Liquidation,
+        "Davranışsal" | "Değer Yatırım" => InfoCluster::MeanReversion,
+        // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
+        // Turtle, Breakout, Rejim Tespiti
+        _ => InfoCluster::Trend,
+    }
 }
 
 /// Yaygın yardımcılar

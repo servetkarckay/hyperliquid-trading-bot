@@ -1,6 +1,7 @@
 //! DAVRANIŞSAL FİNANS — aşırı tepki (overreaction) geri alımı.
 //!
-//! 1. 6-bar getiri, 100-bar σ ile normalize (<−2σ / >+2σ) + hacim
+//! 1. 6-bar getiri, 100-bar log-return RMS ile σ-normalize (z-score
+//!    BENZERİ — gerçek std sapma hesabı değil) + hacim
 //! 2× spike'ı tetik koşulu; tetik yok → Hold.
 //! 2. Panik satışı → kontra Long; euphoria → kontra Short; güç
 //! (|σ|/4).min(0.8).

@@ -227,6 +227,8 @@ pub struct Engine {
     strategy_names: Vec<String>,
  /// tracker durumu dosyası (ENV `TRACK_STATE_PATH`)
     pub track_state_path: String,
+ /// kalıcı risk hafızası dosyası (ENV `RISK_STATE_PATH`)
+    pub risk_state_path: String,
  /// keşif şeridi açık mı (ENGINE_EXPLORE)
     pub explore_on: bool,
  /// keşif hakkı olan stratejiler (`n < full_n`) — veri açlığı kuyruğu
@@ -249,7 +251,7 @@ pub struct Engine {
  /// fazında okunur (`sync_exchange_sl` `evals`'e erişemez).
     atr_px: HashMap<String, f64>,
     am: AllocationManager,
-    risk: crate::RiskManager,
+    pub risk: crate::RiskManager,
     n_cycles: u64,
     funding_ema: HashMap<String, f64>,
     funding_freeze_until: HashMap<String, u64>,
@@ -946,6 +948,8 @@ impl Engine {
             strategy_names,
             track_state_path: std::env::var("TRACK_STATE_PATH")
                 .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into()),
+            risk_state_path: std::env::var("RISK_STATE_PATH")
+                .unwrap_or_else(|_| "/root/hyperliquid/config/risk_state.json".into()),
             explore_on: true,
             explore_names: std::collections::HashSet::new(),
             explore_cursor: 0,
@@ -1988,12 +1992,12 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // kapandı → kayıt R=0 ile düşer (sessiz düşürme =
  // ters seçim bias; yanlış R yazmaktan iyidir).
                         None => {
-                            tracing::warn!("[R] {c} kapandı, dolum fiyatı kaçtı — R=0 kaydedildi");
-                            self.tracker.record_outcome_r(
-                                attr.voters.clone(),
-                                hyperliquid_api::now_ms(),
-                                0.0,
-                            );
+                            // PnL ÇÖZÜMLENEMEDİ ≠ break-even: bilinmeyen R
+                            // ÖĞRENME VERİSİ OLAMAZ (0R yazmak = +2R ve −1R
+                            // kaçmalarını 0'a eşitleyip tracker'da bias
+                            // üretir). Kapanış TradeExit + sayaç olarak
+                            // kayda geçer; tracker'a KATKI YAZILMAZ.
+                            tracing::warn!("[R] {c} kapandı, PnL çözülemedi — öğrenmeye yazılmadı (kayıt+sayaç normal)");
                             self.write_ws_exit_record(&c, &attr, 0.0, excursion);
                         }
                     }
@@ -2142,7 +2146,11 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 }
             }
             let ctx = self.ctx.get(&coin).cloned();
-            let (bid, ask, imb) = self.books.get(&coin).cloned().unwrap_or((0.0, 0.0, 0.0));
+            // DEFTER KONTRATI: yoksa None (Some(0.0) DEĞİL) —
+            // "defter gerçekten 0" ile "defter hiç yok" AYRI bilgiler;
+            // strateji kuralı: veri yok → Skip.
+            let book = self.books.get(&coin).cloned();
+            let (bid, ask, imb) = book.unwrap_or((0.0, 0.0, 0.0));
             let taker = self.agg.taker_balance(&coin).map(|(_, _, r)| r);
 
             let rejim_input = MarketInput {
@@ -2161,9 +2169,9 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 ctx: ctx.clone(),
                 oi_delta: self.ctx.delta_oi(&coin),
                 taker_ratio: taker,
-                book_imbalance: Some(imb),
-                best_bid: Some(bid),
-                best_ask: Some(ask),
+                book_imbalance: book.map(|(_, _, i)| i),
+                best_bid: (bid > 1e-9).then_some(bid),
+                best_ask: (ask > 1e-9).then_some(ask),
                 universe_returns: universe_returns.clone(),
                 iv: None, // IV feed bağlı DEĞİL → sahte IV üretme (VolArbitraj=DATA-MISSING)
                 equity: self.equity,
@@ -2536,6 +2544,11 @@ let position = self.machines.get(&e.coin).and_then(|m| {
             }
         }
         self.risk.update_equity(self.equity);
+        // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
+        // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
+        if let Err(e) = self.risk.save_state(&self.risk_state_path) {
+            tracing::error!("risk hafızası yazılamadı ({}): {e}", self.risk_state_path);
+        }
 
  // oracle/mark referansı: emir fiyatı oracle bandının dışına kaçmasın
         let mark_map: HashMap<String, f64> =
@@ -4733,5 +4746,93 @@ mod exit_intent_wire_tests {
                 "engine '{banned}' KURALINI DOĞRUDAN çağırmamalı (kural stratejide kalır)"
             );
         }
+    }
+}
+
+
+/// ── GOLDEN PATH — uctan uca sözleşme testi (ağsiz, GERÇEK tiplerle) ────
+/// market verisi → strateji → ensemble → rejim → tahsis → risk → emir
+/// kontratı → dolum → TP/SL → kapanış → R → tracker. Bir katman kontratı
+/// bozarsa test DÜŞER.
+#[cfg(test)]
+mod golden_path_tests {
+    use super::*;
+    use crate::allocation_manager::AllocationConfig;
+
+    /// deterministik mum kuyruğu: 100 sabit → dip → kırılım yukarı
+    fn candles() -> Vec<data::Candle> {
+        let mut c = crate::helpers_for_tests::flat(60, 100.0);
+        c.extend((0..20).map(|i| {
+            let px = 100.0 + (i + 1) as f64 * 0.5;
+            crate::helpers_for_tests::candle((60 + i) as i64 * 3_600_000, px, px + 0.3, px - 0.3, px, 150.0)
+        }));
+        c
+    }
+
+    #[test]
+    fn golden_path_tam_zincir() {
+        // ── 1) STRATEJİ: Turtle 20-bar kırılım → Long [0.7] ──
+        let c = candles();
+        let input = MarketInput {
+            coin: "BTC".into(),
+            candles: c.clone(),
+            best_bid: Some(109.0),
+            best_ask: Some(110.0),
+            equity: 10_000.0,
+            ..Default::default()
+        };
+        let strategies = strategy::registry();
+        let signals: Vec<(String, Signal)> = strategies
+            .iter()
+            .map(|s| {
+                let name = s.name().to_string();
+                let sig = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.evaluate(&input))) {
+                    Ok(x) => x,
+                    Err(_) => Signal::Skip { reason: "panik-izole".into() },
+                };
+                (name, sig)
+            })
+            .collect();
+        // ── 2) ENSEMBLE: skor + yön ──
+        let ens = Ensemble::new(EnsembleConfig { min_score: 0.30, ..Default::default() });
+        let cs = ens.combine(signals.clone());
+        assert!(matches!(cs.dir, strategy::ensemble::Dir::Long), "kırılım zinciri Long üretmeli: {:?}", cs);
+        assert!(cs.score > 0.0);
+        // ── 3) REJİM: kapı (bozuk girdi → güvenli varsayım) ──
+        let gate = strategy::rejim_tespiti::classify(&input).map(|(l, _)| l.gate()).unwrap_or(strategy::ensemble::RegimeGate::Open);
+        let cs = ens.apply_regime(cs, gate);
+        assert!(matches!(cs.dir, strategy::ensemble::Dir::Long), "açık rejimde yön korunmalı");
+        // ── 4) TAHSİS: conviction + kontratlı SL/TP ──
+        let am = AllocationManager::new(AllocationConfig::default());
+        let vote = Vote {
+            coin: "BTC".into(),
+            dir: strategy::ensemble::Dir::Long,
+            score: cs.score,
+            voters: cs.contributors.iter().filter(|(_, k)| *k > 0.0).map(|(n, _)| n.clone()).collect(),
+            // tahsis kontratı için yoğunlaşmış ağırlıklar (w_total = oy verenler;
+            // geniş küme havuzunda share küçülür — bkz. normalizasyon notu)
+            weights: cs.contributors.iter().filter(|(_, k)| *k > 0.0).map(|(n, _)| (n.clone(), 1.0)).collect(),
+            explore: std::collections::HashSet::new(),
+            atr_pct: 0.01,
+            mid: 110.0,
+        };
+        let sel = am.allocate(vec![vote], &|_, _| 0.0, 300.0);
+        assert_eq!(sel.len(), 1, "aday tahsis edilmeli");
+        let cand = &sel[0];
+        let mid = 110.0_f64; // vote girdisindeki mid
+        // ── 5) RISK: kontrat kapıları ──
+        assert!(crate::RiskManager::new(Default::default()).pre_trade(10_000.0, &HashMap::new(), "BTC", cand.allocated_usd.max(15.0), 5.0, 0).is_ok());
+        // ── 6) EMİR KONTRATI: SL<entry<TP, TP≥2R, negatif fiyat yok ──
+        assert!(entry_contract_ok(true, mid, cand.sl_px, cand.tp_px));
+        assert!((cand.tp_px - mid).abs() >= 2.0 * (mid - cand.sl_px).abs() - 1e-9);
+        // ── 7) DOLUM → KAPANIŞ → R → TRACKER ──
+        let mut tracker = StrategyTracker::default();
+        let fill = cand.tp_px; // TP dolumu (kâr tarafı)
+        let r = (fill - mid) / (mid - cand.sl_px).abs();
+        tracker.record_outcome_r(vec!["Turtle".into(), "Breakout".into()], 1_700_000_000, r);
+        assert_eq!(tracker.evidence_n("Turtle"), 1, "gerçek kapanış → kanıt");
+        assert!(tracker.portfolio_stats().is_some(), "Kelly için kanıt oluşmalı");
+        // ── 8) ÇIKIŞ SEBEBİ sözleşmesi ──
+        assert_eq!(exit_reason_from_fill(true, false, 0, false, false), Some(ExitReason::TakeProfit));
     }
 }

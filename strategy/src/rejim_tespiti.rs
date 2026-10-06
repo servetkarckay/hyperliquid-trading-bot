@@ -26,8 +26,15 @@ impl Strategy for RejimTespiti {
         let h = input.candles.iter().map(|x| x.h).collect::<Vec<_>>();
         let l = input.candles.iter().map(|x| x.l).collect::<Vec<_>>();
 
-        let adx = indicators::adx(&h, &l, &c, 14).2.last().and_then(|v| *v).unwrap_or(0.0);
-        let hurst = stats::hurst(&c, 20).unwrap_or(0.5);
+        // VERİ DÜRÜSTLÜĞÜ: ADX/Hurst HESAPLANAMAZSA (pencere kısa / seri
+        // dejenere) sahte değer (0/0.5) ile REJİM ÜRETİLMEZ — Skip. Aksi
+        // halde bozuk göstergenin sesi gerçek rejim gibi duyulur.
+        let Some(adx) = indicators::adx(&h, &l, &c, 14).2.last().and_then(|v| *v).filter(|v| v.is_finite() && *v > 0.0) else {
+            return Signal::Skip { reason: "ADX hesaplanamadı — rejim kararı yok".into() };
+        };
+        let Some(hurst) = stats::hurst(&c, 20).filter(|v| v.is_finite()) else {
+            return Signal::Skip { reason: "Hurst hesaplanamadı — rejim kararı yok".into() };
+        };
 
  // vol yüzdelik: son 30 bar vol'un son 200 bar içindeki yeri
         let r = indicators::log_returns(&c);
@@ -100,8 +107,15 @@ pub fn classify(input: &crate::MarketInput) -> Option<(RegimeLabel, String)> {
     let h: Vec<f64> = input.candles.iter().map(|x| x.h).collect();
     let l: Vec<f64> = input.candles.iter().map(|x| x.l).collect();
 
-    let adx = indicators::adx(&h, &l, &c, 14).2.last().and_then(|v| *v).unwrap_or(0.0);
-    let h_ = stats::hurst(&c, 20).unwrap_or(0.5);
+    // VERİ DÜRÜSTLÜĞÜ: bozuk göstergenin sesiyle kapı YÖNETİLMEZ —
+    // ADX/Hurst hesaplanamazsa None → motor güvenli varsayıma (Open) döner;
+    // geçerli hesapla TREND kapısı yalnız gerçek veriyle açılır.
+    let Some(adx) = indicators::adx(&h, &l, &c, 14).2.last().and_then(|v| *v).filter(|v| v.is_finite() && *v > 0.0) else {
+        return None;
+    };
+    let Some(h_) = stats::hurst(&c, 20).filter(|v| v.is_finite()) else {
+        return None;
+    };
     let r = indicators::log_returns(&c);
     let vol30 = |end: usize| -> f64 {
         let w = &r[end - 30..end];

@@ -23,6 +23,19 @@ impl Strategy for OiLikidasyon {
             return Signal::Skip { reason: ">=13 mum gerekli".into() };
         }
         let d_px = c[c.len() - 1] - c[c.len() - 13];
+        // GÖRECE EŞİK: mutlak ΔOI tek başına anlamsız — pencereye göre
+        // ölçekle (|ΔOI| / OI_seviyesi). Eşik altı değişim = gürültü → oy
+        // YAZILMAZ (Hold). OI seviyesi yoksa görece ölçek hesaplanamaz →
+        // Skip (sahte yön yasak).
+        let Some(ctx) = &input.ctx else {
+            return Signal::Skip { reason: "OI seviyesi yok — görece ölçek hesaplanamaz".into() };
+        };
+        let rel_oi = d_oi.abs() / ctx.open_interest.max(1e-12);
+        if !(rel_oi > 0.002) {
+            return Signal::Hold {
+                note: format!("ΔOI pencerenin %{:.2}'inin altında — gürültü, oy yok", rel_oi * 100.0),
+            };
+        }
         let oi_up = d_oi > 0.0;
         let px_up = d_px > 0.0;
 
@@ -44,10 +57,14 @@ mod audit_tests {
     use crate::strat_test_helpers::helpers as H;
 
  /// A — OI↑ + P↑ → Long (trend devam).
-    #[test]
+    fn ctx_oi(oi: f64) -> data::market_ctx::CtxState {
+        data::market_ctx::CtxState { coin: "T".into(), funding: 0.0, open_interest: oi, mark_px: 100.0, oracle_px: 100.0, premium: 0.0, day_ntl_vlm: 1e6, prev_day_px: 100.0, ts: 0 }
+    }
+
     fn oi_up_px_up_long() {
-        let mut candles = H::linear(20, 100.0, 0.5); // fiyat yükseliyor
-        let input = MarketInput { coin: "T".into(), candles, oi_delta: Some(2.0), ..Default::default() };
+        let candles = H::linear(20, 100.0, 0.5); // fiyat yükseliyor
+        // ΔOI=2.0 / OI=400 → görece +%0.5 (eşik %0.2 üstü) → oy
+        let input = MarketInput { coin: "T".into(), candles, oi_delta: Some(2.0), ctx: Some(ctx_oi(400.0)), ..Default::default() };
         match OiLikidasyon.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!(strength >= 0.2 && strength <= 0.8);
@@ -61,17 +78,23 @@ mod audit_tests {
  /// zayıf); OI↓+P↑ → kontra Short (%30 zayıf).
     #[test]
     fn oi_dort_kadrans_yonleri() {
-        let mk = |candles: Vec<data::Candle>, d: f64| MarketInput { coin: "T".into(), candles, oi_delta: Some(d), ..Default::default() };
- // OI↑ + P↓ → Short
+        let mk = |candles: Vec<data::Candle>, d: f64, oi: f64| MarketInput {
+            coin: "T".into(),
+            candles,
+            oi_delta: Some(d),
+            ctx: Some(ctx_oi(oi)),
+            ..Default::default()
+        };
+ // OI↑ + P↓ → Short (ΔOI=2/OI=400 → +%0.5)
         let down = H::linear(20, 110.0, -0.5);
-        assert!(matches!(OiLikidasyon.evaluate(&mk(down, 2.0)), Signal::Short { strength, .. } if strength >= 0.2));
+        assert!(matches!(OiLikidasyon.evaluate(&mk(down, 2.0, 400.0)), Signal::Short { strength, .. } if strength >= 0.2));
  // OI↓ + P↓ → kontra Long (×0.7)
         let down2 = H::linear(20, 110.0, -0.5);
-        let trend_long = match OiLikidasyon.evaluate(&mk(H::linear(20, 100.0, 0.5), 2.0)) {
+        let trend_long = match OiLikidasyon.evaluate(&mk(H::linear(20, 100.0, 0.5), 2.0, 400.0)) {
             Signal::Long { strength, .. } => strength,
             other => panic!("{other:?}"),
         };
-        match OiLikidasyon.evaluate(&mk(down2, -2.0)) {
+        match OiLikidasyon.evaluate(&mk(down2, -2.0, 400.0)) {
             Signal::Long { strength, note } => {
                 assert!((strength - trend_long * 0.7).abs() < 1e-9, "kontra %30 zayıf: {strength} vs {trend_long}");
                 assert!(note.contains("kontra"), "{note}");
@@ -80,7 +103,7 @@ mod audit_tests {
         }
  // OI↓ + P↑ → kontra Short (×0.7)
         let up = H::linear(20, 100.0, 0.5);
-        assert!(matches!(OiLikidasyon.evaluate(&mk(up, -2.0)), Signal::Short { strength, .. } if strength >= 0.14));
+        assert!(matches!(OiLikidasyon.evaluate(&mk(up, -2.0, 400.0)), Signal::Short { strength, .. } if strength >= 0.14));
     }
 
  /// D — ΔOI yoksa Skip (sahte kadrans yasağı).
@@ -88,7 +111,25 @@ mod audit_tests {
     fn oi_veri_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(20, 100.0), oi_delta: None, ..Default::default() };
         assert!(matches!(OiLikidasyon.evaluate(&input), Signal::Skip { .. }));
-        let kisa = MarketInput { coin: "T".into(), candles: H::flat(10, 100.0), oi_delta: Some(1.0), ..Default::default() };
-        assert!(matches!(OiLikidasyon.evaluate(&kisa), Signal::Skip { .. }));
+        // OI seviyesi (ctx) yoksa görece ölçek hesaplanamaz → Skip
+        let no_lvl = MarketInput { coin: "T".into(), candles: H::flat(20, 100.0), oi_delta: Some(1.0), ..Default::default() };
+        assert!(matches!(OiLikidasyon.evaluate(&no_lvl), Signal::Skip { .. }), "OI seviyesi yok → Skip");
+    }
+
+ /// GÖRECE EŞİK: pencerenin %0.2'sinin altındaki ΔOI = gürültü → oy YOK.
+    #[test]
+    fn kucuk_delta_oy_veremez() {
+        // ΔOI=0.5 / OI=4000 → +%0.0125 (eşik %0.2 altı) → Hold
+        let gurultu = MarketInput {
+            coin: "T".into(),
+            candles: H::linear(20, 100.0, 0.5),
+            oi_delta: Some(0.5),
+            ctx: Some(ctx_oi(4000.0)),
+            ..Default::default()
+        };
+        match OiLikidasyon.evaluate(&gurultu) {
+            Signal::Hold { note } => assert!(note.contains("gürültü"), "{note}"),
+            other => panic!("gürültü ΔOI oy veremez (Hold beklenirdi): {other:?}"),
+        }
     }
 }

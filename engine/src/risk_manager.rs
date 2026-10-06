@@ -110,6 +110,54 @@ impl RiskManager {
         self.halted.as_deref()
     }
 
+ /// **Kalıcı risk hafızası** — restart drawdown hafızasını SİFIRLAMAZ:
+ /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.
+ /// (Bu hafızayı kaybetmek, "100→80'de halt, restart'ta 80 yeni peak" tipi
+ /// resetlenmiş risk koruması demektir.)
+    pub fn save_state(&self, path: &str) -> anyhow::Result<()> {
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize)]
+        struct Persisted {
+            peak_equity: f64,
+            current_equity: f64,
+            halted: Option<String>,
+        }
+        let json = serde_json::to_string_pretty(&Persisted {
+            peak_equity: self.peak_equity,
+            current_equity: self.current_equity,
+            halted: self.halted.clone(),
+        })?;
+        if let Some(par) = std::path::Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(par);
+        }
+        let tmp = format!("{path}.tmp");
+        std::fs::write(&tmp, json.as_bytes())?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    pub fn load_state(&mut self, path: &str) -> bool {
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize)]
+        struct Persisted {
+            peak_equity: f64,
+            current_equity: f64,
+            halted: Option<String>,
+        }
+        let Ok(txt) = std::fs::read_to_string(path) else { return false };
+        let Ok(p) = serde_json::from_str::<Persisted>(&txt) else {
+            tracing::error!("risk hafızası BOZUK ({path}) — sıfırdan başlatıldı (uyarı: drawdown hafızası sıfır)");
+            return false;
+        };
+        self.peak_equity = p.peak_equity;
+        self.current_equity = p.current_equity;
+        self.halted = p.halted;
+        if self.halted.is_some() {
+            tracing::error!("risk hafızası yüklendi — trading HALTED (operatör resume gerekli)");
+        }
+        true
+    }
+
  /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
     pub fn resume(&mut self) {
         self.peak_equity = self.current_equity;
@@ -213,5 +261,57 @@ mod tests {
         let r = RiskManager::new(RiskConfig::default());
         assert_eq!(r.max_positions(1_000_000.0, 5), 5, "devasa bakiye bile 5'yi geçmemeli");
         assert_eq!(r.max_positions(0.0, 5), 0, "sıfır bakiyede pozisyon açılmaz");
+    }
+}
+
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    /// Restart drawdown hafızasını SIFIRLAMAZ: 100→80'de halt eden hesap,
+    /// restart'ta peak=80 SANIP (yeni peak) korumasını sıfırlamamalı.
+    #[test]
+    fn restart_peak_hafizasini_sifirlamaz() {
+        let dir = std::env::temp_dir().join("risk-persist-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("risk.json");
+        let path = path.to_str().unwrap();
+
+        let mut r = RiskManager::new(RiskConfig::default());
+        r.update_equity(100.0); // peak=100
+        assert!((r.drawdown_pct(80.0) - 20.0).abs() < 1e-9, "%20 drawdown");
+        r.update_equity(80.0); // halt eşiğine geldi (>= %20)
+        assert!(r.is_halted(), "drawdown halt");
+        r.save_state(path).expect("save");
+
+        // RESTART: yeni RiskManager → yükle
+        let mut r2 = RiskManager::new(RiskConfig::default());
+        assert!(r2.load_state(path), "yüklenmeli");
+        assert_eq!(r2.halt_reason().is_some(), true, "halted kalıcı");
+        // drawdown hafızası: peak hâlâ 100 → 85'te hâlâ halt bölgesi
+        assert!((r2.drawdown_pct(85.0) - 15.0).abs() < 1e-9, "peak=100 korunmalı (80 yeni peak SANILMAZ)");
+        // resume ile peak mevcut equity'ye çekilir
+        r2.update_equity(85.0);
+        r2.resume();
+        assert!(!r2.is_halted());
+        r2.save_state(path).unwrap();
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Bozuk risk hafızası → false (yükleme yapılmaz) + bot sıfırdan başlar
+    /// (uyarı loglu — sessiz varsayım yok).
+    #[test]
+    fn bozuk_risk_hafizasi_yuklenmez() {
+        let dir = std::env::temp_dir().join("risk-persist-bad");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("risk.json");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "{ bozuk").unwrap();
+        let mut r = RiskManager::new(RiskConfig::default());
+        assert!(!r.load_state(path), "bozuk dosya yüklenmez");
+        assert!(!r.is_halted());
+        assert_eq!(r.halt_reason(), None);
+        let _ = std::fs::remove_file(path);
     }
 }
