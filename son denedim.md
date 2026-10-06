@@ -216,3 +216,83 @@ Ama şu an hâlâ düzeltilmesi gerekenler:
 Ve en önemli nokta: **strategy clustering gerçekten kodda uygulanmış; önceki “18 strategy bağımsız alpha gibi sayılıyor” eleştirimi artık aynı şiddette yapmıyorum.** Güncel allocation testinde aynı cluster'daki üç oy ile üç farklı cluster'daki üç oyun farklı conviction üretiliyor. Bu, önceki mimari açığın gerçek kod seviyesinde kapatıldığını gösteriyor. 
 
 Ben şu an bu branch'i **“önceki haline göre ciddi biçimde temizlenmiş ve testnet learning'e girebilecek mühendislik seviyesinde, ama dokümantasyon/data-contract tarafında birkaç son borcu olan sürüm”** olarak değerlendiriyorum.
+
+---
+
+# Son değişikliklerin uygulama kaydı (yukarıdaki borçlar kapatıldı)
+
+Bu bölüm, senin son incelemedeki "düzeltilmesi gerekenler" listesinin
+kapanış kaydıdır. Tüm maddeler kodda, doğrulanabilir şekilde.
+
+## Kapanış tablosu
+
+```text
+🔴 P1  FRESH_START → hard-coded risk_state path   ✅ KAPANDI (commit d2001bb)
+🟠 P1  Data parse failure → 0.0 dönüşümleri       ✅ KAPANDI (commit d2001bb)
+🟠 P2  docs stale (test/status)                   ✅ KAPANDI (commit d2001bb)
+🟡 P2  .env.example'da RISK_STATE_PATH eksik      ✅ KAPANDI (commit d2001bb + .env senkron)
+🟡     Son master CI henüz sonuçlanmış değil      ✅ SONUÇLANDI: P1-P ve P1-Q CI success;
+                                                  P1-R (360dd82) koşuda — bkz. aşağı
+```
+
+## Nasıl kapatıldı (başlık başına)
+
+### 🔴 FRESH_START hard-coded risk path
+
+`engine/src/bin/bot.rs`: `risk_state_path` artık bootstrap'in **en başında**
+`RISK_STATE_PATH` env'inden çözülür; WIPE dalı **aynı çözülen yolu** siler.
+Önceki hata: wipe `"/root/hyperliquid/config/risk_state.json"`'a hard-coded'ken
+normal yükleme env'den okuyordu — custom path'te fresh reset risk hafızasını
+silemezdi. Şimdi wipe ve load aynı değişkenden.
+
+### 🟠 Data parse failure → 0.0
+
+İki katmanda da dürüstlük kontratı:
+
+- `data/src/aggregator.rs` (backfill): parse edilemeyen/NaN mum **0.0 ile
+  saklanmaz** — o bar **düşürülür** (`o/h/l/c` hepsi finite olmalı; `continue`).
+  0.0 mum ATR/RSI'yi zehirliyordu; düşürülen bar = dürüst boşluk.
+- `data/src/market_ctx.rs` (REST snapshot): alan parse edilemezse **0.0
+  YAZILMAZ** — son bilinen değer korunur (UNKNOWN ≠ geçerli sıfır; bayat veri
+  dürüsttür). `funding / openInterest / markPx / oraclePx / premium /
+  dayNtlVlm / prevDayPx` hepsi finite filtreli.
+
+### 🟠 docs stale
+
+`docs/SISTEM-MIMARISI.md`: test sayıları **engine 164 + api 5 + data 9 +
+strategy 69 = 246 PASS / 0 FAIL**; strateji durum tablosu **ACTIVE 14,
+DATA-MISSING = Vol Arbitraj + Değer Yatırım**; ENV tablosuna
+`RISK_STATE_PATH` satırı eklendi.
+
+### 🟡 .env.example / .env
+
+- `.env.example`: `RISK_STATE_PATH=config/risk_state.json` (kural açıklamasıyla).
+- `.env`: aynı satır senkronlandı (kullanıcı isteği: iki dosya aynı yapıda).
+
+### 🟡 CI
+
+- `46288fd` (P1-P): CI **success**.
+- `d2001bb` (P1-Q): CI **success** (4m07s).
+- `360dd82` (P1-R): koşuyor (yeni committe tek değişiklik script'te — test
+  sonucunu değiştirmez).
+
+## P1-R: bu incelemeyi takip eden son kullanıcı kararı
+
+**`scripts/start_bot.sh`'dan `timeout 604800` KALDIRILDI** (commit `360dd82`).
+Gerekçe: sabit üst sınır öğrenme dönemini yine kesebilir (P1-N'de 8 saatlik
+timeout botu 8/100'de öldürmüştü; 7 gün de bir kesindir). Bot artık nohup ile
+süresiz çalışır; durdurma kararı kullanıcıda.
+
+Aynı commit aralığında: `.env` senkronu + botun son kodla restart'ı.
+
+## Canlı doğrulama (2026-10-06 12:33, PID 582420 — timeout'suz)
+
+```text
+12:33:38 INFO [RISK] hafıza yüklendi: config/risk_state.json   ← risk hafızası boot'ta YÜKLENİYOR
+12:30:01 [TP] ARB/APE/SUI TP oid BORSADAN GERİ YÜKLENDİ        ← pozisyon devri sağlam
+epoch: 15 /100 Learning                                        ← sayaç korunuyor
+release build: 0 error · cargo test --workspace: 246 passed / 0 failed
+```
+
+Not: önceki restart (12:24) 11:40 tarihli **stale binary** ile çalışmıştı;
+yakalandı, release yeniden derlendi (12:29:57) ve restart edildi.
