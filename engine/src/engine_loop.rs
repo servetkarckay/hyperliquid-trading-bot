@@ -898,7 +898,7 @@ impl Engine {
         let learning_epoch_path = std::env::var("LEARNING_EPOCH_PATH")
             .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
         let learning = match crate::epoch::LearningEpoch::load(&learning_epoch_path) {
-            Some(e) => {
+            Ok(Some(e)) => {
                 tracing::info!(
                     "[TESTNET] öğrenme dönemi sürüyor: {} — completed trades: {}/{}",
                     e.epoch_id,
@@ -907,7 +907,11 @@ impl Engine {
                 );
                 e
             }
-            None => {
+            // Dosya YOK (ilk çalıştırma) → yeni dönem.
+            // Dosya BOZUK → AÇILIŞ DURUR: sessizce yeni epoch açmak işlem
+            // sayacını 0'a sıfırlar (persistence açığı — bozuk dosya
+            // operatör tarafından onarılmalı; atomik yazım zaten tmp+rename).
+            Ok(None) => {
                 let e = crate::epoch::LearningEpoch::new_testnet(
                     hyperliquid_api::now_ms().to_string(),
                     hyperliquid_api::now_ms(),
@@ -922,6 +926,7 @@ impl Engine {
                 );
                 e
             }
+            Err(e) => return Err(e),
         };
 
         Ok(Self {

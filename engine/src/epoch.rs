@@ -146,10 +146,40 @@ impl LearningEpoch {
 
  /// Diskten yükle (restart devamı). Yoksa/bozuksa `None` — çağıran
  /// yeni dönem açar (sessiz varsayım yok: bozuk dosya WARN + yeni epoch).
-    pub fn load(path: &str) -> Option<Self> {
-        let txt = std::fs::read_to_string(path).ok()?;
-        let e: LearningEpoch = serde_json::from_str(&txt).ok()?;
-        Some(e)
+    /// Diskten yükle — **teşhisli** (sessiz varsayım yok):
+    ///
+    /// - `Ok(None)`     → dosya YOK (ilk çalıştırma; çağıran yeni dönem açar),
+    /// - `Err(…)`       → dosya VAR ama BOZUK/uyumsuz: çağıran AÇILIŞI
+    ///   DURDURMAK ZORUNDA — sessizce yeni epoch açmak işlem sayacını
+    ///   0'a sıfırlar (persistence açığı).
+    ///
+    /// Doğrulamalar: JSON parse + şema alanları (environment yalnız
+    /// "testnet" — canlı ortam kaydı bu build'de geçersiz).
+    pub fn load(path: &str) -> anyhow::Result<Option<Self>> {
+        let txt = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => anyhow::bail!("öğrenme dönemi dosyası okunamadı ({path}): {e}"),
+        };
+        let e: LearningEpoch = serde_json::from_str(&txt).map_err(|err| {
+            anyhow::anyhow!(
+                "öğrenme dönemi dosyası BOZUK ({path}): {err} — sayaç sıfırlamasın diye                  açılış durduruldu; dosyayı onarın (atomik yazım zaten tmp+rename)"
+            )
+        })?;
+        if e.environment != "testnet" {
+            anyhow::bail!(
+                "öğrenme dönemi dosyası environment=\"{}\" — yalnız \"testnet\" geçerli ({path})",
+                e.environment
+            );
+        }
+        if e.completed_trade_count < e.starting_trade_count {
+            anyhow::bail!(
+                "öğrenme dönemi dosyası tutarsız: completed={} < starting={} ({path})",
+                e.completed_trade_count,
+                e.starting_trade_count
+            );
+        }
+        Ok(Some(e))
     }
 }
 
@@ -211,7 +241,7 @@ mod tests {
         let path = path.to_str().unwrap();
         e.save(path).expect("save");
  // restart: diskten yükle → 57'den devam
-        let e2 = LearningEpoch::load(path).expect("load");
+        let e2 = LearningEpoch::load(path).unwrap().expect("load");
         assert_eq!(e2, e);
         assert_eq!(e2.completed_trade_count, 57);
         assert_eq!(e2.environment, "testnet");
@@ -311,5 +341,82 @@ mod tests {
         assert!(!exits.exists(), "yeni dönem exits'i boş başlar");
         assert!(dir.join(format!("trade_exits.jsonl.{ts}.prev")).exists(), "eski veri ARŞİVLI (silinmedi)");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// Engine::new'in bozuk dosya yolunu SESSİZE çevirmemesi gerekir —
+    /// kaynak taraması: Err dalı `return Err` (propagasyon) İÇERMELİ;
+    /// `new_testnet` çağrısı yalnız `Ok(None)` dalında olmalı.
+    #[test]
+    fn engine_new_corrupt_path_propagates_error() {
+        let prod = include_str!("engine_loop.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+        let seg = prod.split("LearningEpoch::load(&learning_epoch_path)").nth(1).unwrap_or("");
+        let match_body = seg.split("        };").next().unwrap_or("");
+        assert!(
+            match_body.contains("Err(e) => return Err(e)"),
+            "Engine::new bozuk epoch'ta açılışı DURDURMALI (sessiz yeni epoch yasak): {match_body}"
+        );
+        // new_testnet çağrısı YALNIZ Ok(None) dalında:
+        let none_arm = match_body.split("Ok(None) =>").nth(1).unwrap_or("");
+        let none_arm = none_arm.split("Err(e) =>").next().unwrap_or("");
+        assert!(
+            none_arm.contains("new_testnet"),
+            "yeni dönem yalnız dosya-yok dalında açılır"
+        );
+        assert!(
+            !none_arm.contains("return Err"),
+            "dosya-yok dalı hata DÖNDÜRMEZ (ilk çalıştırma normaldir)"
+        );
+    }
+
+    /// PERSISTENCE AÇIĞI DÜZELTMESİ: bozuk epoch dosyası sessizce yeni
+    /// epoch (sayaç 0) ÜRETMEZ — Err döner, çağıran (Engine::new) açılışı
+    /// DURDURUR. (Önceki davranış: `ok()?` zinciri bozuk dosyayı sessizce
+    /// None'a çevirip sayacı sıfırlıyordu.)
+    #[test]
+    fn corrupt_json_does_not_reset_counter() {
+        let dir = std::env::temp_dir().join("epoch-test-corrupt");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("epoch.json");
+        let path = path.to_str().unwrap();
+
+        // (a) dosya YOK → Ok(None) (ilk çalıştırma; yeni dönem açılır — bu YOL güvenli)
+        assert_eq!(LearningEpoch::load(path).unwrap(), None);
+
+        // (b) dosya BOZUK JSON → Err (AÇILIŞ DURUR; sayaç korunur)
+        std::fs::write(path, "{ origin: bozuk").unwrap();
+        let e = LearningEpoch::load(path);
+        assert!(e.is_err(), "bozuk JSON Err dönmeli (sessiz None YASAK)");
+        assert!(e.unwrap_err().to_string().contains("BOZUK"));
+
+        // (c) şema uyumsuz (environment=live) → Err
+        std::fs::write(
+            path,
+            br#"{"epoch_id":"x","environment":"live","started_at":1,"starting_trade_count":0,"completed_trade_count":57,"status":"Learning"}"#,
+        )
+        .unwrap();
+        let e = LearningEpoch::load(path);
+        assert!(e.is_err(), "environment=live reddedilmeli");
+        assert!(e.unwrap_err().to_string().contains("testnet"));
+
+        // (d) sayaç tutarsızlığı (completed < starting) → Err
+        std::fs::write(
+            path,
+            br#"{"epoch_id":"x","environment":"testnet","started_at":1,"starting_trade_count":10,"completed_trade_count":5,"status":"Learning"}"#,
+        )
+        .unwrap();
+        let e = LearningEpoch::load(path);
+        assert!(e.is_err(), "completed < starting reddedilmeli");
+
+        // (e) geçerli dosya → Some + sayaç 57'den devam
+        std::fs::write(
+            path,
+            br#"{"epoch_id":"x","environment":"testnet","started_at":1,"starting_trade_count":0,"completed_trade_count":57,"status":"Learning"}"#,
+        )
+        .unwrap();
+        let loaded = LearningEpoch::load(path).unwrap().expect("geçerli dosya okunmalı");
+        assert_eq!(loaded.completed_trade_count, 57);
+        let _ = std::fs::remove_file(path);
     }
 }
