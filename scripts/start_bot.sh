@@ -32,7 +32,7 @@ export ENGINE_HIST_BARS=4400
 export ENGINE_INTERVAL=3600
 export ENGINE_LEVERAGE=5
 export ENGINE_MIN_SCORE=0.30
-export ENGINE_TOP_N=3
+export ENGINE_TOP_N=30
 export TRAIL_ATR_K=1.5
 export TRAIL_ON=1
 # ENGINE_COINS verilmiyor → tüm aktif evren (tek kaynak: TradingUniverse)

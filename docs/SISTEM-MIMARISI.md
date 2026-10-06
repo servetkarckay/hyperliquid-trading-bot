@@ -457,7 +457,7 @@ anlamsızdır.
 | `ENGINE_COINS` | `all` | evren spesifikasyonu (tek kaynak) |
 | `ENGINE_HIST_BARS` | `4400` | ısınma penceresi |
 | `ENGINE_BUDGET_USD` | `300` | döngü bütçesi |
-| `ENGINE_TOP_N` | `3` | eşzamanlı pozisyon tavanı |
+| `ENGINE_TOP_N` | `30` | eşzamanlı pozisyon tavanı |
 | `ENGINE_MIN_SCORE` | `0.30` | ensemble eşik |
 | `ENGINE_LEVERAGE` | `5` | hesap kaldıracı |
 | `ENGINE_FLATTEN` | `0` | açılışta düzleşme (0 = devral) |
