@@ -181,7 +181,7 @@ normal restart / ENV kaldırıldığında
 | `AUXILIARY` | giriş stratejisi değil (boyut/kote/plan önerisi) | Kelly Sizing, Market Making, Optimal Execution |
 | `DATA-MISSING` | girdisi bağlı değil → Skip; sahte veri yok | Vol Arbitraj (IV feed yok) |
 
-**Dürüst sınırlar** (icat yapılmadı): Elliott SHORT kolu kodda yok (testle kanıtlı); Değer Yatırım temel verisi harici (proxy Hold); likidasyon feed'i yok (OI'dan çıkarımsal); MM emir yolu global IOC TIF ile çelişir (quote planı yalnız not).
+**Dürüst sınırlar** (icat yapılmadı): Elliott SHORT kolu kodda yok (testle kanıtlı); Değer Yatırım temel verisi harici (proxy Hold); likidasyon feed'i yok (OI'dan çıkarımsal); MM emir yolu global IOC TIF ile çelişir (quote planı yalnız not); **"Wyckoff" isim iddiası sınırlıdır** — gerçek Wyckoff analizi (faz sayımı, spring/upthrust, schematics) DEĞİLDİR; model = efor/sonuç prensibinin basitleştirilmiş hâli (trend + hacim eforu + aralık konumu). İsim, öğrenme kanıtının sürekliliği için sabit tutulmuştur.
 
 ---
 

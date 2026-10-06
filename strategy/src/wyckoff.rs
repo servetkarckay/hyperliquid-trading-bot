@@ -1,11 +1,19 @@
-//! WYCKOFF — arz-talep efor/sonuç divergence (birikim/dağıtım).
+//! WYCKOFF — efor/sonuç (effort/result) divergence, basitleştirilmiş model.
+//!
+//! **METODOLOJİK DÜRÜSTLÜK — isim iddiası sınırlıdır:** gerçek Wyckoff
+//! analizi faz sayımı (A–D), spring/upthrust, accumulation/distribution
+//! schematics ve kümülatif hacim profili ister. BU MODEL O DEĞİLDİR —
+//! Wyckoff'un **efor/sonuç prensibinin** (hacim = efor, fiyat = sonuç)
+//! basitleştirilmiş bir uygulanmasıdır: trend + hacim eforu + aralık
+//! konumu. Model, kataloğun bu yuvasında "Wyckoff" adıyla kayıtlıdır
+//! (öğrenme kanıtının sürekliliği için isim sabit kalır).
 //!
 //! 1. Girdi: ≥60 mum + hacim; EMA boş/NaN → Skip (panik yok).
 //! 2. Trend: EMA20/EMA50 işareti; efor = son bar hacmi / 20-bar ortalama.
 //! 3. Sonuç: son 20 barlık aralıkta konum (0=alt, 1=üst).
-//! 4. Divergence: trend↑ + hacim onayı + zirveye yakın değil → Long;
-//! ayna Short; yeni zirve + hacim kurusu → dağıtım Short [0.3];
-//! yeni dip + hacim patlaması → birikim Long [0.5]; karışık → Hold.
+//! 4. Uygulama: trend↑ + hacim onayı + zirveye yakın değil → Long;
+//! ayna Short; yeni zirve + hacim kurusu → dağıtım (satış) Short [0.3];
+//! yeni dip + hacim patlaması → birikim (alım) Long [0.5]; karışık → Hold.
 use crate::{closes, last, volumes, MarketInput, Signal, Strategy};
 use math::indicators;
 
