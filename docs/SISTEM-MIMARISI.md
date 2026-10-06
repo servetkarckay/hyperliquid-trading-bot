@@ -212,7 +212,7 @@ normal restart / ENV kaldırıldığında
 | `ENGINE_BUDGET_USD` | 300 | döngü bütçesi |
 | `ENGINE_TOP_N` / `ENGINE_MIN_SCORE` | 3 / 0.30 | pozisyon tavanı / ensemble eşiği |
 | `ENGINE_LEVERAGE` | 5 | hesap kaldıracı |
-| `ENGINE_FLATTEN` | 1 | açılışta tüm pozisyonları kapat (her restart düzleşir) |
+| `ENGINE_FLATTEN` | 0 | açılışta pozisyon devri (recovery) — düzleşme YOK; her restart pozisyonları korur |
 | `ENGINE_EXPLORE` | 1 | keşif kuyruğu |
 | `ENGINE_CRIT_THRESHOLD` | 5 | kill-switch eşiği |
 | `TRAIL_ON / TRAIL_ATR_K / TRAIL_MIN_STEP` | 1 / 1.5 / 0.25 | trailing stop |
