@@ -1,6 +1,6 @@
 # SISTEM MİMARİSİ — hyperliquid-trading-bot
 
-*Bu doküman 2026-10-05'te sıfırdan yeniden yazıldı; içerik koddan doğrulanmıştır.*
+*Bu doküman 2026-10-06 itibarıyla güncel koddan doğrulanmıştır.*
 
 Testnet'te çalışan, testnet'te çalışan, algoritmik ticaret botu. Amaç **motorun doğruluğu** — kâr iddiası DEĞİL.
 
@@ -114,7 +114,7 @@ TP(LONG) = entry_eff + tp_dist TP(SHORT) = entry_eff − tp_dist
 
 - `entry_eff` = **gerçek dolum** (REST `entryPx`); IOC kayma düzeltmesi `EntryAttr::apply_real_fill` ile tek noktada (giriş + TP yeniden türetme).
 - **TP artık gerçek kapanıştır **: giriş dolumunda reduce-only TP trigger (`tpsl="tp"`, cloid'li) borsaya asılır; fill → `TakeProfit`.
-- Çift emir yasağı: `sl_orders`/`tp_orders` haritaları + `TS_GRACE_MS` grace + `restore_tp_orders` (recon'da borsadan ±%0.1 fiyat eşleşmesiyle oid geri yükleme — körlemesine duplicate yok).
+- Çift emir yasağı: `sl_orders`/`tp_orders` haritaları + `TS_GRACE_MS` grace. TP, deterministik cloid tuzuyla ve gerektiğinde ±%0.1 fiyat eşleşmesiyle geri yüklenir; SL de deterministik cloid veya bilinen seviye eşleşmesiyle tanınır. Tanınmayan reduce-only emirler dedupe edilmez ve yetim temizliğinde iptal edilmez.
 - Trailing : mark tepe/dip ratchet; kural: **önce yeni stop, sonra eski iptal**; `TRAIL_ATR_K=1.5`, `TRAIL_MIN_STEP=0.25`.
 - **Kontrat (G)**: Long `SL < entry < TP`, Short `TP < entry < SL`; TP ≥ 2R; negatif fiyat (dejenere ATR) → **emir yok** (`entry_contract_ok`, 192 kombinasyonlu matris testi).
 
@@ -197,7 +197,7 @@ normal restart / ENV kaldırıldığında
 | Metrikler | gerçek fill verisi; kanıt yoksa None; "%99" yasağı | 2 |
 | Risk invariant | EntryGate denklemi + kaynak taraması; risk-lock | 21 |
 
-`cargo test --workspace`: engine 135 + api 5 + data 9 + strategy 65 = **214 passed / 0 failed** (+1 ignored doc-test). Kalite raporu üç katman ayrıdır: **COMPILES PASS · TESTS PASS · TRADING LOGIC VERIFIED (koşullu: sınırlar 'de)**.
+`cargo test --workspace`: engine 160 + api 5 + data 9 + strategy 65 = **239 passed / 0 failed** (+1 ignored doc-test). Kalite raporu üç katman ayrıdır: **COMPILES PASS · TESTS PASS · TRADING LOGIC VERIFIED (koşullu: sınırlar 'de)**.
 
 ---
 
@@ -237,4 +237,4 @@ normal restart / ENV kaldırıldığında
 - Fiyat probu: `probe_px <COIN>`; trailing analitiği: `trail_report`.
 - CI: `.github/workflows/test.yml` — push/PR→master'da `cargo test --workspace`.
 
-*Test sayıları: engine 157, api 5, data 9, strategy 65 = **236 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-06.*
+*Test sayıları: engine 160, api 5, data 9, strategy 65 = **239 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-06.*
