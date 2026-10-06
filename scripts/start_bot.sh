@@ -37,8 +37,9 @@ export TRAIL_ATR_K=1.5
 export TRAIL_ON=1
 # ENGINE_COINS verilmiyor → tüm aktif evren (P1-D: tek kaynak)
 
-# P1-N: 8 saatlik timeout öğrenme dönemi boyunca botu SUSTURUYORDU
-# (ölçüldü: 02:17'de 8/100'de öldü). 7 gün = öğrenme dönemi hedefine yeter.
-nohup timeout 604800 "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
+# TIMEOUT YOK: bot süresiz çalışır (kullanıcı ara ara kontrol eder).
+# (P1-N'de 8 saatlik timeout öğrenme dönemi susturmuştu; sabit üst sınır
+# yerine süresiz koşu + dışarıdan kontrol dürüst plan.)
+nohup "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
 sleep 3
 pgrep -af "$ROOT/target/release/bot"
