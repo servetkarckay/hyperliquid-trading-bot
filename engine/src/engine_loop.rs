@@ -2097,7 +2097,15 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // iptal etmek, kâr hedefini borsadan SİLER (Not: ).
             let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid)
                 || self.executor.tp_orders.get(&cn) == Some(&oid);
-            if !known && !is_sl {
+            let is_reduce_only = self
+                .executor
+                .open_orders()
+                .get(&oid)
+                .map(|o| o.reduce_only)
+                .unwrap_or(false);
+            // Tanınmayan reduce-only emirler kullanıcı/harici koruma olabilir;
+            // bunlar botun giriş/çıkış yetim temizliği tarafından iptal edilmez.
+            if !known && !is_sl && !is_reduce_only {
                 if let Err(e2) = self.executor.cancel(&cn, oid).await {
                     tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
                 } else {
@@ -4606,6 +4614,10 @@ mod recon_path_tests {
         assert!(
             orphan.contains("tp_orders"),
             "yetim-emir temizliği TP oid'ini korumalı: {orphan}"
+        );
+        assert!(
+            orphan.contains("o.reduce_only") && orphan.contains("!is_reduce_only"),
+            "tanimlanmayan reduce-only emirler yetim temizliğinde korunmalı: {orphan}"
         );
     }
 }
