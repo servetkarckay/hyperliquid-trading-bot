@@ -444,6 +444,38 @@ pub fn should_finalize_on_ws(
     (is_sl_fill || is_tp_fill) && !position_open && has_entry_attr
 }
 
+/// P1-N — **devralınan pozisyon için sentetik EntryAttr** (restart recovery).
+///
+/// Neden zorunlu: `entry_attr` RAM'dedir; FLATTEN=0 devralan restart'ta
+/// pozisyona ait attr YOK → kapanışı `should_finalize_on_ws` finalize
+/// EDEMEZ → gerçek kapanış sayılmaz (ölçüldü: PONS +2.19 kapanışı 8/100'de
+/// kaldı).
+///
+/// Dürüstlük sınırları: `entry_px`/`side`/`size` borsa verisinden GERÇEK;
+/// `risk_px` = %2 fallback (gerçek SL mesafesi bilinmiyor → R tahmini);
+/// `voters` BOŞ → tracker'a **atıf kanıtı YAZILMAZ** (sahip olmayan
+/// stratejiye kredi yok) — ama kapanış TradeExit + sayaç olarak KAYDA
+/// GEÇER (gerçekten kapandı).
+pub fn synth_recovered_attr(
+    coin: &str,
+    side: SmSide,
+    entry_px: f64,
+    size: f64,
+    ts: u64,
+) -> EntryAttr {
+    EntryAttr {
+        coin: coin.to_string(),
+        voters: Vec::new(),
+        side,
+        entry_px,
+        risk_px: (entry_px * 0.02).max(entry_px * 1e-4),
+        size: size.abs(),
+        ts,
+        tp_px: None,
+        exit_reason: None,
+    }
+}
+
 /// BLOCKER-1 RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
 ///
 /// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber vermez
@@ -750,6 +782,16 @@ impl Engine {
         // AÇILIŞ YETİM TEMİZLİĞİ: önceki çalışmadan kalan, makineye bağlı
         // OLMAYAN emirler borsada asılı kalır ve dolduğunda yönetilemez.
         // Gerçek pozisyonu olan coin'lerin emirleri DOKUNULMAZ.
+        //
+        // P1-N — **SIRA HATASI (ölçüldü: canlı vaka)**: pozisyon haritası
+        // state recovery'de (AŞAĞIDA, backfill sonrası) dolduruluyordu →
+        // temizlik anında harita BOŞ → gerçek pozisyonun TP/SL çifti
+        // "yetim" SANILIP HEPSİ İPTAL EDİLDİ (SUI/61950239941, …942,
+        // PONS/…0968, …077) → pozisyonlar KORUMASIZ kaldı.
+        // Düzeltme: temizlikten ÖNCE pozisyonlar borsadan çekilir.
+        {
+            let _ = executor.refresh_positions().await;
+        }
         let boot_cands = executor.refresh_orders().await;
         let boot_cands = match boot_cands {
             Ok(c) => c,
@@ -798,6 +840,9 @@ impl Engine {
 
         // STATE RECOVERY — borsadaki gerçek pozisyonlardan
         let mut machines: Machines = HashMap::new();
+        // P1-N: devralınan pozisyonların sentetik attr'ları (struct init'te
+        // haritaya gider — `new`'de self yok).
+        let mut recovered_attrs: HashMap<String, EntryAttr> = HashMap::new();
         let mut recovered = 0;
         {
             let _ = executor.refresh_positions().await;
@@ -816,8 +861,14 @@ impl Engine {
                 });
                 let mut m = PositionStateMachine::new(coin, SmConfig::default());
                 m.recover(existing);
-                if existing.is_some() {
+                if let Some((side, entry_px, size, _mark)) = existing {
                     recovered += 1;
+                    // P1-N: devralınan pozisyona sentetik attr — kapanışı
+                    // sayılabilir yapar (ölçülen: PONS kapanışı kayboldu).
+                    recovered_attrs.insert(
+                        coin.clone(),
+                        synth_recovered_attr(coin, side, entry_px, size, hyperliquid_api::now_ms()),
+                    );
                 }
                 machines.insert(coin.clone(), m);
             }
@@ -903,7 +954,7 @@ impl Engine {
                 .and_then(|v| v.parse::<f64>().ok())
                 .filter(|x| *x > 0.0)
                 .unwrap_or(5.0),
-            entry_attr: HashMap::new(),
+            entry_attr: recovered_attrs,
             trail: HashMap::new(),
             atr_px: HashMap::new(),
             n_cycles: 0,
@@ -4550,6 +4601,101 @@ mod recon_path_tests {
         assert!(
             orphan.contains("tp_orders"),
             "yetim-emir temizliği TP oid'ini korumalı: {orphan}"
+        );
+    }
+}
+
+/// ── P1-N — RESTART DEVRALMA: TP/SL ÇİFTİNİ CLOID TUZUYLA TANIMA ─────────
+#[cfg(test)]
+mod restart_inherit_tests {
+    use crate::executor::{cloid_is_tp, make_cloid, TP_CLOID_SALT};
+
+    /// TP cloid'i: make_cloid(coin, wire_px, wire_sz, TP_CLOID_SALT) —
+    /// restart sonrası RAM boşken bile REST satırından birebir tanınır.
+    #[test]
+    fn tp_order_cloid_tuzuyla_taninir() {
+        let (coin, px, sz) = ("BIO", 0.03263_f64, 1560.0_f64);
+        let c = make_cloid(coin, px, sz, TP_CLOID_SALT);
+        assert!(cloid_is_tp(coin, px, sz, Some(&c)), "TP cloid'i tanınmalı");
+        // SL cloid'i (farklı tuz: dec=5) → TP SANILMAZ
+        let sl_cloid = make_cloid(coin, px, sz, 5);
+        assert_ne!(sl_cloid, c);
+        assert!(!cloid_is_tp(coin, px, sz, Some(&sl_cloid)), "SL satırı TP sanılmaz");
+        // px/sz farkı → cloid farkı → tanınmaz (çapraz eşleşme yasağı)
+        assert!(!cloid_is_tp(coin, px * 1.001, sz, Some(&c)));
+        assert!(!cloid_is_tp(coin, px, sz * 1.001, Some(&c)));
+        // bozuk/eksik alanlar
+        assert!(!cloid_is_tp(coin, 0.0, sz, Some(&c)));
+        assert!(!cloid_is_tp(coin, px, 0.0, Some(&c)));
+        assert!(!cloid_is_tp(coin, px, sz, None));
+    }
+
+    /// Restart'ta RAM boşalır (tp_orders/tp_last_px/trail) — AMA TP emri
+    /// borsada durur. Tanıma RAM'siz çalışmalı; aksi halde ikinci TP
+    /// atılır (duplicate) veya dedupe çifti "artık stop" sanıp iptal eder
+    /// (ölçüldü: P1-M/M2 vakaları).
+    #[test]
+    fn restart_sonrasi_tp_geri_yuklenir_ram_bagimsiz() {
+        let (coin, px, sz) = ("ADA", 0.275307_f64, 186.0_f64);
+        let c = make_cloid(coin, px, sz, TP_CLOID_SALT);
+        // 1) RAM boş: tp_last_px yok → yine de tanınmalı
+        assert!(cloid_is_tp(coin, px, sz, Some(&c)));
+        // 2) HAYALET-SWEEP yarattığı "kaba ızgara" fiyatı (5 hane) — REST
+        //    limitPx ile kurulum px'i AYNI midir? kurulum px'i de round_px_for
+        //    ile üretilmişti → AYNI wire değer → tanıma tutarlı
+        let c2 = make_cloid(coin, px, sz, TP_CLOID_SALT);
+        assert_eq!(c, c2, "deterministik");
+    }
+}
+
+/// ── P1-N — BOOT TEMİZLİĞİ SIRASININ ISPATI ──────────────────────────────
+#[cfg(test)]
+mod boot_order_tests {
+    /// Ölçülen canlı vaka: açılış yetim temizliği, pozisyon haritası
+    /// doldurulmadan ÖNCE koşuyordu → harita boş → gerçek pozisyonun
+    /// TP/SL çifti "yetim" sanılıp iptal → pozisyon KORUMASIZ.
+    #[test]
+    fn boot_temizligi_pozisyon_haritasi_ile_kosar() {
+        let prod = include_str!("engine_loop.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+        // Not: doc yorumunda da "backfill" geçebilir → segment SONUNA kadar
+        // tara (kesme yok); sıra karşılaştırması index üzerinden.
+        let boot = prod.split("AÇILIŞ YETİM TEMİZLİĞİ").nth(1).unwrap_or("");
+        let refresh_pos = boot.find("refresh_positions").unwrap_or(usize::MAX);
+        let dedupe = boot.find("dedupe_sl").unwrap_or(usize::MAX);
+        let orphan = boot.find("yetim emir iptal edildi").unwrap_or(usize::MAX);
+        assert!(refresh_pos < usize::MAX, "boot'ta pozisyon haritası çekilmeli");
+        assert!(
+            refresh_pos < dedupe && refresh_pos < orphan,
+            "SIRA: pozisyon haritası, dedupe ve yetim temizliğinden ÖNCE olmalı              (harita boşken temizlik gerçek koruma emirlerini siler)"
+        );
+    }
+}
+
+/// ── P1-N — DEVRALINAN POZİSYON ATTR SENTEZİ ────────────────────────────
+#[cfg(test)]
+mod recover_attr_tests {
+    use super::*;
+    /// Devralınan pozisyon (FLATTEN=0 restart) attr'sız kalınca kapanışı
+    /// SAYILMIYORDU (ölçüldü: PONS +2.19 kapanışı 8/100'de kaldı).
+    /// Sentez: gerçek entry/side/size + %2 risk fallback + voters BOŞ
+    /// (tracker'a atıf kanıtı YAZILMAZ — sahi olmayan stratejiye kredi yok).
+    #[test]
+    fn devralinan_pozisyona_sentetik_attr_uretilir() {
+        let a = synth_recovered_attr("SUI", SmSide::Short, 1.30, 12.6, 12345);
+        assert_eq!(a.coin, "SUI");
+        assert_eq!(a.side, SmSide::Short);
+        assert_eq!(a.entry_px, 1.30);
+        assert!((a.size - 12.6).abs() < 1e-9, "size MUTLAK değer olmalı");
+        assert!((a.risk_px - 0.026).abs() < 1e-9, "risk fallback = entry×%2");
+        assert!(a.voters.is_empty(), "voters BOŞ — tracker atıf yok");
+        assert!(a.tp_px.is_none());
+        // kapanış finalize'ı: has_entry_attr=true → sayılabilir
+        assert!(
+            should_finalize_on_ws(false, true, false, true),
+            "sentetik attr ile kapanış finalize edilebilir"
         );
     }
 }

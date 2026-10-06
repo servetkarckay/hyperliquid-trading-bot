@@ -23,7 +23,11 @@ fi
 export RUST_LOG=info
 export ENGINE_BUDGET_USD=300
 export ENGINE_CYCLE_SECS=300
-export ENGINE_FLATTEN=1
+# P1-N: RESTART'TA POZİSYON DEVRI (FLATTEN=0): 100-işlem öğrenme dönemi
+# için her restart market'ten düzleşme YANLIŞ — pozisyonlar recovery ile
+# devralınır (TP/SL emirleri borsada durur, cloid tuzuyla geri yüklenir).
+# FRESH_START yine de her şeyi düzleştirir (deney başlangıcı).
+export ENGINE_FLATTEN=0
 export ENGINE_HIST_BARS=4400
 export ENGINE_INTERVAL=3600
 export ENGINE_LEVERAGE=5
@@ -33,6 +37,8 @@ export TRAIL_ATR_K=1.5
 export TRAIL_ON=1
 # ENGINE_COINS verilmiyor → tüm aktif evren (P1-D: tek kaynak)
 
-nohup timeout 28800 "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
+# P1-N: 8 saatlik timeout öğrenme dönemi boyunca botu SUSTURUYORDU
+# (ölçüldü: 02:17'de 8/100'de öldü). 7 gün = öğrenme dönemi hedefine yeter.
+nohup timeout 604800 "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
 sleep 3
 pgrep -af "$ROOT/target/release/bot"

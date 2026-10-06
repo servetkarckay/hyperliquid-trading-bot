@@ -59,6 +59,22 @@ pub fn make_cloid(coin: &str, px: f64, sz: f64, salt: u64) -> String {
 
 use hyperliquid_api::{Config, Exchange, Info, Tif, now_ms};
 
+/// P1-N — RESTART DEVRALMA: bu dinlenen satırın cloid'i TP TUZUYLA
+/// üretilenle birebir eşleşiyor mu?
+///
+/// `make_cloid` deterministiktir (coin+px+sz+tuz) → restart sonrası RAM'de
+/// kaybolan `tp_last_px`/`tp_orders`'a GEREK KALMAZ: REST satırının
+/// (px=sz'den yeniden üretilen) cloid'i TP tuzuyla aynıysa BU BİZİM
+/// TP'MİZDİR. SL cloid'i farklı tuz (dec) kullandığı için çapraz eşleşmez.
+pub fn cloid_is_tp(coin: &str, row_px: f64, row_sz: f64, row_cloid: Option<&str>) -> bool {
+    let Some(c) = row_cloid else { return false };
+    if !(row_px > 0.0) || !(row_sz > 0.0) {
+        return false;
+    }
+    let expected = make_cloid(coin, row_px, row_sz, TP_CLOID_SALT);
+    c.eq_ignore_ascii_case(&expected)
+}
+
 /// P1-L — bu dinlenen reduce-only satır **bizim TP trigger'ımız mı?**
 ///
 /// TP trigger-LIMIT'in REST `limitPx` değeri TP fiyatının KENDİSİDİR
@@ -817,6 +833,20 @@ impl Executor {
             if !row.reduce_only || self.tp_orders.contains_key(&row.coin) {
                 continue;
             }
+            // P1-N: ÖNCE cloid tuzu (RAM'siz, EntryAttr'a bağımsız) —
+            // restart sonrası tp_px_by_coin BOŞTUR (EntryAttr RAM'de kalır).
+            if cloid_is_tp(&row.coin, row.px, row.sz, row.cloid.as_deref()) {
+                self.tp_orders.insert(row.coin.clone(), row.oid);
+                if row.px > 0.0 {
+                    self.tp_last_px.insert(row.coin.clone(), row.px);
+                }
+                n += 1;
+                tracing::info!(
+                    "[TP] {c} TP oid BORSADAN GERİ YÜKLENDİ (oid={o} px={px:.6}) — yeni emir atılmadı",
+                    c = row.coin, o = row.oid, px = row.px
+                );
+                continue;
+            }
             let Some(&want) = tp_px_by_coin.get(&row.coin) else { continue };
             if want > 0.0 && (row.px - want).abs() / want <= 0.001 {
                 self.tp_orders.insert(row.coin.clone(), row.oid);
@@ -1064,7 +1094,10 @@ impl Executor {
                     ts: o["timestamp"].as_u64().unwrap_or(0),
                 },
             );
-            rows.push(OpenOrderRow { coin: cn, oid, cloid, is_buy, sz: 0.0, px, reduce_only });
+            // P1-N: satır sz'i = origSz (borsadaki gerçek lot) — cloid tuzu
+            // tanıması (coin+px+sz+tuz deterministiktir) origSz'ye ihtiyaç duyar.
+            let row_sz = o["origSz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            rows.push(OpenOrderRow { coin: cn, oid, cloid, is_buy, sz: row_sz, px, reduce_only });
         }
         rows
     }
@@ -1126,7 +1159,22 @@ impl Executor {
             // de aday sayıp dedupe EN YENİ oid'i tuttuğu için oid sırasına
             // göre ya TP'yi ya SL'yi İPTAL EDİYORDU (ölçüldü: ZRO/AVAX/ONDO
             // TP'leri, BIO'nun SL'i iptal edildi).
-            if is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn).copied()) {
+            //
+            // P1-N — RESTART DEVRALMA: `tp_last_px` RAM'de kaybolur;
+            // cloid tuzu deterministiktir → RAM'siz tanıma + oid GERİ YÜKLEME
+            // (körlemesine ikinci TP atma yasağı da buradan kapanır).
+            let row_tp = is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn).copied())
+                || cloid_is_tp(&cn, px, row.sz, row.cloid.as_deref());
+            if row_tp {
+                if reduce_only && self.tp_orders.get(&cn) != Some(&oid) {
+                    self.tp_orders.insert(cn.clone(), oid);
+                    if px > 0.0 {
+                        self.tp_last_px.insert(cn.clone(), px);
+                    }
+                    tracing::info!(
+                        "[TP] {cn} TP oid BORSADAN GERİ YÜKLENDİ (oid={oid}) — yeni emir ATILMADI"
+                    );
+                }
                 continue;
             }
             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
