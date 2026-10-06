@@ -5,14 +5,28 @@
 //! alt %20 BottomShort / %40-60 Mid.
 //! 3. Long/Short [0.6] dilim üyeliği; orta dilim Hold.
 //! 4. `rank_shift_exit_long`: LONG, Top'tan alt %40'a düştü → Exit
-//! (stratija pozisyon tarafını bilmez; intent ENGINE'den yönlendirilir).
-use crate::{closes, MarketInput, Signal, Strategy};
+//! — çıkış kuralı + durumu (önceki band) STRATEJİNDE yaşar; motor
+//! `exit_intent` API'siyle yalnız yönlendirir (kurallar tek yerde).
+use crate::{closes, MarketInput, Signal, Strategy, ExitCtx, ExitIntent};
 use math::indicators;
 
-pub struct KesitMomentum;
+pub struct KesitMomentum {
+    /// **Önceki döngünün sıralama bandı** (coin → band) — çıkış kuralının
+    /// DURUMU stratejinin KENDİSİNDE yaşar ("kurallar tek yerde" prensibi;
+    /// önceki tasarım bu haritayı engine'de tutuyordu). `Mutex` = `&self`
+    /// API'siyle tekil strateji nesnesinde iç mutasyon.
+    prev: std::sync::Mutex<std::collections::HashMap<String, RankBand>>,
+}
+
+impl Default for KesitMomentum {
+    fn default() -> Self {
+        Self { prev: std::sync::Mutex::new(std::collections::HashMap::new()) }
+    }
+}
 
 /// Coinin kesit sıralamasındaki **dilimi** — tek kaynak (strateji + engine
-/// aynı fonksiyonu kullanır; engine pozisyon tarafını bilerek exit yönlendirir).
+/// aynı fonksiyonu kullanır; çıkış kuralı `exit_intent` API'siyle
+/// stratejinin kontrolünde).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankBand {
  /// üst %20 (long dilimi)
@@ -108,6 +122,33 @@ impl Strategy for KesitMomentum {
         let _ = closes(&input.candles);
         Signal::Hold { note: "dilim dışı".into() }
     }
+
+    /// **Çıkış kuralı** (doküman: "üst dilimden alt %40'a düşen coin Exit") —
+    /// durum (önceki band) DAHIL burada; motor yalnız yönlendirir.
+    ///
+    /// - Kural yalnız **LONG** pozisyona uygulanır (kesit momentum long'un
+    ///   kapanış kuralı; short dilim bandı zaten kuralın çalışma alanı).
+    /// - `position = None` (Flat) → band KAYIT EDİLMEZ → pozisyon açılışında
+    ///   durum fresh başlar: girişte hemen çıkış üretilemez (false-positive
+    ///   yasağı — en az bir tam döngü kanıt gerekir).
+    fn exit_intent(&self, ctx: &ExitCtx) -> Option<ExitIntent> {
+        let pos = ctx.position.as_ref()?;
+        if !pos.is_long {
+            return None;
+        }
+        let cur = rank_band(&ctx.universe_returns, &ctx.coin)?;
+        let mut prev = self.prev.lock().expect("band kilidi");
+        let prev_band = prev.insert(ctx.coin.clone(), cur);
+        if rank_shift_exit_long(prev_band, Some(cur)) {
+            return Some(ExitIntent {
+                note: format!(
+                    "kesit rank kayması (LONG): önceki={:?} → {:?}",
+                    prev_band, cur
+                ),
+            });
+        }
+        None
+    }
 }
 
 // momentum ölçümünde EMA eğimi desteği (referans)
@@ -166,7 +207,7 @@ mod exit_tests {
             universe_returns: universe.clone(),
             ..Default::default()
         };
-        match KesitMomentum.evaluate(&input) {
+        match KesitMomentum::default().evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!((strength - 0.6).abs() < 1e-9);
                 assert!(note.contains("üst dilim"));
@@ -180,12 +221,73 @@ mod exit_tests {
             universe_returns: universe.clone(),
             ..Default::default()
         };
-        match KesitMomentum.evaluate(&input2) {
+        match KesitMomentum::default().evaluate(&input2) {
             Signal::Short { strength, .. } => {
                 assert!((strength - 0.6).abs() < 1e-9);
                 assert_eq!(rank_band(&universe, "C00"), Some(RankBand::BottomShort));
             }
             other => panic!("alt dilim Short beklenirdi: {other:?}"),
         }
+    }
+}
+
+
+/// Çıkış-niyeti API'si — **durum stratejinin kendisinde** (engine'den taşındı).
+#[cfg(test)]
+mod exit_intent_tests {
+    use super::*;
+    use crate::{ExitPositionInfo, strat_test_helpers::helpers as H};
+    use std::sync::Mutex;
+
+    fn universe() -> Vec<(String, f64)> {
+        (0..30).map(|i| (format!("C{i:02}"), i as f64 / 100.0)).collect()
+    }
+
+    fn ctx_long(coin: &str, u: &[(String, f64)]) -> ExitCtx {
+        ExitCtx {
+            coin: coin.into(),
+            candles: vec![],
+            universe_returns: u.to_vec(),
+            position: Some(ExitPositionInfo { is_long: true, size: 1.0, entry_px: 100.0 }),
+        }
+    }
+
+    /// Durum akışı: 1. döngü (Top) → niyet YOK; band KAYDEDİLDİ;
+    /// 2. döngü (alt %40) → niyet VAR (kural tetiklendi). Kesit sıralaması
+    /// coin'in KENDİ getirisinden geliyor → "C29" Top, "C01" alt %40.
+    #[test]
+    fn exit_intent_durum_stratejinin_icinde() {
+        let k = KesitMomentum::default();
+        let u = universe();
+        // 1. döngü: Top band → önceki YOK → niyet yok (false-positive yasağı)
+        assert!(k.exit_intent(&ctx_long("C29", &u)).is_none(), "ilk döngüde niyet ÜRETİLMEZ");
+        // aynı coin alt %40'a düştü (getirisi sıfırın altına) → niyet VAR
+        let mut u2 = universe();
+        u2[29].1 = -5.0; // C29 alt %40'a düştü
+        let intent = k.exit_intent(&ctx_long("C29", &u2)).expect("kayma → niyet");
+        assert!(intent.note.contains("kesit rank kayması"), "{intent:?}");
+        // idempotent ikinci çağrı: band zaten kayıtlı, tekrar kayma yok
+        assert!(k.exit_intent(&ctx_long("C29", &u2)).is_none(), "aynı band → ikinci niyet YOK");
+    }
+
+    /// Flat (position=None) → niyet sorulmaz; band KAYIT EDİLMEZ →
+    /// pozisyon açılışında durum fresh (girişte hemen çıkış ÜRETİLMEZ).
+    #[test]
+    fn exit_intent_flatte_niyet_ve_kayit_yok() {
+        let k = KesitMomentum::default();
+        let u = universe();
+        let flat = ExitCtx { coin: "C29".into(), candles: vec![], universe_returns: u.clone(), position: None };
+        assert!(k.exit_intent(&flat).is_none());
+        // harici kontrol: harita boş kalmalı (Flat kayıt yapmaz)
+        assert!(k.prev.lock().unwrap().is_empty());
+        // short pozisyon → kural LONG'a özgü → niyet yok
+        let short = ExitCtx {
+            coin: "C29".into(),
+            candles: vec![],
+            universe_returns: u,
+            position: Some(ExitPositionInfo { is_long: false, size: 1.0, entry_px: 100.0 }),
+        };
+        assert!(k.exit_intent(&short).is_none());
+        assert!(k.prev.lock().unwrap().is_empty(), "short'ta band kaydı da YOK");
     }
 }

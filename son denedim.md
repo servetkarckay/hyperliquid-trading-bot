@@ -1,7 +1,5 @@
 Baktım reis. Bu sefer “bug var mı?” seviyesinde değil, **sistemi bir quant + backend + execution + risk analisti gözüyle** değerlendirdim.
 
-İncelediğim temel referans master: `4884c9e87545657dd3e134e84bb277eedb98777b` — P1-O sonrası. PR #2’deki P1-P değişikliklerini master’dan ayrı tutuyorum; o henüz merge edilmedi.
-
 # Genel hüküm
 
 Benim değerlendirmem:

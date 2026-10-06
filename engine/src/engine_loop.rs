@@ -78,6 +78,8 @@ struct CycleEval {
     atr_pct: f64,
  /// son 200 kapanış (korelasyon hesabı için)
     closes: Vec<f64>,
+ /// son ~200 KAPANMIŞ mum (strateji çıkış-niyeti girdisi: kanal kuralları)
+    candles_tail: Vec<data::Candle>,
 }
 
 /// Pozisyon başına trailing stop durumu + MFE/MAE (excursion) kaydı.
@@ -274,9 +276,6 @@ pub struct Engine {
  /// P1: bu döngüde pozisyon haritası `sync_positions_from` ile tazelendi mi?
  /// Auto-unlock flat doğrulaması YALNIZ bu doğrulanmış düzlemlerde ilerler.
     rest_sync_verified: bool,
- /// C — kesit momentum sıralama dilimi (önceki döngü). Rank kayması
- /// (Top → alt %40) LONG pozisyon için Exit üretir; kanıt yoksa YOK.
-    rank_band_prev: HashMap<String, strategy::kesit_momentum::RankBand>,
 }
 
 /// **Canlı ağırlık dosyasını doğrula ve sayısal ağırlıklara çevir** (saf fonksiyon).
@@ -953,7 +952,6 @@ impl Engine {
             explore_pick: None,
             gate: EntryGate::default(),
             rest_sync_verified: false,
-            rank_band_prev: HashMap::new(),
             leverage: std::env::var("ENGINE_LEVERAGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -2227,12 +2225,13 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             }
 
             evals.push(CycleEval {
-                coin,
+                coin: coin.clone(),
                 cs,
                 bid,
                 ask,
                 atr_pct,
                 closes: closes200,
+                candles_tail: candles.iter().rev().take(200).rev().cloned().collect(),
             });
         }
 
@@ -2473,24 +2472,36 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     .map(|m| !matches!(m.state, PosState::Flat))
                     .unwrap_or(false);
                 if open && matches!(act, Action::Nothing) {
-                    let cur_band = strategy::kesit_momentum::rank_band(&universe_returns, &e.coin);
-                    let prev_band = self.rank_band_prev.get(&e.coin).copied();
-                    let side_long = self
-                        .machines
-                        .get(&e.coin)
-                        .map(|m| m.in_position().map(|(s, _, _)| s == SmSide::Long).unwrap_or(false))
-                        .unwrap_or(false);
- // C: dokümante kural — LONG, üst %20'den alt %40'a düştü → Exit
-                    let kesit_exit = side_long
-                        && strategy::kesit_momentum::rank_shift_exit_long(prev_band, cur_band);
- // C: turtle dokümante kural — kapanış 55-bar kanalın altı
- // → LONG trend bitti (strateji ölü dal yerine helper üretir)
-                    let turtle_exit = side_long
-                        && strategy::trend_following_turtle::long_exit_signal(&self.agg.history(&e.coin, self.loop_cfg.interval_secs).to_vec());
- // B: ensemble Exit oyu → gerçek ExitNow (Flat'ta hiçbir emir YOK;
- // PendingExit'te idempotent — ikinci ExitNow üretmez)
+let position = self.machines.get(&e.coin).and_then(|m| {
+                        m.in_position().map(|(s, _, sz)| strategy::ExitPositionInfo {
+                            is_long: s == SmSide::Long,
+                            size: sz,
+                            entry_px: self
+                                .executor
+                                .positions()
+                                .get(&e.coin)
+                                .map(|p| p.entry_px)
+                                .unwrap_or(0.0),
+                        })
+                    });
+                    let ctx = strategy::ExitCtx {
+                        coin: e.coin.clone(),
+                        candles: e.candles_tail.clone(),
+                        universe_returns: universe_returns.clone(),
+                        position,
+                    };
+                    // Motor KURAL BİLMEZ: çıkış kuralları stratejilerin
+                    // `exit_intent` API'sinde (durum dahil); motor yalnız
+                    // pozisyon state'ini verir ve niyeti YÖNLENDİRİR.
+                    let mut rule_note: Option<String> = None;
+                    for s in &self.strategies {
+                        if let Some(intent) = s.exit_intent(&ctx) {
+                            rule_note = Some(intent.note);
+                            break;
+                        }
+                    }
                     let sig_exit = e.cs.exit_requested;
-                    if kesit_exit || turtle_exit || sig_exit {
+                    if rule_note.is_some() || sig_exit {
                         if let Some(m) = self.machines.get_mut(&e.coin) {
                             act = m.force_exit(px_b, px_a);
                         }
@@ -2498,17 +2509,12 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                             tracing::info!(
                                 "[EXIT] {} çıkış kanalı: {} (contributor={:?})",
                                 e.coin,
-                                if kesit_exit { "kesit rank kayması (LONG)" }
-                                else if turtle_exit { "turtle 55-bar altı (LONG)" }
-                                else { "Signal::Exit" },
+                                rule_note
+                                    .unwrap_or_else(|| "Signal::Exit".into()),
                                 e.cs.exit_contributors
                             );
                         }
                     }
-                }
- // band kaydını GÜNCELLE (exit o döngüde işlendi, sonraki kayıt)
-                if let Some(b) = strategy::kesit_momentum::rank_band(&universe_returns, &e.coin) {
-                    self.rank_band_prev.insert(e.coin.clone(), b);
                 }
                 acts.push((idx, act, asset, szd));
             } else {
@@ -4702,5 +4708,30 @@ mod recover_attr_tests {
             should_finalize_on_ws(false, true, false, true),
             "sentetik attr ile kapanış finalize edilebilir"
         );
+    }
+}
+
+
+/// ── MİMARİ ISPAT — engine çıkış KURALINI BİLMEZ ─────────────────────────
+/// "Strateji kuralları tek yerde": çıkış kuralları stratejilerin
+/// `exit_intent` API'sinde; engine yalnız çağırır + yönlendirir.
+#[cfg(test)]
+mod exit_intent_wire_tests {
+    #[test]
+    fn engine_kural_fonksiyonlarina_dogrudan_cagri_yapmaz() {
+        let prod = include_str!("engine_loop.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or("");
+        assert!(
+            prod.contains("exit_intent(&ctx)"),
+            "engine exit_intent'i ÇAĞIRMALI"
+        );
+        for banned in ["rank_shift_exit_long(", "long_exit_signal("] {
+            assert!(
+                !prod.contains(banned),
+                "engine '{banned}' KURALINI DOĞRUDAN çağırmamalı (kural stratejide kalır)"
+            );
+        }
     }
 }

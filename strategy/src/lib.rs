@@ -109,6 +109,19 @@ pub trait Strategy: Send + Sync {
  /// Hangi dokümanı uyguladığı
     fn evaluate(&self, input: &MarketInput) -> Signal;
 
+ /// **ÇIKIŞ NİYETİ** — pozisyon-farkında çıkış kuralı.
+ ///
+ /// "Strateji kuralları TEK YERDE" prensibi: çıkış kuralı stratejinin
+ /// KENDİSİNDE yaşar (durum dahil — önceki döngü bandı gibi); motor
+ /// pozisyon state'ini verir ve niyeti YÖNLENDİRİR (`ExitNow`), kuralı
+ /// BİLMEZ. Varsayılan: yok (çoğu strateji çıkış kuralı tanımlamaz).
+ ///
+ /// `ctx.position = None` (Flat) → niyet sorulmaz → emir üretilmez.
+    fn exit_intent(&self, ctx: &ExitCtx) -> Option<ExitIntent> {
+        let _ = ctx;
+        None
+    }
+
  /// Sistem raporu için durum (sistem raporu `ACTIVE / AUXILIARY /
  /// DATA-MISSING` ayrımı yapabilmeli).
  ///
@@ -148,10 +161,37 @@ impl StratStatus {
 }
 
 /// 00-strateji-katalogu.md — tüm stratejilerin kayıt defteri
+/// Çıkış-niyeti çağrısı için motor bağlamı: stratejiye pozisyon state'ini
+/// ve kendi kuralının girdilerini tek yerde verir.
+#[derive(Debug, Clone)]
+pub struct ExitCtx {
+    pub coin: String,
+    /// kapanmış mum kuyruğu (kanal-tarzı kurallar için — son ~200 bar)
+    pub candles: Vec<Candle>,
+    /// evren geneli 1g getiriler (kesit sıralaması için)
+    pub universe_returns: Vec<(String, f64)>,
+    /// AÇIK pozisyon (engine state); `None` = Flat → niyet sorulmaz
+    pub position: Option<ExitPositionInfo>,
+}
+
+/// Açık pozisyonun taraf bilgisi (engine'den stratejiye)
+#[derive(Debug, Clone, Copy)]
+pub struct ExitPositionInfo {
+    pub is_long: bool,
+    pub size: f64,
+    pub entry_px: f64,
+}
+
+/// Stratejinin tetiklenen çıkış kuralı (log/audit notu taşır)
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExitIntent {
+    pub note: String,
+}
+
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(wyckoff::Wyckoff),
-        Box::new(kesit_momentum::KesitMomentum),
+        Box::new(kesit_momentum::KesitMomentum::default()),
         Box::new(lob_emir_akisi::LobEmirAkisi),
         Box::new(market_making::MarketMaking),
         Box::new(optimal_execution::OptimalExecution),
@@ -197,3 +237,5 @@ pub const STRATEGY_COUNT: usize = 18;
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]
 pub mod strat_test_helpers;
+
+

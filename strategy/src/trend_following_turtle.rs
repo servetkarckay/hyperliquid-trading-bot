@@ -5,17 +5,18 @@
 //! 2. Filtre: 55-bar kanal üstü → Hold (trend sürüyor, piramit koşulu).
 //! 3. **Ölü sinyal düzeltmesi **: `price<ll55→Exit` dalı yapısal
 //! ölüydü (ll55 ≤ ll20 ⟹ Short önce); kural `long_exit_signal`
-//! helper'ına taşındı — engine LONG pozisyonda Exit yönlendirir.
+//! helper'ına taşındı; bugün kural `exit_intent` TRAIT API'siyle
+//! stratejinin kendisinde (motor yalnız yönlendirir).
 //! 4. ATR ≤ 0 / kanal serisi kısa → Skip; <56 mum → Skip.
-use crate::{closes, highs, lows, MarketInput, Signal, Strategy};
+use crate::{closes, highs, lows, MarketInput, Signal, Strategy, ExitCtx, ExitIntent, ExitPositionInfo};
 use math::indicators;
 
 pub struct TurtleTrendFollowing;
 
 /// Turtle **long Exit kuralı** (doküman): kapanış 55-bar kanalın altı →
 /// long trend bitti. Strateji pozisyon tarafını BİLMEDİĞİ için bu kural
-/// evaluate içinde ölüydü (ll55 ≤ ll20 ⟹ Short önce yakalardı); engine
-/// LONG pozisyonu için buradan Exit yönlendirir.
+/// evaluate içinde ölüydü (ll55 ≤ ll20 ⟹ Short önce yakalardı);
+/// bugün kural `exit_intent` API'sinde — kural + çağrı stratejide.
 pub fn long_exit_signal(candles: &[data::Candle]) -> bool {
     if candles.len() < 56 {
         return false; // veri yok → karar yok (sahte exit yasak)
@@ -88,6 +89,22 @@ impl Strategy for TurtleTrendFollowing {
  // `long_exit_signal` üzerinden ENGINE'e taşınır (kesit
  // `rank_shift_exit_long` ile aynı mimari).
         Signal::Hold { note: format!("kanal içi ({price:.0}); 20/55 kanalları={hh20:.0}/{ll20:.0}, 55={hh55:.0}/{ll55:.0}") }
+    }
+
+    /// **Çıkış kuralı** (doküman: kapanış 55-bar kanalın altı → long trend
+    /// bitti) — kural + çağrı stratejinin KENDİSİNDE; motor yalnız
+    /// yönlendirir. Kural yalnız LONG pozisyona uygulanır.
+    fn exit_intent(&self, ctx: &ExitCtx) -> Option<ExitIntent> {
+        let pos = ctx.position.as_ref()?;
+        if !pos.is_long {
+            return None;
+        }
+        if long_exit_signal(&ctx.candles) {
+            return Some(ExitIntent {
+                note: "turtle: kapanış 55-bar kanalın altı (LONG trend bitti)".into(),
+            });
+        }
+        None
     }
 }
 
@@ -177,5 +194,46 @@ mod audit_tests {
         let candles = H::flat(10, 100.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         assert!(matches!(TurtleTrendFollowing.evaluate(&input), Signal::Skip { .. }));
+    }
+}
+
+
+/// Çıkış-niyeti API'si — kural + çağrı stratejinin kendisinde.
+#[cfg(test)]
+mod exit_intent_tests {
+    use super::*;
+    use crate::strat_test_helpers::helpers as H;
+
+    /// LONG + kapanış 55-bar kanalın altı → niyet VAR; aksi → YOK.
+    #[test]
+    fn exit_intent_55bar_alti_long() {
+        let mut candles = H::flat(60, 100.0);
+        H::set_last(&mut candles, 80.0, 80.5, 79.5, 100.0);
+        let long = ExitCtx {
+            coin: "ADA".into(),
+            candles,
+            universe_returns: vec![],
+            position: Some(ExitPositionInfo { is_long: true, size: 1.0, entry_px: 100.0 }),
+        };
+        let intent = TurtleTrendFollowing.exit_intent(&long).expect("55-bar altı LONG → niyet");
+        assert!(intent.note.contains("55-bar"), "{intent:?}");
+
+        // SHORT pozisyon + kuralı TETİKLER cinsden mumlar → yine YOK
+        // (kural LONG'a özgü — taraf kapısı olmadan short'ta sahte niyet üretirdi)
+        let mut trigger_candles = H::flat(60, 100.0);
+        H::set_last(&mut trigger_candles, 80.0, 80.5, 79.5, 100.0);
+        let short = ExitCtx {
+            coin: "ADA".into(),
+            candles: trigger_candles,
+            universe_returns: vec![],
+            position: Some(ExitPositionInfo { is_long: false, size: 1.0, entry_px: 100.0 }),
+        };
+        assert!(
+            TurtleTrendFollowing.exit_intent(&short).is_none(),
+            "SHORT pozisyonda çıkış niyeti ÜRETİLMEZ (kural LONG'a özgü)"
+        );
+        // Flat → YOK
+        let flat = ExitCtx { coin: "ADA".into(), candles: H::flat(60, 100.0), universe_returns: vec![], position: None };
+        assert!(TurtleTrendFollowing.exit_intent(&flat).is_none());
     }
 }
