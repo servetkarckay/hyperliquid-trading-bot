@@ -852,10 +852,9 @@ impl Executor {
  /// **TP OID GERİ YÜKLEME** (restart / WS kopması sonrası).
  ///
  /// Kural (körlemesine duplicate etme yasağı): `openOrders` taramasında
- /// AYNI coin için reduce-only + fiyatı `tp_px` ile ±%0.1 eşleşen emir
- /// varsa → **bizim TP'mizdir**, oid kaydedilir, YENİ EMİR ATILMAZ.
- /// Eşleşmeyen reduce-only emirlere dokunulmaz (SL taraması onları
- /// ele alır).
+ /// TP cloid'i eşleşen emir → **bizim TP'mizdir**, oid kaydedilir.
+ /// ClOİD geri kazanımı mümkün değilse bilinen TP fiyatıyla ±%0.1 eşleşme
+ /// fallback'idir. Eşleşmeyen reduce-only emirlere burada dokunulmaz.
     pub fn restore_tp_orders(
         &mut self,
         rows: &[OpenOrderRow],
@@ -1148,10 +1147,9 @@ impl Executor {
         Ok(self.parse_open_orders(&arr))
     }
 
- /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
- /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
- /// Ham satırlar — TP oid geri yükleme (`restore_tp_orders`) bu satırları
- /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
+ /// Duran **reduce-only** emirlerin ham satırlarını döndürür.
+ /// TP/SL reconciliation önce botun deterministik cloid'iyle sınıflandırır;
+ /// tanınmayan reduce-only emirler `refresh_orders` tarafından SL adayı yapılmaz.
     pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
         let v = self.info.open_orders(&self.user).await?;
         let arr = v.as_array().cloned().unwrap_or_default();
@@ -1178,12 +1176,11 @@ impl Executor {
  // (Not: GMT oid=…61867 ve …165356, LAYER …61871 ve …166722
  // aynı anda borsada duruyor).
  //
- // DOĞRU KURAL: **dinlenen (resting) + `reduceOnly` emir stop'tur.**
- // Gerekçe: bot'un diğer tüm reduce-only emirleri **IOC**'dur
- // (`flatten_all`, `Action::ExitNow` → `tif: Tif::Ioc`), IOC hiç
- // dinlenmez → `openOrders`'a girmez. Giriş emirleri de
- // `reduce_only: false`'dur. Yani defterde kalan tek reduce-only
- // emir sınıfı stop'tur.
+ // DOĞRU KURAL: dinlenen `reduceOnly` emirler bir **koruma/emir
+ // sınıfıdır**, ama tek başına botun SL'si olduğu kanıtı değildir.
+ // Önce TP cloid'i, sonra SL cloid'i, en son yalnız cloid'i olmayan
+ // satırlar için bilinen SL seviyesiyle eşleştirme yapılır. Hiçbiri
+ // tutmuyorsa emir UNKNOWN bırakılır ve dedupe edilmez.
             let reduce_only = row.reduce_only;
             let is_buy = row.is_buy;
             let px = row.px;
@@ -1214,15 +1211,15 @@ impl Executor {
             if reduce_only {
                 let own_sl = cloid_is_sl(&cn, px, row.sz, is_buy, row.cloid.as_deref());
                 let known = self.sl_last_px.get(&cn).copied().unwrap_or(0.0);
-                let price_matches_known = if known > 0.0 {
+                // cloid mevcut ama bizim SL cloid'imiz değilse, aynı fiyata
+                // denk gelen harici emri botunmuş gibi kabul ETME.
+                let price_matches_known = row.cloid.is_none() && known > 0.0 {
                     let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
                     let trig = hyperliquid_api::round_px_for(
                         if is_buy { px / 1.05 } else { px / 0.95 },
                         d,
                     );
                     trig > 0.0 && (trig - known).abs() / known <= 0.001
-                } else {
-                    false
                 };
 
                 if !own_sl && !price_matches_known {
