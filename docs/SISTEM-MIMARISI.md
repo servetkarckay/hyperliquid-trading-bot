@@ -407,8 +407,8 @@ TESTNET ──► cold start ──► 100 gerçek kapanmış işlem ──► r
 - Öğrenme dönemi tek deneydir: aynı konfigürasyonla (stratejiler, eşikler,
   risk limitleri, evren) 100 gerçek kapanış toplanır. Deney sırasında
   parametre değişikliği yapılmaz.
-- `cargo test --workspace`: **246 passed / 0 failed** (engine 164,
-  data 9, api 5, strategy 68). Release build ayrı derlenir.
+- `cargo test --workspace`: **259 passed / 0 failed** (engine 164,
+  data 19, api 5, strategy 71). Release build ayrı derlenir.
 
 ## 26. Mainnet promotion boundary
 
@@ -501,8 +501,8 @@ anlamsızdır.
 ## 30. Test architecture
 
 ```text
-cargo test --workspace  →  246 passed / 0 failed
-engine 164 · data 9 · api 5 · strategy 68
+cargo test --workspace  →  259 passed / 0 failed
+engine 164 · data 19 · api 5 · strategy 71
 ```
 
 - **Kontrat testleri**: EntryGate denklemi (kaynak taraması), exit sahipliği
