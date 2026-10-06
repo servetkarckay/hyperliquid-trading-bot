@@ -85,15 +85,22 @@ impl MarketCtx {
                 Some(c) => c,
                 None => continue,
             };
+            // DATA DÜRÜSTLÜĞÜ: alan parse edilemezse 0.0 YAZILMAZ (UNKNOWN ≠
+            // geçerli sıfır); son bilinen değer KORUNUR (yoksa 0.0) —
+            // bayat veri dürüsttür, sahte sıfır değil.
+            let prev = self.latest.get(coin).cloned();
+            let f = |x: &str, d: f64| x.parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(d);
             let st = CtxState {
                 coin: coin.clone(),
-                funding: c.funding.parse().unwrap_or(0.0),
-                open_interest: c.openInterest.parse().unwrap_or(0.0),
-                mark_px: c.markPx.parse().unwrap_or(0.0),
-                oracle_px: c.oraclePx.parse().unwrap_or(0.0),
-                premium: c.premium.clone().and_then(|p| p.parse().ok()).unwrap_or(0.0),
-                day_ntl_vlm: c.dayNtlVlm.parse().unwrap_or(0.0),
-                prev_day_px: c.prevDayPx.clone().and_then(|p| p.parse().ok()).unwrap_or(0.0),
+                funding: f(&c.funding, prev.as_ref().map(|p| p.funding).unwrap_or(0.0)),
+                open_interest: f(&c.openInterest, prev.as_ref().map(|p| p.open_interest).unwrap_or(0.0)),
+                mark_px: f(&c.markPx, prev.as_ref().map(|p| p.mark_px).unwrap_or(0.0)),
+                oracle_px: f(&c.oraclePx, prev.as_ref().map(|p| p.oracle_px).unwrap_or(0.0)),
+                premium: c.premium.clone().and_then(|p| p.parse::<f64>().ok()).filter(|v| v.is_finite())
+                    .unwrap_or_else(|| prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
+                day_ntl_vlm: f(&c.dayNtlVlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
+                prev_day_px: c.prevDayPx.clone().and_then(|p| p.parse::<f64>().ok()).filter(|v| v.is_finite())
+                    .unwrap_or_else(|| prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
                 ts: now,
             };
             self.apply_event(st);

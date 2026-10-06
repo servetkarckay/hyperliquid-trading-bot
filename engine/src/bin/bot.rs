@@ -40,6 +40,11 @@ async fn main() -> anyhow::Result<()> {
  // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
     engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
 
+    // Risk hafızası yolu: WIPE ve normal-yükleme AYNI kaynağı kullanmalı
+    // (önceki hata: wipe hard-coded, yükleme ENV'den — custom path'te
+    // fresh reset risk hafızasını SİLEMEZDİ).
+    let risk_state_path = std::env::var("RISK_STATE_PATH")
+        .unwrap_or_else(|_| "/root/hyperliquid/config/risk_state.json".into());
     let decision = engine::epoch::fresh_start_decision(fresh_env, std::path::Path::new(&epoch_path).exists(), is_testnet);
     match decision {
         engine::epoch::FreshDecision::Invalid => {
@@ -53,8 +58,9 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => anyhow::bail!("[TESTNET] tracker state silinemedi: {e}"),
             }
-            // 1b) risk hafızası — silinir (yeni deney = yeni drawdown hafızası)
-            match std::fs::remove_file("/root/hyperliquid/config/risk_state.json") {
+            // 1b) risk hafızası — silinir (yeni deney = yeni drawdown hafızası);
+            // AYNI çözülen yol (ENV RISK_STATE_PATH) — hard-coded DEĞİL
+            match std::fs::remove_file(&risk_state_path) {
                 Ok(()) => tracing::info!("[TESTNET] eski risk hafızası temizlendi"),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => anyhow::bail!("[TESTNET] risk hafızası silinemedi: {e}"),
@@ -185,8 +191,6 @@ async fn main() -> anyhow::Result<()> {
     // Risk hafızası KALICI: peak_equity + halted restart'ta yüklenir.
     // (Yüklenmezse 100→80'de halt eden hesap, restart'ta 80'i yeni peak
     // kabul ederek drawdown korumasını sıfırlamış olur.)
-    let risk_state_path = std::env::var("RISK_STATE_PATH")
-        .unwrap_or_else(|_| "/root/hyperliquid/config/risk_state.json".into());
     if engine.risk.load_state(&risk_state_path) {
         tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
     } else {

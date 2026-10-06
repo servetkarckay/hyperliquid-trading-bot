@@ -264,13 +264,19 @@ impl Aggregator {
             raw.iter().rev().take(bars).collect();
         let mut n = 0;
         for c in recent.into_iter().rev() {
+            // DATA DÜRÜSTLÜĞÜ: parse edilemeyen mum 0.0'la saklanmaz —
+            // o bar VERİ YOK demektir (0.0 mum, ATR/RSI'yi zehirler).
+            let f = |x: &str| x.parse::<f64>().ok().filter(|v| v.is_finite());
+            let (Some(o), Some(h), Some(l), Some(cl)) = (f(&c.o), f(&c.h), f(&c.l), f(&c.c)) else {
+                continue;
+            };
             let candle = Candle {
                 t: c.t,
-                o: c.o.parse().unwrap_or(0.0),
-                h: c.h.parse().unwrap_or(0.0),
-                l: c.l.parse().unwrap_or(0.0),
-                c: c.c.parse().unwrap_or(0.0),
-                v: c.v.parse().unwrap_or(0.0),
+                o,
+                h,
+                l,
+                c: cl,
+                v: f(&c.v).unwrap_or(0.0),
                 n: c.n.unwrap_or(0) as u64,
                 closed: true,
             };

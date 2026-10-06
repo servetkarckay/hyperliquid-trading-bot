@@ -177,9 +177,9 @@ normal restart / ENV kaldırıldığında
 
 | Durum | Anlam | Kimler |
 |---|---|---|
-| `ACTIVE` | girdisi tam, yönlü sinyal üretebilir | 15 strateji |
+| `ACTIVE` | girdisi tam, yönlü sinyal üretebilir | 14 strateji |
 | `AUXILIARY` | giriş stratejisi değil (boyut/kote/plan önerisi) | Kelly Sizing, Market Making, Optimal Execution |
-| `DATA-MISSING` | girdisi bağlı değil → Skip; sahte veri yok | Vol Arbitraj (IV feed yok) |
+| `DATA-MISSING` | girdisi bağlı değil → Skip; sahte veri yok | Vol Arbitraj (IV feed yok), Değer Yatırım (temel feed yok) |
 
 **Dürüst sınırlar** (icat yapılmadı): Elliott SHORT kolu kodda yok (testle kanıtlı); Değer Yatırım temel verisi harici (proxy Hold); likidasyon feed'i yok (OI'dan çıkarımsal); MM emir yolu global IOC TIF ile çelişir (quote planı yalnız not); **"Wyckoff" isim iddiası sınırlıdır** — gerçek Wyckoff analizi (faz sayımı, spring/upthrust, schematics) DEĞİLDİR; model = efor/sonuç prensibinin basitleştirilmiş hâli (trend + hacim eforu + aralık konumu). İsim, öğrenme kanıtının sürekliliği için sabit tutulmuştur.
 
@@ -197,7 +197,7 @@ normal restart / ENV kaldırıldığında
 | Metrikler | gerçek fill verisi; kanıt yoksa None; "%99" yasağı | 2 |
 | Risk invariant | EntryGate denklemi + kaynak taraması; risk-lock | 21 |
 
-`cargo test --workspace`: engine 135 + api 5 + data 9 + strategy 65 = **214 passed / 0 failed** (+1 ignored doc-test). Kalite raporu üç katman ayrıdır: **COMPILES PASS · TESTS PASS · TRADING LOGIC VERIFIED (koşullu: sınırlar 'de)**.
+`cargo test --workspace`: engine 164 + api 5 + data 9 + strategy 69 = **246 passed / 0 failed** (+1 ignored doc-test). Kalite raporu üç katman ayrıdır: **COMPILES PASS · TESTS PASS · TRADING LOGIC VERIFIED (koşullu: sınırlar "Dürüst sınırlar" başlığında)**.
 
 ---
 
@@ -224,6 +224,7 @@ normal restart / ENV kaldırıldığında
 | `TRADE_EXITS_PATH` | config/trade_exits.jsonl | trade-exit arşivi |
 | `TESTNET_FRESH_START` | (yok) | =1: İLK çalıştırmada temiz deney (sonraki restartlar state'i korur) |
 | `LEARNING_EPOCH_PATH` | config/learning_epoch.json | öğrenme dönemi + kalıcı işlem sayacı |
+| `RISK_STATE_PATH` | config/risk_state.json | kalıcı risk hafızası (peak_equity + halted; FRESH_START siler) |
 | `EV_TAKER_FEE_BPS / EV_SLIPPAGE_BPS / EV_MIN_DIST_BPS` | 4.5 / 5.0 / 75 | TEK maliyet modeli |
 | `CLICKHOUSE_URL / REDIS_URL` | (boş) | kalıcılık; boşsa Memory fallback |
 | `RUST_LOG / LOG_LEVEL` | info | log seviyesi |
@@ -237,4 +238,4 @@ normal restart / ENV kaldırıldığında
 - Fiyat probu: `probe_px <COIN>`; trailing analitiği: `trail_report`.
 - CI: `.github/workflows/test.yml` — push/PR→master'da `cargo test --workspace`.
 
-*Test sayıları: engine 157, api 5, data 9, strategy 65 = **236 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-06.*
+*Test sayıları: engine 164, api 5, data 9, strategy 69 = **246 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-06.*
