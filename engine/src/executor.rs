@@ -1243,6 +1243,7 @@ impl Executor {
                     candidates.push((cn, oid));
                 }
             }
+        }
 
         Ok(candidates)
     }
