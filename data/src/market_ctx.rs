@@ -61,13 +61,23 @@ impl MarketCtx {
         self.latest.insert(coin, c);
     }
 
- /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır)
+ /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır).
+    ///
+    /// Çekirdek sayılar (funding/OI/mark/oracle) zaten ingestor'da
+    /// doğrulanmıştır; meşru null edebilecek alanlar (premium/dayNtlVlm/
+    /// prevDayPx) `None` gelirirse SON BİLİNEN değer korunur — sahte
+    /// sıfır yazılmaz (REST yoluyla aynı dürüstlük kontratı).
     pub fn apply_stream(&mut self, ev: &StreamEvent) {
         if let StreamEvent::Ctx { coin, funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, ts } = ev {
+            let prev = self.latest.get(coin).cloned();
+            let r = |o: &Option<f64>, d: f64| o.unwrap_or_else(|| prev.as_ref().map(|p| d).unwrap_or(0.0));
             self.apply_event(CtxState {
                 coin: coin.clone(), funding: *funding, open_interest: *open_interest,
-                mark_px: *mark_px, oracle_px: *oracle_px, premium: *premium,
-                day_ntl_vlm: *day_ntl_vlm, prev_day_px: *prev_day_px, ts: *ts,
+                mark_px: *mark_px, oracle_px: *oracle_px,
+                premium: r(premium, prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
+                day_ntl_vlm: r(day_ntl_vlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
+                prev_day_px: r(prev_day_px, prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
+                ts: *ts,
             });
         }
     }
@@ -154,5 +164,54 @@ impl MarketCtx {
 
     pub fn tracked(&self) -> usize {
         self.latest.len()
+    }
+}
+
+
+#[cfg(test)]
+mod apply_stream_testleri {
+    use super::*;
+    use crate::ingestor::StreamEvent;
+
+    /// WS yolu: meşru null alan (premium/dayNtlVlm/prevDayPx None) →
+    /// SON BİLİNEN değer korunur; sahte 0.0 yazılmaz. Çekirdek alanlar
+    /// güncellenir.
+    #[test]
+    fn apply_stream_null_uyari_son_bilineni_korur() {
+        let mut c = MarketCtx::new(8);
+        c.apply_stream(&StreamEvent::Ctx {
+            coin: "BTC".into(), funding: 0.0001, open_interest: 10.0,
+            mark_px: 100.0, oracle_px: 99.0,
+            premium: Some(0.0025), day_ntl_vlm: Some(500.0), prev_day_px: Some(95.0),
+            ts: 1,
+        });
+        c.apply_stream(&StreamEvent::Ctx {
+            coin: "BTC".into(), funding: 0.0002, open_interest: 11.0,
+            mark_px: 101.0, oracle_px: 100.0,
+            premium: None, day_ntl_vlm: None, prev_day_px: None,
+            ts: 2,
+        });
+        let st = c.get("BTC").unwrap();
+        assert_eq!(st.funding, 0.0002, "çekirdek alan güncellenir");
+        assert_eq!(st.mark_px, 101.0);
+        assert_eq!(st.premium, 0.0025, "null → son bilinen premium korunur");
+        assert_eq!(st.day_ntl_vlm, 500.0, "null → son bilinen vlm korunur");
+        assert_eq!(st.prev_day_px, 95.0);
+    }
+
+    /// İlk event'te Option alan None ise ve önceki değer yoksa:
+    /// 0.0 (bilinmezin dürüst temsili — prev yok) ama asla sahte büyüklük yok.
+    #[test]
+    fn apply_stream_ilk_event_null_ile_baslar() {
+        let mut c = MarketCtx::new(8);
+        c.apply_stream(&StreamEvent::Ctx {
+            coin: "ETH".into(), funding: 0.0001, open_interest: 1.0,
+            mark_px: 3000.0, oracle_px: 2999.0,
+            premium: None, day_ntl_vlm: None, prev_day_px: None,
+            ts: 1,
+        });
+        let st = c.get("ETH").unwrap();
+        assert_eq!(st.premium, 0.0);
+        assert_eq!(st.day_ntl_vlm, 0.0);
     }
 }

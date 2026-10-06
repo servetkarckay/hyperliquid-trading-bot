@@ -76,12 +76,18 @@ pub enum StreamEvent {
     Book { coin: String, bids: Vec<(f64, f64)>, asks: Vec<(f64, f64)>, ts: i64 },
     Mids { mids: HashMap<String, f64>, ts: i64 },
  /// WS activeAssetCtx: canlı piyasa bağlamı (funding, OI, mark/oracle...)
-    Ctx { coin: String, funding: f64, open_interest: f64, mark_px: f64, oracle_px: f64, premium: f64, day_ntl_vlm: f64, prev_day_px: f64, ts: i64 },
+    Ctx { coin: String, funding: f64, open_interest: f64, mark_px: f64, oracle_px: f64, premium: Option<f64>, day_ntl_vlm: Option<f64>, prev_day_px: Option<f64>, ts: i64 },
 }
 
-/// WS/REST sayı alanları: string veya number gelebilir
-pub fn num(v: &Value) -> f64 {
-    v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64()).unwrap_or(0.0)
+/// WS/REST sayı alanları: string veya number gelebilir.
+/// Eksik/geçersiz/finite-olmayan değer → `None` — sahte 0.0 taşınmaz;
+/// arayan taraf event'i geçersiz sayar (drop) ya da Optionsel alan olarak
+/// geçirir ("bozuk ≠ sıfır" kontratı).
+pub fn num(v: &Value) -> Option<f64> {
+    v.as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| v.as_f64())
+        .filter(|x| x.is_finite())
 }
 
 /// metaAndAssetCtxs TEK çağrıyla aktif evreni çeker (delist hariç, hacme göre sıralı)
@@ -244,12 +250,30 @@ impl Ingestor {
                 if ctx.is_null() {
                     return vec![];
                 }
+                // ÇEKİRDEK SAYI KONTRATI: funding/OI/mark/oracle eksik,
+                // geçersiz ya da finite-olmayan event GEÇERSİZDİR ve
+                // düşürülür — sahte sıfır bağlam sisteme girmez.
+                // (premium/dayNtlVlm/prevDayPx HL'de meşru null olabilir →
+                // Option(f64) olarak geçirilir, tüketiciyedeki son bilinen
+                // değer korunur.)
+                let (Some(funding), Some(oi), Some(mark), Some(oracle)) = (
+                    num(&ctx["funding"]),
+                    num(&ctx["openInterest"]),
+                    num(&ctx["markPx"]),
+                    num(&ctx["oraclePx"]),
+                ) else {
+                    tracing::debug!(
+                        coin = %ev.data["coin"],
+                        "activeAssetCtx sayı alanları geçersiz — event düşürüldü (sahte 0.0 yazılmadı)"
+                    );
+                    return vec![];
+                };
                 vec![StreamEvent::Ctx {
                     coin: ev.data["coin"].as_str().unwrap_or("").to_string(),
-                    funding: num(&ctx["funding"]),
-                    open_interest: num(&ctx["openInterest"]),
-                    mark_px: num(&ctx["markPx"]),
-                    oracle_px: num(&ctx["oraclePx"]),
+                    funding,
+                    open_interest: oi,
+                    mark_px: mark,
+                    oracle_px: oracle,
                     premium: num(&ctx["premium"]),
                     day_ntl_vlm: num(&ctx["dayNtlVlm"]),
                     prev_day_px: num(&ctx["prevDayPx"]),
@@ -257,6 +281,110 @@ impl Ingestor {
                 }]
             }
             _ => vec![],
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod num_sozlesme_testleri {
+    use super::*;
+    use serde_json::json;
+
+    /// SAYI SÖZLEŞMESİ: eksik/geçersiz/finite-olmayan → None; sahte 0.0 YOK.
+    #[test]
+    fn num_gecerli_string() {
+        assert_eq!(num(&json!("0.00012")), Some(0.00012));
+    }
+
+    #[test]
+    fn num_gecerli_number() {
+        assert_eq!(num(&json!(123.5)), Some(123.5));
+        assert_eq!(num(&json!(0)), Some(0.0)); // gerçek sıfır GEÇERLİDİR
+    }
+
+    #[test]
+    fn num_gecersiz_string_sifir_yazmaz() {
+        assert_eq!(num(&json!("abc")), None);
+        assert_eq!(num(&json!("")), None);
+    }
+
+    #[test]
+    fn num_eksik_deger_none() {
+        assert_eq!(num(&json!(null)), None);
+        assert_eq!(num(&Value::Bool(true)), None);
+    }
+
+    #[test]
+    fn num_finite_olmayan_basilir() {
+        // "NaN"/"Infinity" string'i f64 parse'ına GİRER; is_finite keser
+        assert_eq!(num(&json!("NaN")), None);
+        assert_eq!(num(&json!("Infinity")), None);
+        assert_eq!(num(&json!("-Infinity")), None);
+        assert_eq!(num(&json!("1e999")), None); // inf'e taşar
+    }
+
+    /// Çeviri: geçerli ctx → event üretilir, alanlar birebir taşınır.
+    #[test]
+    fn ctx_ceviri_gecerli_event_uretir() {
+        let ev = hyperliquid_api::websocket::WsEvent {
+            channel: "activeAssetCtx".into(),
+            data: json!({"coin":"BTC","ctx":{"funding":"0.0001","openInterest":"123.4",
+                "markPx":"65000.5","oraclePx":"64999.9","premium":"0.001",
+                "dayNtlVlm":"987.6","prevDayPx":"64000"}}),
+        };
+        let out = Ingestor::translate(&ev);
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            StreamEvent::Ctx { funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, .. } => {
+                assert_eq!(*funding, 0.0001);
+                assert_eq!(*open_interest, 123.4);
+                assert_eq!(*mark_px, 65000.5);
+                assert_eq!(*oracle_px, 64999.9);
+                assert_eq!(*premium, Some(0.001));
+                assert_eq!(*day_ntl_vlm, Some(987.6));
+                assert_eq!(*prev_day_px, Some(64000.0));
+            }
+            _ => panic!("Ctx bekleniyordu"),
+        }
+    }
+
+    /// Geçersiz/eksik ÇEKİRDEK alan → event DÜŞÜRÜLÜR (sahte 0.0 bağlam YOK).
+    #[test]
+    fn ctx_bozuk_cekirdek_event_dusurur() {
+        let mk = |mark: serde_json::Value, funding: serde_json::Value| {
+            hyperliquid_api::websocket::WsEvent {
+                channel: "activeAssetCtx".into(),
+                data: json!({"coin":"BTC","ctx":{"funding":funding,"openInterest":"10",
+                    "markPx":mark,"oraclePx":"99"}}),
+            }
+        };
+        // markPx geçersiz string
+        assert!(Ingestor::translate(&mk(json!("bozuk"), json!("0.0001"))).is_empty());
+        // funding eksik
+        assert!(Ingestor::translate(&mk(json!("100"), json!(null))).is_empty());
+        // markPx finite-olmayan → düşür; 0.0 falan YAZILMAZ
+        assert!(Ingestor::translate(&mk(json!("NaN"), json!("0.0001"))).is_empty());
+    }
+
+    /// HL'de meşru null olan alanlar (premium vb.) Option olarak taşınır —
+    /// 0.0'a çevrilmeler yok.
+    #[test]
+    fn ctx_mesru_null_option_tasinir() {
+        let ev = hyperliquid_api::websocket::WsEvent {
+            channel: "activeAssetCtx".into(),
+            data: json!({"coin":"ETH","ctx":{"funding":"0.0001","openInterest":"1",
+                "markPx":"3000","oraclePx":"2999","premium":null,
+                "dayNtlVlm":null,"prevDayPx":null}}),
+        };
+        let out = Ingestor::translate(&ev);
+        match &out[0] {
+            StreamEvent::Ctx { premium, day_ntl_vlm, prev_day_px, .. } => {
+                assert_eq!(*premium, None);
+                assert_eq!(*day_ntl_vlm, None);
+                assert_eq!(*prev_day_px, None);
+            }
+            _ => panic!("Ctx bekleniyordu"),
         }
     }
 }
