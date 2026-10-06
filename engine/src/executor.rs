@@ -29,9 +29,9 @@ pub const TS_GRACE_MS: u64 = 600_000;
 /// Deterministik idempotency anahtarı.
 ///
 /// Hyperliquid cloid = **128 bit hex**, `0x` prefix'li → 32 hex hane
-/// (docs: "optional 128 bit hex string, e.g. 0x1234...cdef"). 16 hane
-/// gönderilince API 422 "Failed to deserialize the JSON body" döndü (testnet
-/// 09:22'de Not: tüm flatten emirleri reddedildi).
+/// (docs: "optional 128 bit hex string, e.g. 0x1234...cdef").
+/// Kontrat: 0x + 32 hane hex (128-bit); kısa/16 hane gönderim API 422
+/// ("Failed to deserialize the JSON body") ile reddedilir.
 ///
 /// Aynı (coin, fiyat, boyut, döngü) için aynı anahtar üretilir → `post`'un
 /// 429/5xx retry'ı aynı emri ikinci kez yollayamaz.
@@ -104,22 +104,22 @@ pub struct FillEvent {
     pub is_sl_fill: bool,
 }
 
-/// BLOCKER-2 DÜZELTMESİ: dolumun açılış/kapanış ayrımı `closedPnl`'den
-/// YAPILMAZ. Hyperliquid fill şeması `dir` alanını ayrıca verir:
+/// Dolumun açılış/kapanış ayrımı `dir` alanından yapılır — `closedPnl`
+/// KULLANILMAZ. Hyperliquid fill şeması:
 /// "Open Long"/"Open Short" (açılış), "Close Long"/"Close Short"
-/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — eski tarafı
-/// kapatıp yeniyi açar → yeni taraf için açılış).
+/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — önceki
+/// tarafı kapatıp yeniyi açar → yeni taraf için açılış).
 ///
 /// `closedPnl == 0` kesinlikle "açılış" demek değildir: break-even
-/// kapanışta 0'dır ve eski kod tam bunu açılış sanıp giriş korumasını
-/// TEKRAR kuruyordu.
+/// kapanışta 0'dır; açılış-koruması `dir`-tabanlı ayrımla kurulur.
 pub fn is_open_fill(dir_field: &str) -> bool {
     dir_field.starts_with("Open") || dir_field.contains('>')
 }
 
 /// BORSA STOP grid denemesi: fiyat tick'i coin'e özel ve meta'da YOK
-/// (Not: ME 6 haneyi reddediyor). "invalid price" gelince kaba ızgarada
-/// bir hane azaltılır. Giriş yolu (`batch_execute`) ile aynı strateji.
+/// Bazı coin'ler 6 haneyi reddeder; "invalid price" gelince kaba
+/// ızgarada bir hane azaltılır. Giriş yolu (`batch_execute`) ile
+/// aynı strateji.
 async fn place_sl_grid(
     ex: &Exchange,
     asset: u32,
@@ -159,7 +159,7 @@ async fn place_sl_grid(
 }
 
 /// **REDUCE-ONLY TP TRIGGER** — `tpsl="tp"`, `is_market=false` (dinlenen
-/// limit). TP artık gerçek kapanış kaynağı: fill geldiğinde `oid` eşleşmesi
+/// limit). TP gerçek kapanış kaynağıdır: fill geldiğinde `oid` eşleşmesi
 /// ile `ExitReason::TakeProfit` atanır.
 ///
 /// SL ile AYNI ızgara mantığı: borsa fiyat ızgarasını reddederse hane
@@ -255,10 +255,10 @@ pub struct Executor {
  /// otomatik iptal eder.
     pub sl_orders: HashMap<String, i64>,
  /// coin -> stop'un KONULDUĞU zaman (ms). `ensure_sl` idempotency'si
- /// `sl_orders`'a bakıyordu; WS reconnect'te ya da `orderUpdates`'in
- /// "open" bildirimi geç geldiğinde harita boşalıyor ve motor aynı stop'u
- /// 5 dakika sonra TEKRAR kuruyordu (Not: ALT/TURBO/BIGTIME üst üste
- /// iki oid ile kuruldu). `TS_GRACE_MS` boyunca tekrar denenmez.
+ /// `sl_orders`'a bakar; WS reconnect'te ya da `orderUpdates`'in
+ /// "open" bildirimi geç geldiğinde harita boşalabilir ve motor
+ /// aynı stop'u TEKRAR kurar. `TS_GRACE_MS` boyunca tekrar denenmez
+ /// (çift-oid önleme kapısı).
     pub sl_armed_at: HashMap<String, u64>,
  /// coin -> borsada DURAN stop'un fiyatı. Restart sonrası `trail` haritası
  /// boş olduğu için stop'un seviyesi bilinmez; bu harita `openOrders`
@@ -268,21 +268,19 @@ pub struct Executor {
  /// Arka plandaki (spawn) stop kurulumlarının oid'ini sahibe geri taşıyan
  /// kanal. `tokio::spawn` `&mut self` yakalayamaz; bu olmadan kurulan stop
  /// `sl_orders`'a **hiç** yazılmaz ve motor aynı stop'u tekrar kurar
- /// (ölçülen çift-stop hatasının asıl kaynağı).
+ /// (çift-stop kurulumunu önler).
     pub sl_tx: tokio::sync::mpsc::UnboundedSender<(String, i64, f64)>,
     pub sl_rx: tokio::sync::mpsc::UnboundedReceiver<(String, i64, f64)>,
  /// GİRİŞ EMİRİ ATILDI, henüz dolmadı: coin -> (hedef SL fiyatı, ts_ms).
  /// Dolum anında (fill gelir gelmez) borsa stop'u kurulur.
  /// DİKKAT: `run_cycle` bitmeden WS dolumu işlenemez (ana döngü `await`
- /// sırasında `oe_rx`'i okumaz) — dolayısıyla eski kayıtlar ZAMAN
- /// DAMGASI ile temizlenmeli, "pozisyon yok" diye anında silinmemeli.
+ /// sırasında `oe_rx`'i okumaz) — bekleyen kayıtlar ZAMAN DAMGASI ile
+ /// temizlenmeli, "pozisyon yok" diye anında silinmemeli.
  ///
- /// ⚠️ DEĞER **RİSK MESAFESİDİR** (fiyat farkı), MUTLAK STOP FİYATI DEĞİL.
- /// Ölçülen hata: mutlak fiyat karar anındaki **defter** fiyatından
- /// hesaplanıyordu, dolum ise IOC kaymasıyla **%0.9 daha kötü** geldi:
- /// defter entry=0.0090015 → stop=0.0090015 (short, +risk)
- /// gerçek dolum =0.009083 → stop dolumun **0.9% ALTINDA**
- /// → stop zaten piyasadaydı → **1.1 saniyede tetiklendi**, −$0.21.
+ /// ⚠️ DEĞER **RİSK MESAFESİDİR** (fiyat farkı), MUTLAK STOP FİYATI DEĞİL:
+ /// IOC kayması karar anındaki defter fiyatını %0.9 gibi oranlarda
+ /// kötüleştirebilir; mutlak stop fiyatı mesafe kaybında dolumun
+ /// ALTINA düşer ve anında tetiklenir. Mesafe farkı bağışıklıdır.
  /// Mesafe taşınınca stop `dolum_px ± mesafe` ile kurulur ve kayma
  /// stop'u yanlış tarafa **taşıyamaz** (kayma olsa da stop dolumun
  /// lehine kalır).
@@ -294,7 +292,7 @@ pub struct Executor {
  /// dolum-anına taşınabilir).
     pub pending_tp: HashMap<String, (f64, u64)>,
  /// BORSA TARAFI TP: coin -> reduce-only TP trigger oid'i (`tpsl="tp"`).
- /// TP artık **gerçek kapanış kaynağıdır** (TP fill → TakeProfit).
+ /// TP **gerçek kapanış kaynağıdır** (TP fill → TakeProfit).
     pub tp_orders: HashMap<String, i64>,
  /// coin -> TP'nin KONULDUĞU zaman (ms) — `ensure_tp` idempotency
  /// kapısı (`sl_armed_at` ile aynı şema; çift TP yasağı).
@@ -398,11 +396,10 @@ impl Executor {
         let next = Self::parse_positions(arr);
  // BOŞ DİZİ = HATA DEĞİL, GERÇEKTİR.
  //
- // Yanlış ayrım çok pahalıydı: "boş dizi → hata, eski haritayı koru"
- // kuralı, tüm pozisyonlar gerçekten kapandığında (SL'ler borsada
- // tetiklendi, `user` dolumu WS kopması yüzünden kaçtı) haritayı
- // ÖMÜR BOYU DONDURUYORDU → `open_now` tavanı hiç açılmıyor, `pz`
- // yanlış, senkron hep eski haritayı "tekrar doğruluyordu".
+ // Kontrat: "boş dizi → hata, haritayı koru" ayrımı DONMUŞ harita
+ // doğurur — SL'ler borsada tetiklenip `user` dolumu WS kopmasında
+ // kaçtığında pozisyonlar kapalıdır ama harita dolu kalır; `open_now`
+ // tavanı hiç açılmaz, senkron bayat haritayı tekrar doğrular.
  //
  // Doğru ayrım: `assetPositions` **anahtarı yoksa / null ise** hata
  // (parse sorunu → harita korunur). Anahtar var ve dizi boşsa hesap
@@ -600,10 +597,9 @@ impl Executor {
             }
             let is_buy = *szi < 0.0;
             let px = if is_buy { base * 1.01 } else { base * 0.99 };
- // NOT: `place_limit` adaptif fiyat tick keşfini KULLANMIYOR — ME gibi
- // 6 haneyi reddeden coin'lerde "invalid price" ile kapanıyordu
- // (Not: 4 kapakta da başarısız, pozisyon kaldı). Aynı, girişlerde
- // kanıtlanmış `batch_execute` yolunu kullan.
+ // NOT: `place_limit` adaptif fiyat tick keşfini KULLANMIYOR —
+ // 6 haneyi reddeden coin'lerde "invalid price" ile kapanabilir;
+ // girişlerde kanıtlanmış `batch_execute` yolu kullanılır.
             if let Some((asset, szd)) = self.cached_asset(coin) {
                 let qty = hyperliquid_api::round_sz_up(sz, szd);
                 let w = hyperliquid_api::exchange_endpoint::WireOrder {
@@ -882,8 +878,8 @@ impl Executor {
  /// Neden bu sira zorunlu: ters sırada (`iptal → yerleştir`) yerleştirme
  /// başarısız olursa ya da ağ koparsa pozisyon **sıfır korumasız** kalır.
  /// Not: `place_trigger` bazı coin'lerde fiyat ızgarası bulamayınca
- /// ("invalid price") denemelerde tamamen başarısız oluyor (ME: 4 deneme).
- /// Doğru sırada, yerleştirme başarısızsa eski stop **ayakta kalır** →
+ /// ("invalid price") denemelerde tamamen başarısız olabiliyor.
+ /// Doğru sırada, yerleştirme başarısızsa önceki stop **ayakta kalır** →
  /// en kötü senaryo "trailing gerçekleşmedi", "korumasız pozisyon" değil.
  ///
  /// `grace` kapısı **bilinçli olarak atlanır**: bu bir *ikinci* stop değil,
@@ -907,16 +903,16 @@ impl Executor {
         let ex = self.ex.clone();
  // 1) YENİYİ KUR
         let new_oid = place_sl_grid(&ex, asset, !is_long, qty, new_px, dec, coin).await?;
- // 2) Yalnız kurulduktan SONRA eskiyi iptal et
+ // 2) Yalnız kurulduktan SONRA önceki stop iptal edilir
         if let Some(o) = old_oid {
             if o != new_oid {
                 match self.cancel(coin, o).await {
                     Ok(()) => {
                         self.open_orders.remove(&o);
-                        tracing::info!("[SL] {coin} eski stop iptal edildi oid={o} (yeni={new_oid})");
+                        tracing::info!("[SL] {coin} önceki stop iptal edildi oid={o} (yeni={new_oid})");
                     }
                     Err(e) => tracing::warn!(
-                        coin, oid = o, "eski stop iptal edilemedi — İKİ STOP AÇIK KALABİLİR: {e}"
+                        coin, oid = o, "önceki stop iptal edilemedi — İKİ STOP AÇIK KALABİLİR: {e}"
                     ),
                 }
             }
@@ -1132,11 +1128,10 @@ impl Executor {
         let rows = self.parse_open_orders(&arr);
         for row in rows {
             let (cn, oid) = (row.coin.clone(), row.oid);
- // BORSA STOP'LARINI YENİDEN TANI — ÖLÇÜLMÜŞ HATA BURADA:
+ // BORSA STOP'LARINI `reduceOnly + limitPx` EŞLEŞMESİYLE TANI:
  //
- // Önceki tespit `isTrigger || triggerPx` alanlarına bakıyordu ve
- // **daima false** dönüyordu. Testnet `openOrders` yanıtı bu alanları
- // **hiç göndermiyor** (Not: 09:5x, ham yanıt):
+ // Tespit `isTrigger || triggerPx` alanlarına bakamaz — REST
+ // `openOrders` yanıtı bu alanları GÖNDERMEZ (ham yanıt örnek):
  // {'coin':'GMT','side':'B','limitPx':'0.009562','sz':'5539.0',
  // 'oid':61642165356,'reduceOnly':True,'isTrigger':None,'triggerPx':None}
  // Yani REST taraması stop'ları ASLA tanımıyordu → `sl_orders`
@@ -1155,10 +1150,10 @@ impl Executor {
             let is_buy = row.is_buy;
             let px = row.px;
  // **BİZİM TP'MİZ SL DEĞİLDİR**: reduce-only trigger-LIMIT
- // TP de dinlenir; eski kural ("resting + reduceOnly = stop") TP'yi
- // de aday sayıp dedupe EN YENİ oid'i tuttuğu için oid sırasına
- // göre ya TP'yi ya SL'yi İPTAL EDİYORDU (Not: ZRO/AVAX/ONDO
- // TP'leri, BIO'nun SL'i iptal edildi).
+ // TP de dinlenir; "resting + reduceOnly = stop" ayrımı TEK
+ // BAŞINA yeterli değildir — TP/SL ayrımı fiyat yakınlığıyla
+ // (`is_our_tp_row`) yapılır; aksi halde dedupe TP veya SL'yi
+ // yanlış aday sayıp iptal edebilir.
  //
  // RESTART DEVRALMA: `tp_last_px` RAM'de kaybolur;
  // cloid tuzu deterministiktir → RAM'siz tanıma + oid GERİ YÜKLEME
@@ -1222,10 +1217,9 @@ impl Executor {
 
  /// Aynı coin için birden fazla duran stop varsa **yalnız en yenisini** bırak.
  ///
- /// Ölçülen zarar (testnet 09:5x): GMT için oid=…61867 ve …165356, LAYER
- /// için …61871 ve …166722 aynı anda borsada duruyordu. İki reduce-only stop
- /// birden pozisyonu kapatmaya çalışıyor; borsa birini `reduceOnlyCanceled`
- /// ile iptal ediyor, `sl_orders` hangisinin ayakta kaldığını bilmiyor →
+ /// İki reduce-only stop aynı pozisyonu kapatmaya çalışırsa borsa
+ /// birini `reduceOnlyCanceled` ile iptal eder; `sl_orders`
+ /// hangisinin ayakta kaldığını bilemez →
  /// bir sonraki taramada üçüncüsü ekleniyor.
  ///
  /// oid zamanla artan sayıdır (yeni emir daha büyük oid alır) → en büyük
@@ -1254,7 +1248,7 @@ impl Executor {
                     self.open_orders.remove(oid);
                 }
             }
- // STOP FİYATINI REST'ten TERS HESAPLA — ÖLÇÜLEN TUZAK:
+ // STOP FİYATINI REST'ten TERS HESAPLA — KONTRAT:
  //
  // `place_trigger(is_market = true)` gövdeyi
  // "p": trigger_px × 1.05 (alış stop, kısa kapatma)
@@ -1291,10 +1285,9 @@ impl Executor {
  /// REST'ten pozisyonları yenile (clearinghouseState.assetPositions)
     pub async fn refresh_positions(&mut self) -> Result<()> {
         let st = self.info.clearinghouse_state(&self.user).await?;
- // KRİTİK: borsa ara sıra `null` döndürüyor (Not: 23:0x). Null'da
- // pozisyonları SİLMEK, borsadaki $400'lük açık pozisyonları "yok"
- // sayardı -> bot onları yönetmezdi. Boş/çözümsüz yanıt = hatadır,
- // eski harita korunur.
+ // KRİTİK: borsa ara sıra `null` döndürebilir. Null'da pozisyonları
+ // SİLMEK, borsadaki açık pozisyonları "yok" saymak olur → bot onları
+ // yönetmezdi. Boş/çözümsüz yanıt = hatadır, önceki harita korunur.
         let arr = match st.get("assetPositions").and_then(|v| v.as_array()) {
             Some(a) => a.clone(),
             None => {
@@ -1325,9 +1318,9 @@ impl Executor {
     pub fn handle_ws_event(&mut self, channel: &str, data: &Value) {
         match channel {
             "orderUpdates" => self.apply_order_update(data),
- // SUNUCU KANALI ADI "userEvents" — "user" ile eşleştirmek
- // TÜM DOLUMLARI sessizce düşürüyordu (Not: borsada pozisyon
- // vardı, `fill(user)` sayacı 0, makine hiç pozisyona girmiyordu).
+ // SUNUCU KANALI ADI "userEvents" — "user" takısıyla eşleşir;
+ // eşleşmeyen kanal adı tüm fill'leri sessizce DÜŞÜRÜR (fill
+ // işlenmez, makine hiç pozisyona girmez).
             "user" | "userEvents" | "userNonFundingLedgerUpdates" => {
                 for f in data["fills"].as_array().cloned().unwrap_or_default() {
                     self.apply_fill(&f);
@@ -1396,8 +1389,7 @@ impl Executor {
  // 3-4 dakika gecikmeyle geliyor; bu anlık olay stop kaydından
  // düşmezse motor stop'u YENİDEN kuruyor, sonra borsa `reduceOnly`
  // gereksiz emri `reduceOnlyCanceled` ile iptal ediyor.
- // Not: TURBO stop oid=…09076 kuruldu → tetiklendi → 4 dk sonra
- // "stop iptal edildi" logu, yeni oid ile ikinci kurulum denemesi.
+ // aksi halde motor aynı stop'u YENİDEN kurar (çift stop döngüsü).
             if self.sl_orders.get(&coin) == Some(&oid) {
                 self.sl_orders.remove(&coin);
                 self.sl_armed_at.remove(&coin);
@@ -1476,10 +1468,9 @@ impl Executor {
                     }
                 }
  // STOP TETİKLENDİ (bu dolumun oid'i borsa stop'ununkiyle aynıysa):
- // stop artık yerinde değil, `sl_orders`'ta kalırsa döngü sonundaki
- // senkron "pozisyon hâlâ açık" görüp aynı stop'u YENİDEN
- // kurar, sonra iptal eder — Not: oid=...584 kuruldu,
- // 3 dk sonra oid=...641 tekrar kuruldu ve o da iptal edildi.
+ // stop artık yerinde değildir; `sl_orders`'ta kalırsa döngü
+ // sonundaki senkron "pozisyon hâlâ açık" görüp aynı stop'u
+ // YENİDEN kurar, sonra iptal eder (çift stop döngüsü).
  // Borsa stop'u kendisi kapanmışsa `oid` eşleşir.
                 let mut is_sl_fill = false;
                 if self.sl_orders.get(&coin) == Some(&oid) {
@@ -1541,13 +1532,13 @@ impl Executor {
             }
             if open_fill {
                 if let Some((risk, _ts)) = self.pending_sl.remove(&coin) {
- // STOP GERÇEK DOLUM FİYATINDAN. `px` = dolum fiyatı.
- // (Ölçülen hata: karar anındaki defter fiyatı + IOC kayması
- // → stop %0.9 yanlış tarafta → 1.1 sn'de tetiklendi.)
+ // STOP GERÇEK DOLUM FİYATINDAN. `px` = dolum fiyatı
+ // (IOC kayması defter fiyatından sapor; mutlak fiyat yolu
+ // stop'u yanlış tarafa koyabilir — mesafe yolu bağışıklıdır).
                     let mut sl = if is_buy { px - risk } else { px + risk };
  // SERT YAN KAPISI: stop dolum fiyatının **hatalı tarafına**
- // asla konulamaz (böyle bir emir zaten piyasada olduğu için
- // anında tetiklenir ve zararı büyütür — ölçülen bu). Minimum
+ // konulamaz — o tarafta emir zaten piyasadadır ve anında
+ // tetiklenip zararı büyütür. Minimum
  // mesafe %0.25; risk mesafesi zaten bu eşiğin üstündeyse
  // koşul sağlanmaz.
                     let min_d = px * 0.0025;
@@ -1578,7 +1569,7 @@ impl Executor {
  // çağrısını grace'e takar; gerçek oid kanal ile döner.
                         self.sl_armed_at
                             .insert(coin.clone(), hyperliquid_api::now_ms());
- // GERÇEK TP EXECUTION: TP artık borsada asılı.
+ // GERÇEK TP EXECUTION: TP borsada asılıdır.
  // Mesafe `pending_tp`'den (karar anında
  // `AllocationConfig::tp_from_entry` ile türetildi;
  // mesafe girişten bağımsız → doluma taşınabilir).
@@ -1656,8 +1647,7 @@ impl Executor {
  ///
  /// `tokio::spawn` içinden `&mut self` geçemez; bu kanal tek yazma yoludur.
  /// `run_cycle` başında çağrılır. Çağrılmazsa kurulan stop hiç kayıt
- /// altına alınmaz ve motor 5 dakika sonra aynı stop'u ikinci kez asar
- /// (ölçülen hata).
+ /// altına alınmaz ve motor aynı stop'u ikinci kez asabilir.
     pub fn drain_sl_results(&mut self) -> usize {
         let mut n = 0usize;
         while let Ok((coin, oid, px)) = self.sl_rx.try_recv() {
@@ -1980,11 +1970,10 @@ mod senaryo_tests {
     }
 
  // ANALİST MADDESİ 3 — "geçerli boş assetPositions = hata" ayrımı
- // YANLIŞTI ve sistem kendini kilitlemeye meyilliydi: tüm pozisyonlar
- // gerçekten kapandığında (SL'ler borsada tetiklendi, `user` dolumu WS
- // kopması yüzünden kaçtı) her döngü "hata" sayılır → 5 hata üst üste
- // kill-switch → flatten → restart → tekrar. Testnet koşuları hep
- // pozisyonlu olduğu için görülmemişti.
+ // NORMAL İŞLEYİŞ: tüm pozisyonlar gerçekten kapandığında
+ // (`user` dolumu WS kopmasında kaçabilir) boş dizi HATA SAYILMAZ,
+ // haritayı sıfırlar — aksi halde her döngü "hata" sayılır, 5 hata
+ // üst üste kill-switch döngüsü tetiklenir.
     #[test]
     fn gecerli_bos_dizi_flat_hesabi_temsil_edER_flat() {
         let next = Executor::parse_positions(&[]);
@@ -1992,7 +1981,7 @@ mod senaryo_tests {
     }
 
     #[test]
-    fn bos_dizi_eskiden_bos_haritada_kapanan_bildirmez() {
+    fn bos_dizi_bos_haritada_kapanis_bildirmesidir() {
         let mut old: HashMap<String, Position> = HashMap::new();
         old.insert(
             "BTC".into(),
@@ -2017,15 +2006,15 @@ mod senaryo_tests {
     #[test]
     fn suregre_kapisi_tekrar_kurmayi_engeller() {
  // `sl_orders` boşken (reconnect) süre kapısı yeni stop'un kurulmasını
- // engeller. Ölçülen hata: aynı pozisyona 5 dk arayla ikinci oid.
+ // engeller (aynı pozisyona ikinci oid kurulumunu önler).
         let armed: HashMap<String, u64> =
             HashMap::from([("BTC".to_string(), hyperliquid_api::now_ms())]);
         let age = (hyperliquid_api::now_ms() as i64 - armed["BTC"] as i64).unsigned_abs();
         assert!(age < TS_GRACE_MS, "taze kurulum grace penceresinde");
- // eski kayıt artık geçmişte
+ // kayıt grace penceresinin dışındadır
         let old = hyperliquid_api::now_ms() - TS_GRACE_MS - 1_000;
         let age_old = (hyperliquid_api::now_ms() as i64 - old as i64).unsigned_abs();
-        assert!(age_old >= TS_GRACE_MS, "eski kurulum grace dışı → yeniden denenebilir");
+        assert!(age_old >= TS_GRACE_MS, "grace dışı kurulum yeniden denenebilir");
     }
 }
 
@@ -2053,9 +2042,10 @@ mod cloid_tests {
 mod stop_px_tests {
  /// REST `limitPx`'i stop fiyatı DEĞİL. `place_trigger(is_market = true)`
  /// gövdeyi `trigger × 1.05` (alış) / `trigger × 0.95` (satış) yolluyor ve
- /// REST `openOrders` yalnız `limitPx` döndürüyor. Ölçülen canlı eşleşme:
- /// LAYER stop px=0.07868414 → REST limitPx=0.082614 → /1.05 = 0.078680 ✓
- /// Bu olmadan restart sonrası stop seviyesi %5 yanlış okunur.
+ /// REST `openOrders` yalnız `limitPx` döndürediği için stop fiyatı
+ /// `limitPx / 1.05` (satış-stop) veya `/0.95` (alış-stop) formülüyle
+ /// ters hesaplanır — aksi halde restart sonrası stop seviyesi
+ /// %5 yanlış okunur.
     #[test]
     fn rest_limit_px_ters_cevirilir_yoksa_yuzde5_kayik() {
         let trigger = 0.07868414731730063_f64;
@@ -2108,10 +2098,10 @@ mod sl_side_tests {
         sl
     }
 
- /// ÖLÇÜLEN HATA: stop, karar anındaki **defter** fiyatından hesaplanıyordu.
- /// GMT: defter entry=0.0090015 (short), gerçek dolum=0.009083 (%0.9 kayma).
- /// Mutlak fiyat kullanılırsa stop = 0.0090015 + risk, dolumun **altında**
- /// kalır → zaten piyasada → 1.1 saniyede tetiklenir (−$0.21 Not: ).
+ /// KONTRAT: stop mesafesi mutlak fiyat DEĞİL, risk mesafesidir.
+ /// IOC kayması dolumu defter fiyatından %0.9 gibi oranlarda
+ /// saptırır; mutlak fiyat yolu stop'u dolumun ALTINDA bırakır
+ /// (zaten piyasadaki emir = anında tetiklenme).
     #[test]
     fn ioc_kaymasi_stopu_yan_tarafa_tasimaz() {
         let fill = 0.009083_f64;
@@ -2122,11 +2112,13 @@ mod sl_side_tests {
             "kısa stop dolumun ÜSTÜNDE olmalı, yoksa anında tetiklenir. sl={sl} fill={fill}"
         );
         assert!((sl - (fill + risk)).abs() < 1e-12, "mesafe korunur");
- // ESKİ (hatalı) davranışın sonucu: stop dolumun %0.9 altında
+ // MESAFE KORUMASI: stop dolumdan EN AZ `risk` kadar uzaktır;
+ // mesafe mutlak fiyata çevrilirse IOC kayması stop'u dolumun
+ // %0.9 gibi oranlarda altına bırakır → anında tetiklenme.
         let buggy = 0.0090015_f64 + risk;
         assert!(
             buggy < fill,
-            "kanıt: eski yöntem stop'u dolumun altına koyuyordu → anında tetiklenme"
+            "mesafe kayıpsız korunur: stop dolumun altına düşmez"
         );
     }
 

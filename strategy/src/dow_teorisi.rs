@@ -5,8 +5,8 @@
 //! 2. Yapı: HH+HL (yükseliş) / LH+LL (düşüş) + hacim doğrulayıcı
 //! (yükseliş bar hacmi baskınlığı) + EMA50 konumu.
 //! 3. Dört onay tamamsa Long/Short [0.6]; eksikte Hold (eleme).
-//! 4. EMA hesaplanamazsa Skip — SAHTE onay yok (eski `unwrap_or(0.0)`
-//! sahte Long üretiyordu).
+//! 4. EMA hesaplanamazsa Skip — SAHTE onay yok (gösterge yok = onay
+//! yok; trivial koşul EMA yokluğunda onay üretmez).
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
@@ -39,8 +39,8 @@ impl Strategy for DowTeorisi {
         let dn_v: f64 = c.windows(2).enumerate().filter(|(_i, w)| w[1] < w[0]).map(|(i, _)| vols[i + 1]).sum();
         let vol_confirms_up = up_v > dn_v;
 
- // EMA50 YOK → onay VERİLMEZ (eski `unwrap_or(0.0)` EMA boşsa
- // `px > 0.0` trivially true yapıp SAHTE Long onayı üretiyordu).
+ // EMA50 YOK → onay VERİLMEZ: EMA None'ken `px > 0.0` koşulu
+ // trivially true olur; sahte Long onayı bu yolla ÜRETİLMEZ.
         let Some(e50) = last_ema(&c, 50) else {
             return Signal::Skip { reason: "EMA50 hesaplanamadı".into() };
         };
@@ -134,7 +134,7 @@ mod audit_tests {
     }
 
  /// D — EMA hesaplanamazsa Skip: SAHTE Long onayı ÜRETİLMEZ
- /// (eski `unwrap_or(0.0)` EMA boşsa `px > 0.0` trivially true yapıyordu).
+ /// (EMA None'ken `px > 0.0` trivially true olurdu; onay yolu None'a bağlı).
     #[test]
     fn dow_ema_yoksa_skip_sahte_onay_uretmez() {
         let pivs = [(0usize, 100.0), (10, 98.0), (30, 112.0), (50, 102.0), (70, 122.0), (90, 108.0), (119, 116.0)];

@@ -25,9 +25,9 @@ impl Strategy for KlasikIndikatorler {
         let mut notes = Vec::new();
 
  // 1) RSI14: 30<RSI<50 -> +1 (dip alım bölgesi), 50<RSI<70 -> -0.5 (aşırı)
- // I — SİMETRİ DÜZELTMESİ: dip alım ödülü (+1) ile aşırı alım cezası
- // eşit ağırlıkta (eski kod: aşırı alım −0.5, OBV aşağı kolü YOK →
- // Short skoru yapısal ulaşılmazdı = gizli Long yanlılığı).
+ // I — SİMETRİ KONTRATI: dip alım ödülü (+1) ile aşırı alım cezası
+ // eşit ağırlıkta; Short skoru Long skoruyla yapısal simetriktir
+ // (tek yanlı ödül/ceza asimetrisi Long yanlılığı doğurur).
         // KONTRAT: None göstergeler oy KATMAZ. RSI hesaplanamazsa (None)
         // nötr 50 İLE SAHTE oy yazılmaz — gösterge yok = katkı yok.
         match indicators::rsi(&c, 14).last().and_then(|v| *v).filter(|v| v.is_finite()) {

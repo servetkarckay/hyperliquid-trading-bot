@@ -10,6 +10,9 @@
 //! 4. Periyodik dump (300 sn): etkin ağırlıklar (ATOMİK tmp+rename),
 //! tick cache, tracker state.
 //! 5. Restart exponential backoff (30..300 sn).
+//! 6. Öğrenme dönemi bootstrap: testnet endpoint teyidi, FRESH_START
+//!    wipe (tracker/weights/epoch/risk + flatten + arşiv), epoch
+//!    yükleme, risk hafızası yükleme — normal restart state KORUR.
 
 use engine::engine_loop::{Engine, LoopConfig};
 use utils::{logger, time};
@@ -40,9 +43,9 @@ async fn main() -> anyhow::Result<()> {
  // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
     engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
 
-    // Risk hafızası yolu: WIPE ve normal-yükleme AYNI kaynağı kullanmalı
-    // (önceki hata: wipe hard-coded, yükleme ENV'den — custom path'te
-    // fresh reset risk hafızasını SİLEMEZDİ).
+    // Risk hafızası yolu: WIPE ve normal-yükleme AYNI kaynağı kullanır —
+    // RISK_STATE_PATH env'i; custom path'te de fresh reset risk hafızasını
+    // tamamen temizler ve restart aynı hafızayı yükler.
     let risk_state_path = std::env::var("RISK_STATE_PATH")
         .unwrap_or_else(|_| "/root/hyperliquid/config/risk_state.json".into());
     let decision = engine::epoch::fresh_start_decision(fresh_env, std::path::Path::new(&epoch_path).exists(), is_testnet);
@@ -166,10 +169,10 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.25);
- // TP artık GERÇEK kapanıştır mesafesi (tp_atr_mult/sl_atr_mult)
- // × gerçek risk mesafesidir (min 2×risk kapılı); giriş dolumunda
- // reduce-only TP trigger borsaya asılır, fill → ExitReason::TakeProfit.
- // Trailing yalnız SL'yi ratchet'ler.
+ // TP mesafesi (tp_atr_mult/sl_atr_mult) × GERÇEK risk mesafesidir
+ // (min 2×risk kapılı); giriş dolumunda reduce-only TP trigger borsaya
+ // asılır, fill → ExitReason::TakeProfit. Trailing yalnız SL'yi
+ // ratchet'ler.
     tracing::info!(
         "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          \
          (yalnız SL ratchet'lenir; TP GERÇEK kapanıştır: giriş dolumunda reduce-only TP trigger asılır — entry_eff ± max(tp/sl×risk, 2×risk), §4)"
@@ -228,16 +231,16 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut cycle = tokio::time::interval(std::time::Duration::from_secs(cycle_secs));
- // kill-switch taksonomisi. Eşik `ENGINE_CRIT_THRESHOLD` (varsayılan 5)
- // ama artık yalnız **karar-kritik** hataları sayar.
+ // kill-switch taksonomisi: eşik `ENGINE_CRIT_THRESHOLD` (varsayılan 5)
+ // ve yalnız **karar-kritik** hataları sayar.
     let crit_thr = std::env::var("ENGINE_CRIT_THRESHOLD")
         .ok().and_then(|v| v.parse().ok()).unwrap_or(5);
     let mut health = engine::track::Health::new(crit_thr);
     let mut ntp_cycle = tokio::time::interval(std::time::Duration::from_secs(1800)); // 30 dk'da resync
     ntp_cycle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
- // Ağırlık dosyası: **yalnız `origin:"live"`** olan kabul edilir.
- // Varsayılan yol `ensemble_weights_live.json` (eski `ensemble_weights.json`
- // backtest çıktısıydı ve look-ahead biaslıydı — kapandı).
+ // Ağırlık dosyası: **yalnız `origin:"live"`** olan kabul edilir
+ // (backtest-üretimli ağırlık dosyası look-ahead biaslıdır; kontrat
+ // canlı kanıt sürecinden gelen ağırlıktır).
     let weights_in = std::env::var("ENSEMBLE_WEIGHTS_IN")
         .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
  // CANLI tahteribaf: aynı dosya (in=out). `origin:"live"` şeması yazılır,
@@ -407,8 +410,8 @@ async fn main() -> anyhow::Result<()> {
  // TAKSONOMİ: yalnız karar-kritik hatalar
  // sayılır. WS reconnect / geçici REST timeout /
  // 429 / stop-yerleştirme hatası **sayılmaz** —
- // eski kural bunları sayıyor ve testnet'in normal
- // WS düşüşleri sistemi öldürüyordu.
+ // testnet'in normal WS düşüşleri kill-switch
+ // tetiklememelidir.
                             let kill = health.on_error(&e.to_string());
                             let crit = health.crit_streak();
                             engine.set_health_ok(health.entries_allowed());

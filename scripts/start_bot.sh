@@ -23,7 +23,7 @@ fi
 export RUST_LOG=info
 export ENGINE_BUDGET_USD=300
 export ENGINE_CYCLE_SECS=300
-# P1-N: RESTART'TA POZİSYON DEVRI (FLATTEN=0): 100-işlem öğrenme dönemi
+# RESTART'TA POZİSYON DEVRI (FLATTEN=0): 100-işlem öğrenme dönemi
 # için her restart market'ten düzleşme YANLIŞ — pozisyonlar recovery ile
 # devralınır (TP/SL emirleri borsada durur, cloid tuzuyla geri yüklenir).
 # FRESH_START yine de her şeyi düzleştirir (deney başlangıcı).
@@ -35,11 +35,10 @@ export ENGINE_MIN_SCORE=0.30
 export ENGINE_TOP_N=3
 export TRAIL_ATR_K=1.5
 export TRAIL_ON=1
-# ENGINE_COINS verilmiyor → tüm aktif evren (P1-D: tek kaynak)
+# ENGINE_COINS verilmiyor → tüm aktif evren (tek kaynak: TradingUniverse)
 
-# TIMEOUT YOK: bot süresiz çalışır (kullanıcı ara ara kontrol eder).
-# (P1-N'de 8 saatlik timeout öğrenme dönemi susturmuştu; sabit üst sınır
-# yerine süresiz koşu + dışarıdan kontrol dürüst plan.)
+# TIMEOUT YOK: bot süresiz çalışır (sabit üst sınır öğrenme
+# dönemini kesebilir; durdurma kararı operatördedir).
 nohup "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
 sleep 3
 pgrep -af "$ROOT/target/release/bot"

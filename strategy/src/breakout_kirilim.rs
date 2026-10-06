@@ -1,8 +1,8 @@
 //! BREAKOUT — sıkışma ön koşullu kırılım OLAY dedektörü.
 //!
-//! 1. Sıkışma: BB(20,2) genişliğinın kırılımdan **5 bar önceki** değeri,
-//! ÖNCESİNİN 100 ölçümü içinde ilk %35'lik dilimde düzeltmesi:
-//! eski kod kırılım barında ölçüyordu → yüzdelik daima %100 → ölü strateji).
+//! 1. Sıkışma: BB(20,2) genişliğinin kırılımdan **5 bar önceki** değeri,
+//!    kırılım ÖNCESİ 100 ölçüm penceresi içinde ilk %35'lik dilimdedir
+//!    (derinlik şartı) — sıkışmadan doğan kırılım; refleks kırılımı değil.
 //! 2. Tetik: fiyat son 30 barın zirve/dibini geçer (kırılım OLAY — yön
 //! tahmini değil, iki yan simetrik).
 //! 3. Onay: taker akışı (yok → Skip) + OI teyidi (yok → kırılım sinyal

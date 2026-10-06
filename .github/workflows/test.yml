@@ -18,9 +18,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # Tek test adımı. İş emri komutu BİREBİR bu: `cargo test --workspace`
-      # (--release yok). Test sayısı bu çıktının logundan raporlanır; ikinci
-      # bir `cargo test` çalıştırılmaz.
+      # Tek test adımı: `cargo test --workspace`. Test sayısı bu
+      # çıktının logundan raporlanır; ikinci bir `cargo test` koşulmaz.
       - name: Run tests
         run: cargo test --workspace
       # Release build kanıtı: üretim binary'si derlenebilir (cargo test

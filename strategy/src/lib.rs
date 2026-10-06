@@ -39,7 +39,7 @@ use data::Candle;
 /// Strateji girdisi: tüm hesaplamalar bu snapshot üzerinden yapılır.
 pub struct MarketInput {
     pub coin: String,
- /// 1h mumlar, kronolojik (eskiden yeniye)
+ /// 1h mumlar, kronolojik sıra (eski→yeni)
     pub candles: Vec<Candle>,
  /// canlı bağlam (funding/OI/mark) — data::MarketCtx'ten
     pub ctx: Option<CtxState>,

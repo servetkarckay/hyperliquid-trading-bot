@@ -448,8 +448,8 @@ impl StrategyTracker {
  /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
  /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
  ///
- /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş artık
- /// normal tracker akışında (§ kuralı).
+ /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş
+ /// normal tracker akışında yürür (§ kuralı).
     pub fn explore_queue(&self, names: &[String], pol: &LearnPolicy) -> Vec<String> {
         let mut q: Vec<(usize, String)> = Vec::new();
         for name in names {
@@ -557,13 +557,12 @@ impl StrategyTracker {
         }
     }
 
- // ── PERSISTENCE ( borcu #4 — artık kritik) ──────────────────────────
+ // ── PERSISTENCE ─────────────────────────────────────────────────────
  //
- // Neden şart: öğrenme artık **canlı**. Restart olunca tüm n/win/PF/ΣR
- // sıfırlanırsa sistem her seferinde "18 strateji × w=1.0" cold-start'a
- // döner ve **hiçbir zaman öğrenemez** — testnet'te günlerce süren
- // toplama boşa gider. Daha kötüsü: restart sonrası ilk 10 işlem
- // nötr (w=1.0) görünür, yani öğrenilmiş ağırlıklar sessizce silinir.
+ // Öğrenme **canlı**dır: restart'ta n/win/PF/ΣR korunmazsa sistem her
+ // seferinde "18 strateji × w=1.0" cold-start'a döner ve testnet'te
+ // günlerce süren kanıt toplama boşa gider. Durum diske yazılır ve
+ // restart'ta birebir yüklenir.
  //
  // `entry_attr` (pozisyon başına, R hesabının girdisi) RAM'de kalır —
  // restart kabul edilebilir: sadece o pozisyonun kapanışında R kaydı
@@ -573,7 +572,8 @@ impl StrategyTracker {
  /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
  /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
  /// restart'ta birebir yüklenir — sentetik ±1R YOK. schema_version = 2.
- /// sparse JSON bug fix: önce entry'leri topla, sonra join(",") — indeks tabanlı virgül YOK.
+ /// Sparse JSON güvenliği: entry'ler önce toplanır, sonra join(",") —
+ /// indeks tabanlı virgül YOK (aynı yazım biçimi korunur).
     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
         use std::fmt::Write as _;
         let mut names: Vec<&String> = self.stats.keys().collect();
@@ -683,9 +683,9 @@ impl StrategyTracker {
 /// **CANLI** ağırlık dökümü — `origin: "live"` işaretli.
 ///
 /// Yükleyici (`bot.rs`) `origin != "live"` olan dosyayı **reddeder**:
-/// backtest çıktısı (eski `ensemble_weights.json`) look-ahead biaslıydı
-/// ve motor kaldırıldı — o dosya artık anlamsız. `origin` alanı
-/// olmayan dosya da reddedilir (bilinmeyen köken = güvenilmez).
+/// backtest-üretimli ağırlık dosyası (look-ahead biaslı) reddedilir;
+/// `origin` alanı olmayan dosya da reddedilir (bilinmeyen köken =
+/// güvenilmez).
 ///
 /// Şema:
 /// ```json
@@ -712,8 +712,8 @@ pub fn live_weights_json(weights: &HashMap<String, f64>, ts: u64) -> String {
     s
 }
 
-/// Backtest çıktısı formatı (eski) — **artık üretilmiyor**, yalnız reddedilmek
-/// üzere tanımlı ki `origin` alanı yanlışlıkla taşınmasın.
+/// Backtest çıktısı formatı — **üretilmez**; yalnız reddedilmek üzere
+/// tanımlı ki `origin` alanı yanlışlıkla taşınmasın.
 #[deprecated(note = "backtest kaldırıldı; canlı formatı `live_weights_json`")]
 pub fn weights_json(weights: &HashMap<String, f64>) -> String {
     live_weights_json(weights, 0)
@@ -820,7 +820,7 @@ mod tests {
         let (w, ex, _) = t.effective_weights(&nm, &pol(10, 30));
         let v = w["Kesit"];
         assert!(v >= WEIGHT_CLAMP_LO && v <= WEIGHT_CLAMP_HI, "clamp dışı: {v}");
-        assert!((v - COLD_START_WEIGHT).abs() > 1e-9, "n=12 artık dinamik");
+        assert!((v - COLD_START_WEIGHT).abs() > 1e-9, "n=12 ile ağırlık dinamiktir");
         assert!(ex.contains("Kesit"), "n=12 < full_n=30 → kuyrukta");
     }
 
@@ -1134,7 +1134,7 @@ pub enum ErrClass {
 /// Neden mesajdan: hata türleri 5 ayrı modülde (`anyhow::bail!` ile) üretiliyor;
 // her birine enum eklemek yerine **kalıcı bir sözleşme** (mesaj önekleri)
 /// kuruyoruz. Yanlış sınıflama **güvenli** yöndedir: emin olunamayan →
-/// `Critical` (eski davranış).
+/// `Critical` (fail-safe sınıflama).
 pub fn classify(err: &str) -> ErrClass {
     let e = err.to_ascii_lowercase();
  // ── SAYILMAYANLAR (önce bakılır — daha spesifik) ──
@@ -1172,7 +1172,7 @@ pub fn classify(err: &str) -> ErrClass {
     if CRITICAL.iter().any(|t| e.contains(t)) {
         return ErrClass::Critical;
     }
- // EMİN OLUNAMAZ → Critical (eski davranış: say)
+ // EMİN OLUNAMAZ → Critical (fail-safe: say)
     ErrClass::Critical
 }
 

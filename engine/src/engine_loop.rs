@@ -128,7 +128,7 @@ pub struct EntryAttr {
  /// **ANALYTICAL TP HEDEFİ** — gerçek dolum (`entry_px`) üzerinden
  /// `AllocationConfig::tp_from_entry` ile türetilir.
  ///
- /// ✅ Bu hedef ARTIK GERÇEK KAPANIŞTIR giriş dolumunda
+ /// ✅ Bu hedef GERÇEK KAPANIŞ mesafesidir (giriş DOLUMUNDA uygulanır)
  /// `pending_tp` mesafesiyle reduce-only TP trigger borsaya asılır
  /// (`Executor::ensure_tp`); TP fill → `ExitReason::TakeProfit`
  /// (`exit_reason_from_fill`, F). Analytical hedef ve actual emir AYRI
@@ -143,7 +143,7 @@ impl EntryAttr {
  ///
  /// `entry_px` = gerçek dolum (REST `entryPx`), `risk_px` = gerçek SL
  /// mesafesi (stop entry'ye göre taşınır → kayma risk mesafesini değiştirmez).
- /// Geçersiz giriş/risk'te `None` döner ve eski hedef **silinmez**
+ /// Geçersiz giriş/risk'te `None` döner ve mevcut hedef **silinmez**
  /// (yarım kalan veri, sıfırlanmış veriden daha dürüst).
     pub fn set_analytical_tp(&mut self, cfg: &AllocationConfig) -> Option<f64> {
         let dir = if self.side.is_buy() { Dir::Long } else { Dir::Short };
@@ -156,11 +156,12 @@ impl EntryAttr {
     }
 
  /// REST `entryPx` (gerçek dolum) geldiğinde `entry_px`'i düzeltir ve
- /// analytical TP'yi **yeniden** türetir. `true` = kayma ölçüldü ve düzeltildi.
+ /// analytical TP'yi **yeniden** türetir. `true` = kayma ölçülmüş ve
+ /// TP yeni doluma göre kalibre edilmiştir.
  ///
  /// Kayma ölçülür (`[SL] … kayma=%`) çünkü aynı değer stop fiyatını ve
  /// R-çarpanını da besler. TP yeniden türetilmezse yanlış fiyatta kalır:
- /// long'da dolum yukarı kaydıysa TP eski fiyatta (kâr tarafında ama
+ /// long'da dolum yukarı kaydıysa TP dolum-öncesi fiyatta kalır (kâr tarafında ama
  /// gerekenden yakın), short'ta aşağı kaydıysa TP **zarar tarafına** düşer.
     pub fn apply_real_fill(&mut self, rest_entry: f64, cfg: &AllocationConfig) -> bool {
         if !(rest_entry > 0.0) || !rest_entry.is_finite() {
@@ -387,8 +388,8 @@ pub struct LiveWeightsMerge {
 /// 2. tracker kanıtı yoksa → canlı snapshot **KORUNUR**; o da yoksa 1.0
 /// (tracker tarafının cold-start değeri `tracker_w`'de zaten 1.0'dır).
 ///
-/// Kural 2, "canlı dosya okunuyor ama bir sonraki uygulamada sessizce 1.0'a
-/// eziliyor" hatasını (asıl BLOCKER) kapatır.
+/// Kural 2: canlı dosya okunduktan sonra bir sonraki uygulamada
+/// sessizce 1.0'a ezilemez — snapshot birebir geçerlidir.
 pub fn merge_effective_weights(
     tracker_w: &HashMap<String, f64>,
     live: &HashMap<String, f64>,
@@ -436,6 +437,7 @@ pub const RISK_LOCK_FLAT_CYCLES: u32 = 2;
 /// Koşullar: exchange-trigger fill (SL/TP oid eşleşmesi) + pozisyon artık
 /// haritada YOK (tam kapanış) + EntryAttr biliniyor. Kısmi dolum
 /// (`position_open=true`) finalize ÜRETMEZ — pozisyon sürüyor.
+/// (borsada kapanış, motor haritasında kapalıysa WS'ten gelir;
 pub fn should_finalize_on_ws(
     is_sl_fill: bool,
     is_tp_fill: bool,
@@ -449,8 +451,8 @@ pub fn should_finalize_on_ws(
 ///
 /// Neden zorunlu: `entry_attr` RAM'dedir; FLATTEN=0 devralan restart'ta
 /// pozisyona ait attr YOK → kapanışı `should_finalize_on_ws` finalize
-/// EDEMEZ → gerçek kapanış sayılmaz (Not: PONS +2.19 kapanışı 8/100'de
-/// kaldı).
+/// EDEMEZ → gerçek kapanış sayılmaz. Attr sentetik kurulur ki
+/// devralınan pozisyonun kapanışı tam sayım üretsin.
 ///
 /// Dürüstlük sınırları: `entry_px`/`side`/`size` borsa verisinden GERÇEK;
 /// `risk_px` = %2 fallback (gerçek SL mesafesi bilinmiyor → R tahmini);
@@ -477,10 +479,11 @@ pub fn synth_recovered_attr(
     }
 }
 
-/// BLOCKER-1 RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
+/// RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
 ///
-/// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber vermez
-/// (makine o oid'i bilmemez); makine `InPosition`'da KALIRDI:
+/// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber
+/// vermez (makine o oid'i bilmemez); recon bu kapanışı makineye
+/// taşır — aksi halde makine `InPosition`'da KALIR:
 /// `already_on=true` → aynı coine yeni giriş kilitli kalır,
 /// çıkış kanalı (`force_exit`) **bayat boyutla** yeni ExitNow üretebilir
 /// (canlı emir riski).
@@ -630,11 +633,10 @@ pub fn apply_exit_reason(cur: &mut Option<ExitReason>, new: ExitReason) {
 /// **GİRİŞ KAPISI — gerçek runtime durumu.**
 ///
 /// `entries_allowed` bir **alan değildir**; `health_ok && !risk_locked`
-/// denkleminden **türetilir**. Bu ayrım bilinçlidir: eski kodda
-/// `run_cycle` içindeki auto-unlock yolu `entries_allowed = true` yazıyordu,
-/// böylece `health_ok=false` iken kilit açılsa bile girişe izin veriliyordu
-/// (denklem ihlali). Artık saklanacak tek şey iki bit var; türetilen
-/// değer elle yazılamaz.
+/// denkleminden **türetilir**. Bu ayrım bilinçlidir: `entries_allowed`
+/// alan olarak saklansa auto-unlock yolu `health_ok=false` iken bile
+/// girişe izin yazabilir; türetilen değer denklemi YALNIZ gerçek
+/// iki bitten alır.
 ///
 /// `Engine` bu tipi `gate` alanında TUTAR; testler de aynı tipi kullanır
 /// (kopyalanmış `TestEngine` taklitleri yerine).
@@ -761,8 +763,8 @@ impl Engine {
         }
 
  // TESTNET SIFIRLAMA: `ENGINE_FLATTEN=1` -> açılışta TÜM pozisyonları
- // kapat, sıfırdan başla (sanal para; hata düzeltmeleri temiz sayfa
- // ister. state recovery yine de çalışır, artık boş döner).
+ // kapat, sıfırdan başla (deney başlangıcı — temiz sayfa; state
+ // recovery yine de çalışır, kapanamayan pozisyonları devralır).
         if std::env::var("ENGINE_FLATTEN").as_deref() == Ok("1") {
             let mids: HashMap<String, f64> = info
                 .all_mids()
@@ -780,16 +782,14 @@ impl Engine {
             }
         }
 
- // AÇILIŞ YETİM TEMİZLİĞİ: önceki çalışmadan kalan, makineye bağlı
+ // AÇILIŞ YETİM TEMİZLİĞİ: çalışmadan kalan, makineye bağlı
  // OLMAYAN emirler borsada asılı kalır ve dolduğunda yönetilemez.
  // Gerçek pozisyonu olan coin'lerin emirleri DOKUNULMAZ.
  //
- // **SIRA HATASI (Not: canlı vaka)**: pozisyon haritası
- // state recovery'de (AŞAĞIDA, backfill sonrası) dolduruluyordu →
- // temizlik anında harita BOŞ → gerçek pozisyonun TP/SL çifti
- // "yetim" SANILIP HEPSİ İPTAL EDİLDİ (SUI/61950239941, …942,
- // PONS/…0968, …077) → pozisyonlar KORUMASIZ kaldı.
- // Düzeltme: temizlikten ÖNCE pozisyonlar borsadan çekilir.
+ // **SIRA KONTRATI**: yetim temizliği, pozisyon haritası
+ // state recovery'den (AŞAĞIDA, backfill sonrası) SONRA koşar;
+ // harita dolduktan sonra temizlik güvenlidir → gerçek
+ // pozisyonun TP/SL çifti "yetim" SAYILMAZ.
         {
             let _ = executor.refresh_positions().await;
         }
@@ -864,8 +864,8 @@ impl Engine {
                 m.recover(existing);
                 if let Some((side, entry_px, size, _mark)) = existing {
                     recovered += 1;
- // devralınan pozisyona sentetik attr — kapanışı
- // sayılabilir yapar (ölçülen: PONS kapanışı kayboldu).
+ // devralınan pozisyona sentetik attr — kapanış sayımına
+ // katılabilir hâle gelir (recovery kontratı).
                     recovered_attrs.insert(
                         coin.clone(),
                         synth_recovered_attr(coin, side, entry_px, size, hyperliquid_api::now_ms()),
@@ -1105,7 +1105,7 @@ impl Engine {
  // ANINDA FİNALİZE: pozisyon bu fill'le kapandıysa
  // (haritadan düşmüşse) TradeExit + R + sayaç ŞİMDİ yazılır;
  // REST clearinghouse taramasına bağımlı DEĞİL (429/arıza
- // kapanış kaydını kaçıramaz — ölçülen ZRO/AVAX vakası).
+ // durumunda kapanış kaydı yine yazılır).
                 let pos_open = self
                     .executor
                     .positions()
@@ -1147,7 +1147,7 @@ impl Engine {
                         r,
                     );
  // TradeExit kaydı: makine-yolu çıkışı DA trade-exit
- // yazsın (eski kod burada attr'ı sildiği için SignalExit
+ // yazsın (attr burada silinirse SignalExit
  // kayıtlarına "signal" yazılmıyordu). MFE/MAE trail'den.
                     let excursion = self.trail.remove(&coin).map(|t| {
                         let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
@@ -1368,8 +1368,8 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  /// 2. **Tracker kanıtı yoksa** → kaydedilmiş canlı snapshot (`live_weights`)
  /// **korunur**; o da yoksa nötr `1.0`.
  ///
- /// Kural 2, "canlı dosya yükleniyor ama bir sonraki `apply_effective_weights`
- /// çağrısında sessizce 1.0'a eziliyor" hatasını (asıl BLOCKER) kapatır.
+ /// Kural 2: canlı dosya yüklendikten sonra bir sonraki
+ /// `apply_effective_weights` çağrısında sessizce 1.0'a EZİLEMEZ.
  /// Snapshot **birebir** uygulanır: `WEIGHT_CLAMP_*` yalnız tracker
  /// türevlerine ait, dosyadaki `1.75` `1.75` kalır.
  ///
@@ -1447,7 +1447,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
         }
     }
 
- /// geriye uyumlu çağrı (eski testler/yol)
+ /// geriye uyumlu çağrı (test/legacy yol)
     fn dyn_weights(&mut self) {
         self.apply_effective_weights();
     }
@@ -1478,7 +1478,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  /// Her döngüde BORSA STOP senkronu ( "exits_only" kuralı).
  ///
  /// Açık her pozisyon için borsada reduce-only SL yoksa kurar; pozisyon
- /// kapanmış (veya artık listelenmemiş) stop'u iptal eder. İdempotenttir:
+ /// kapanmış (veya borsadan kalkmış) stop'u iptal eder. İdempotenttir:
  /// `sl_orders` sayesinde her döngü güvenle çağrılabilir. SL fiyatı
  /// girişte kaydedilen gerçek risk mesafesinden (`entry_attr.risk_px`)
  /// gelir; kayıt yoksa %2'lik kurtarma stop'u konur.
@@ -1486,13 +1486,13 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // Önce arka planda (spawn) kurulan stop'ların oid'ini kayda al — yoksa
  // `sl_orders` boş görünür ve aynı stop ikinci kez asılır.
         self.executor.drain_sl_results();
- // WS reconnect sonrası `sl_orders` bellekte kaybolur (Not: testnet
+ // WS reconnect sonrası `sl_orders` bellekte kaybolur;
  // 502/connection reset). Borsa stop'ları `openOrders` taramasından
  // geri yüklemezsek motor aynı stop'u ikinci kez kuruyor.
  //
  // Tarama yalnız eksiklik varsa yapılır (döngü başına ek REST yok).
  // `dedupe_sl` aynı coin'de birden fazla stop bulursa **en yenisini
- // bırakıp eskilerini iptal eder** — ölçülen çift-stop birikimini
+ // bırakıp öncekilerini iptal eder** — çift-stop birikimini
  // kendi kendine temizler.
         let open_pos = self
             .executor
@@ -1628,7 +1628,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // BAŞARISIZLIKTA ESKİ STOP AYAKTA KALIR (replace_sl
  // sırası sayesinde) → en kötü senaryo "trailing
  // olmadı", "korumasız pozisyon" değil.
-                                tracing::warn!("[SL] {coin} trailing taşınamadı ({e}) — eski stop korunuyor");
+                                tracing::warn!("[SL] {coin} trailing taşınamadı ({e}) — mevcut stop korunuyor");
                             }
                         }
                     }
@@ -1638,8 +1638,8 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // SON SAVUNMA: kayıt düşmüşse borsada gerçekten stop var mı diye
  // bak. WS olayı (`triggered`/`canceled`) `user` dolumundan dakikalar
  // önce geliyor; aradaki boşlukta motor aynı stop'u ikinci kez
- // kuruyordu. `refresh_orders` trigger'ları `sl_orders`'a yazdığı için
- // `ensure_sl` artık idempotent.
+ // kurabilir. `refresh_orders` trigger'ları `sl_orders`'a yazdığı
+ // için `ensure_sl` idempotenttir — kayıt düşmüşse yenisi kurulumaz.
  //
  // Trailing bu noktadan sonra `cur_sl_px`'yi de günceller: ilk
  // kurulumdan sonra hedef seviye takip edilsin.
@@ -1647,7 +1647,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // DİKKAT: idempotent dönüşte (`Ok(false)`) GÜNCELLEME YAPILMAZ —
  // aksi halde trailing'in bir önceki satırda yeni taşıdığı seviye
  // bir sonraki satırda sabit giriş stop'una geri yazılır ve
- // trailing her döngü kendini sıfırlar (Not: hiç ratchet olmadı).
+ // trailing her döngü kendini sıfırlar (ratchet kaybı).
             match self.executor.ensure_sl(coin, is_long, szi.abs(), sl_px).await {
                 Ok(true) => {
                     if let Some(t) = self.trail.get_mut(coin) {
@@ -1687,7 +1687,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // ÖNEMLİ: "pozisyon yok" diye ANINDA silinemez — WS dolumu
  // `run_cycle` bitmeden işlenemediği için (ana döngü `await` sırasında
  // `oe_rx`'i okumaz) hedef, dolumdan önce temizlenip SL hiç kurulmazdı.
- // Bu yüzden 10 dakikadan eski kayıtlar temizlenir.
+ // Bu yüzden 10 dakikadan bayat kayıtlar temizlenir.
         let now = hyperliquid_api::now_ms();
         let stale_pending: Vec<String> = self
             .executor
@@ -1735,7 +1735,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             let tp_px = match self.entry_attr.get(coin) {
                 Some(a) if a.tp_px.is_some() => a.tp_px.unwrap(),
                 Some(a) => {
- // dolum düzeltmesi gelmemiş: risk mesafesinden (tek formül)
+ // dolum düzeltmesi gelmemişse: risk mesafesinden (tek formül)
                     let risk = if a.risk_px > 0.0 { a.risk_px } else { a.entry_px.abs() * 0.02 };
                     let dir = if a.side.is_buy() { Dir::Long } else { Dir::Short };
                     self.am.cfg.tp_from_entry(dir, a.entry_px, risk)
@@ -1834,14 +1834,14 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             }
  // POZİSYON HARİTASI = BORSANIN KENDİ VERİSİ. WS dolumları
  // haritayı güncelliyor ama bir WS olayı kaçırılırsa harita bayatlar
- // (Not: açılış haritası boş kaldığı için `open_now` tavanı hiç
+ // (açılış haritası boş kalırsa `open_now` tavanı hiç
  // tetiklenmiyordu, 3 açık pozisyon varken 4. giriş açıldı).
  // Aynı REST yanıtı zaten çekildi → buradan bedava senkron.
             if let Some(arr) = st["assetPositions"].as_array() {
                 let mut closed = self.executor.sync_positions_from(arr);
  // REST delta TEK BAŞINA YETMEZ: `apply_fill` kapanan
  // pozisyonu haritadan düştüğü için 'gone' delta kapanışları
- // YUTAR (Not: ZRO/AVAX SL tetiklendi, kayıt YOK).
+ // YUTAR — SL tetiklenip kayıt düşmeyen kapanış öğrenmeye DOKUNUZ.
  // Gerçek WS işareti: closed_pnl haritasındaki closing fill'ler
  // → union; ikisi de aynı bloktan TEK kayıt + TEK sayım alır
  // (entry_attr remove tek-yazım garantisi).
@@ -1853,7 +1853,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // harita bu döngüde BORSADAN tazelendi → auto-unlock
  // flat doğrulaması sayacı ilerleyebilir.
                 self.rest_sync_verified = true;
- // BLOCKER-1: borsa kapanışlarını durum makinesine UYGULA
+ // RECON: borsa kapanışlarını durum makinesine UYGULA
  // (TP/SL/external close makineye oid üzerinden gelmez).
                 {
                     let gone_machines = {
@@ -1892,13 +1892,13 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // SISTEMATİK TERS SEÇİM BİAS'ı (kazanmayan işlemler kalıyor).
  // Gerçek kural: kayıt pozisyon kapanınca düşer (aşağıda).
  // `entry_attr.entry_px` karar anındaki **defter** fiyatıdır;
- // IOC kaymasıyla dolum farklı gelir (Not: %0.9). Bu değer
+ // IOC kaymasıyla dolum farklı gelir (%0.9 gibi oranlar). Bu değer
  // hem `sync_exchange_sl`'in stop'unu hem R-çarpanını hem
  // MFE/MAE'yi besler → REST `entryPx` (otoriter) ile
  // üzerine yazılır. AKSI halde stop yan tarafa kurulur
- // (ölçülen: 1.1 sn'de tetiklenen kısa pozisyon).
- // düzeltme analytical TP'yi de yeniden türetir —
- // eski entry'de kalan TP, short'ta dolumdan sonra
+ // (anında tetiklenme).
+ // dolum kalibrasyonu analytical TP'yi de yeniden türetir —
+ // dolum-öncesi fiyatta kalan TP, short'ta dolumdan sonra
  // **zarar tarafına** düşebilirdi.
                 let am_cfg = self.am.cfg.clone();
                 let rest_entries: Vec<(String, f64)> = self
@@ -1922,10 +1922,10 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // fiyat, MAE = aleyhli yönde görülen en kötü fiyat. R cinsinden
  // yazılır (risk = giriş stop mesafesi × boyut).
  //
- // MFE/MAE olmadan trailing'i "işe yarıyor" diye savunmak
- // ölçümsüz iddiadır — mevcut 4 kayıp örneğinin hepsi 1-4 dk
- // içinde stop'landı, yani MFE ≈ 0 ve trailing'in işe yaramayacağı
- // zaten görünüyor. Bu log, bir sonraki kararı VERİYE dayandırır.
+ // MFE/MAE izlenimi olmadan trailing'in etkinliği ölçülebilir
+ // değildir; kayıp örneklerinin MFE ≈ 0 profili trailing'in
+ // savunmadığını gösterir. Bu log, bir sonraki kararı VERİYE
+ // dayandırır.
                     let excursion = self.trail.remove(&c).map(|t| {
                         let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
                         let fav = if t.is_long {
@@ -2036,7 +2036,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
             }
         }
 
- // Zaman filtresi artık YALNIZ pozisyonsuz artıkları toparlar: 24 saati
+ // Zaman filtresi YALNIZ pozisyonsuz artıkları toparlar: 24 saati
  // aşan ama hâlâ tutulan pozisyonun kaydı KORUNUR (aksi halde SL
  // %2'ye düşer ve R-çarpanı kaybolur).
         {
@@ -2067,10 +2067,10 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
         let mut recon_notes: Vec<String> = Vec::new();
         if now_ms.saturating_sub(self.last_recon_ms) >= 30_000 {
             self.last_recon_ms = now_ms;
- // DEDUPE ÖNCESİ DRAIN ZORUNLU: recon, spawn
- // kanallarını tük-etmeden dedupe çalıştırıyordu → `sl_last_px`
- // boş → SL-WARN seviye assert'i baypas → bot KENDİ TP'sini
- // "artık stop" sanıp İPTAL EDİYORDU (Not: BIO/GRAM).
+ // DEDUPE ÖNCESİ DRAIN ZORUNLU: recon, spawn kanallarını
+ // tük-etmeden dedupe çalıştırırsa `sl_last_px` boş kalır →
+ // TP "yetim stop" sayılıp İPTAL EDİLEBİLİR. Drain sınıflamayı
+ // besler; dedupe ancak sonrasında güvenlidir.
             self.executor.drain_sl_results();
             self.executor.drain_tp_results();
             let cands = self.executor.refresh_orders().await;
@@ -2096,7 +2096,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
  // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
  // pozisyonunu borsada korumasız bırakırdı.
  // TP trigger da bot'un KORUMA çiftidir — "yetim" sayıp
- // iptal etmek, kâr hedefini borsadan SİLER (Not: ).
+ // iptal etmek, kâr hedefini borsadan SİLER.
             let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid)
                 || self.executor.tp_orders.get(&cn) == Some(&oid);
             if !known && !is_sl {
@@ -2175,7 +2175,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 universe_returns: universe_returns.clone(),
                 iv: None, // IV feed bağlı DEĞİL → sahte IV üretme (VolArbitraj=DATA-MISSING)
                 equity: self.equity,
- // D: gerçek pozisyon (USD, ±) — / artık ölü veri değil
+ // D: gerçek pozisyon (USD, ±) — türetilmiş veri değil
                 inventory_usd: self
                     .executor
                     .positions()
@@ -2326,7 +2326,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                 .machines
                 .get(&e.coin)
                 .map(|m| !matches!(m.state, PosState::Flat))
- // makine yoksa pozisyon da yoktur → FLAT say (eski `true`
+ // makine yoksa pozisyon da yoktur → FLAT say (`true`
  // bilinmeyen coini "zaten pozisyonda" sanıyordu)
                 .unwrap_or(false);
             if already_on || e.cs.dir == Dir::Neutral {
@@ -2425,10 +2425,9 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
         }
         let sel_names: std::collections::HashSet<String> =
             selected.iter().map(|c| c.coin.clone()).collect();
- // AÇIK POZİSYON TAVANI: `cap_positions` yalnızca BU DÖNGÜDE seçilen
- // adayları sınırlıyordu, açık pozisyonları saymıyordu. Döngü 5 sn'de
- // bir çalıştığı için bot her turda yeni 3 aday açıp listeyi
- // sınırsız büyütüyordu (Not: ENGINE_TOP_N=3 iken 30 pozisyon).
+ // AÇIK POZİSYON TAVANI: `cap_positions` BU DÖNGÜDE seçilen adayları
+ // VE açık pozisyonları birlikte sınırlar; açık pozisyonlar sayılmazsa
+ // bot her turda yeni adaylar açar ve liste sınırsız büyür.
         let mut open_now = self
             .executor
             .positions()
@@ -2581,7 +2580,7 @@ let position = self.machines.get(&e.coin).and_then(|m| {
  // `pmap` state machine'lerden kuruluyor ve yalnız `position_value`
  // taşıyor — `szi` `Default` = 0.0. Burada `szi`'ye
  // bakmak "zaten tutmuyorum" kontrolünü DAİMA false
- // yapıyordu (Not: ZK açıkken aynı coine ikinci kez
+ // yapıyordu — açık pozisyonda ikinci girişe
  // ters yönde giriş yapıldı, pozisyon ikiye katlandı).
  // Doğru kaynak: borsadan gelen `executor.positions`.
  // ── FEE-FARKINDALIKLI EV KAPISI ──────────────────
@@ -2763,7 +2762,7 @@ let position = self.machines.get(&e.coin).and_then(|m| {
  // (EV kapısıyla AYNI fee+slippage+spread). Ad-hoc ±%0.5/±%0.2
  // ikinci maliyet modeli KALDIRILDI; operasyonel taban
  // (EXECUTION_BAND_FLOOR_BPS=50 bps) ince testnet defterinde
- // dolum kaçışını önler (ölçülen).
+ // dolum kaçışını önler (ince defterde agresif fiyat).
                     let spread_bps_band = {
                         let mid2 = if e.ask > 0.0 && e.bid > 0.0 { (e.ask + e.bid) / 2.0 } else { 0.0 };
                         if mid2 > 0.0 { (e.ask - e.bid).abs() / mid2 * 10_000.0 } else { 0.0 }
@@ -2824,8 +2823,8 @@ let position = self.machines.get(&e.coin).and_then(|m| {
  // kullanarak gecikmesiz reduce-only trigger SL kurar.
  //
  // ⚠️ MUTLAK FİYAT DEĞİL, **RİSK MESAFESİ** yazılır.
- // Ölçülen hata: mutlak fiyat karar anındaki **defter**
- // fiyatından geliyordu; IOC kayması dolumu %0.9 daha kötü
+ // IOC kayması dolumu karar-anındaki defter fiyatından %0.9 gibi
+ // oranlarda kötüleştirebilir; mesafe yolu bundan bağımsızdır
  // getirdi → kısa pozisyonun stop'u dolumun **altında**
  // kaldı → 1.1 saniyede tetiklendi (−$0.21). Mesafe
  // taşınınca stop `dolum_px ± mesafe` olur ve kayma stop'u
@@ -3033,7 +3032,7 @@ impl Engine {
 
  /// Health sonucunu engin'e bildir.
  ///
- /// `entries_allowed` **artık bir alan değil**, `gate` üzerinden türetilir;
+ /// `entries_allowed` bir **alan değildir**, `gate` üzerinden türetilir;
  /// burada yalnız sağlık biti güncellenir. `bot.rs` hiçbir koşulda
  /// `entries_allowed` YAZAMAZ (alan yok).
     pub fn set_health_ok(&mut self, health_ok: bool) {
@@ -3148,7 +3147,7 @@ mod trail_tests {
 
     #[test]
     fn trailing_asla_gevsetmez() {
- // Tepe girişe döndü: hedef eski stop'un ALTINDA kalıyor.
+ // Tepe girişe döndü: hedef, önceki stop'un ALTINDA kalıyor.
         let t = st(true, 100.0, 2.0, 100.0, 97.0);
         assert!(!better(&t, target(&t, 1.5), 0.25), "fiyat düşünce stop gevşemez");
         let t2 = st(false, 100.0, 2.0, 100.0, 103.0);
@@ -3352,7 +3351,7 @@ mod risk_lock_tests {
             "KİLİT AÇILDI ama health_ok=false → entries_allowed=false"
         );
 
- // Sağlık dönene kadar de kapalı (kilit artık yok).
+ // Sağlık dönene kadar giriş de kapalı (tek denklem).
         assert!(!g.entries_allowed());
         g.set_health_ok(true);
         assert!(g.entries_allowed(), "sağlık dönünce giriş açılır");
@@ -3699,7 +3698,7 @@ mod live_weights_tests {
 
     #[test]
     fn live_weights_invalid_number_rejected() {
- // sayı DEĞİL (eski hatalı şema: nesne)
+ // sayı DEĞİL (geçersiz şema: nesne)
         let obj = serde_json::json!({
             "origin": "live",
             "weights": {"Wyckoff": {"n": 12, "sum_r": 3.0, "last_ts": 9}}
@@ -3837,7 +3836,7 @@ mod tp_entry_tests {
  /// 1. `set_analytical_tp` → plan TP, `entry_eff = karar fiyatı`
  /// 2. `apply_real_fill(REST entryPx)` → entry düzeltilir **ve TP yeniden türetilir**
  /// 3. `attr.tp_px == cfg.tp_from_entry(dir, GERÇEK DOLUM, risk)`
- /// 4. plan TP'den **farklı** (kayma TP'yi 1:1 kaydırır) → eski fiyatta kalmıyor
+ /// 4. plan TP'den **farklı** (kayma TP'yi 1:1 kaydırır) → TP dolum fiyatına taşınır
     #[test]
     fn allocation_tp_entry_eff_ile_baglanir() {
         let c = cfg();
@@ -3849,9 +3848,9 @@ mod tp_entry_tests {
         assert!((plan - c.tp_from_entry(Dir::Long, decision, risk)).abs() < 1e-12);
         assert_eq!(a.tp_px, Some(plan));
 
- // 2) gerçek dolum geldi → düzeltme YAPILDI
+ // 2) gerçek dolum geldi → TP/stop doluma kalibre edilir
         assert!(a.apply_real_fill(fill, &c), "kayma ölçülmeliydi");
-        assert_eq!(a.entry_px, fill, "entry artık gerçek dolum");
+        assert_eq!(a.entry_px, fill, "entry gerçek dolumdur");
 
  // 3) analytical TP GERÇEK dolumdan türetildi
         let want = c.tp_from_entry(Dir::Long, fill, risk);
@@ -3900,7 +3899,7 @@ mod tp_entry_tests {
         assert!(!a.apply_real_fill(0.0, &c));
         assert!(!a.apply_real_fill(f64::NAN, &c));
         assert_eq!(a.entry_px, 100.0);
-        assert_eq!(a.tp_px, Some(plan), "geçersiz veri eski hedefi silmez");
+        assert_eq!(a.tp_px, Some(plan), "geçersiz veri mevcut hedefi silmez");
     }
 
  /// Risk mesafesi kaymayla DEĞİŞMEZ (stop entry'ye göre taşınır):
@@ -4346,7 +4345,7 @@ mod metrics_tests {
     }
 }
 
-/// ── BLOCKER 1+2 — BORSA KAPANIŞI ↔ DURUM MAKİNESİ SÖZLEŞMESİ ────────────
+/// ── BORSA KAPANIŞI ↔ DURUM MAKİNESİ SÖZLEŞMESİ ─────────────────────────
 #[cfg(test)]
 mod recon_contract_tests {
     use super::*;
@@ -4366,7 +4365,7 @@ mod recon_contract_tests {
         Position { coin: "X".into(), szi, entry_px: 100.0, position_value: szi.abs() * 100.0, unrealized_pnl: 0.0, leverage: 1.0, liquidation_px: None }
     }
 
- /// BLOCKER-1: borsa TP fill → pozisyon borsadan silinir → makine FLAT
+ /// RECON SÖZLEŞMESİ: borsa TP fill → pozisyon borsadan silinir → makine FLAT
  /// olmalı; sonraki döngüde force_exit EMİR ÜRETMEMELİ.
     #[test]
     fn tp_fill_closes_machine_to_flat() {
@@ -4382,7 +4381,7 @@ mod recon_contract_tests {
         assert!(matches!(mm.force_exit(99.0, 99.5), Action::Nothing));
     }
 
- /// BLOCKER-1: borsa SL fill → makine FLAT (aynı sözleşme, ters yön).
+ /// RECON SÖZLEŞMESİ: borsa SL fill → makine FLAT (aynı sözleşme, ters yön).
     #[test]
     fn sl_fill_closes_machine_to_flat() {
         let mut machines: Machines = HashMap::new();
@@ -4425,7 +4424,7 @@ mod recon_contract_tests {
         assert!(matches!(machines.get("SOL").unwrap().state, PosState::Pending { .. }));
     }
 
- /// BLOCKER-2 — açılış/kapanış ayrımı: `dir` alanı kaynak; closedPnl DEĞİL.
+ /// AÇILIŞ/KAPANIŞ AYRIMI: `dir` alanı kaynak; closedPnl DEĞİL.
     #[test]
     fn closing_fill_zero_pnl_is_not_open_fill() {
  // BREAK-EVEN kapanış: closedPnl=0 AMA dir=Close → açılış DEĞİL
@@ -4434,7 +4433,7 @@ mod recon_contract_tests {
  // açılışlar
         assert!(is_open_fill("Open Long"));
         assert!(is_open_fill("Open Short"));
- // ters çevirme: eski taraf kapanır, YENİ TARAFA açılış
+ // ters çevirme: önceki taraf kapanır, YENİ TARAFA açılış
         assert!(is_open_fill("Long > Short"));
         assert!(is_open_fill("Short > Long"));
  // bilinmeyen/boş şema → fail-safe: açılış SAYILMAZ
@@ -4443,8 +4442,8 @@ mod recon_contract_tests {
     }
 }
 
-/// ── BLOCKER 2 devam — exec-apply_fill kapısı: kapanış fill'i koruma
-/// KURMAZ; açılış fill'i kurar (yalnız gerçek apply_fill yolu koşar — bu
+/// ── exec-apply_fill kapısı: kapanış fill'i koruma KURMAZ;
+/// açılış fill'i kurar (yalnız gerçek apply_fill yolu koşar — bu
 /// test soyutlanmış kapıyı sınar).
 #[cfg(test)]
 mod fill_protection_tests {
@@ -4462,8 +4461,9 @@ mod fill_protection_tests {
  // ÜRETİM İSPATI 1: koruma kapısı closedPnl'e BAĞLANAMAZ (kaynak taraması).
  // ÜRETİM İSPATI 2: closing fill (dir=Close) closedPnl=0 olsa bile
  // closed_pnl HARİTASINA YAZILMALI — recon kapanış kaydının WS
- // işareti. `closed != 0.0` İLE HARİTAYA YAZIM YASAK (eski hata:
- // break-even kapanışlar kayboluyordu).
+ // işareti. `closed != 0.0` İLE HARİTAYA YAZIM YASAK (break-even
+ // kapanışta closedPnl=0'dır; o satırlar atlanırsa kapanış kaydı
+ // kaybolur).
         let src = include_str!("executor.rs");
         let prod = src.split("#[cfg(test)]").next().unwrap_or("");
         for (i, l) in prod.lines().enumerate() {
@@ -4478,8 +4478,8 @@ mod fill_protection_tests {
             );
         }
  // ÜRETİM İSPATI 2 (kaynak taraması): closed_pnl YAZIM koşulu
- // `closed != 0.0` İÇEREMEZ — eski hata: break-even kapanışlar
- // haritaya yazılmıyor → kapanış kaydı kayboluyordu.
+ // `closed != 0.0` İÇEREMEZ — break-even kapanışta closedPnl=0
+ // olur; o satırlar atlanırsa kapanış kaydı kaybolur.
         let entry_line = prod
             .lines()
             .position(|l| l.contains("self.closed_pnl.entry(coin.clone())"))
@@ -4553,9 +4553,8 @@ mod ws_finalize_tests {
 mod dedupe_tp_tests {
     use crate::executor::is_our_tp_row;
 
- /// Ölçülen vaka: dedupe_sl reduce-only TP trigger'ı "artık stop" sanıp
- /// İPTAL EDİYORDU (ZRO/AVAX/ONDO TP'leri; BIO'da SL). Kural: TP satırı
- /// SL adayına GİRMEZ.
+ /// KONTRAT: dedupe_sl reduce-only TP trigger'ı "yetim stop" SANMAZ
+ /// ve İPTAL ETMEZ. Kural: TP satırı SL adayına GİRMEZ.
     #[test]
     fn dedupe_sl_kendi_tp_orderini_iptal_etmez() {
         let tp_px = 1.8568_f64;
@@ -4588,7 +4587,7 @@ mod dedupe_tp_tests {
             .unwrap_or("");
         assert!(
             prod.contains("is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn)"),
-            "refresh_orders TP tanımasını ÇAĞIRMIYOR (eski hata geri geldi)"
+            "refresh_orders TP tanımasını ÇAĞIRMIYOR"
         );
         assert!(
             prod.contains("self.sl_last_px.insert(coin, px)"),
@@ -4604,11 +4603,11 @@ mod dedupe_tp_tests {
 /// ── devam — RECON YOLU BAĞLANTI ISPATI ─────────────────────────────
 #[cfg(test)]
 mod recon_path_tests {
- /// (30 sn) recon'u dedupe ÖNCESİ drain ZORUNLU — ölçülen vaka:
- /// drain'siz dedupe `sl_last_px`'i boş görüp TP'yi "artık stop" sanıp
- /// iptal ediyordu (BIO/GRAM).
+ /// SIRA KONTRATI: recon, dedupe ÖNCESİ killi drain ZORUNLU —
+ /// drain'siz dedupe `sl_last_px`'i boş görüp TP'yi "yetim stop"
+ /// sayıp iptal edebilir.
     #[test]
-    fn p13_recon_dedupe_oncesi_drain_yapar() {
+    fn recon_dedupe_oncesi_drain_yapar() {
         let prod = include_str!("engine_loop.rs")
             .split("#[cfg(test)]")
             .next()
@@ -4617,7 +4616,7 @@ mod recon_path_tests {
         let head = recon.split("let cands").next().unwrap_or("");
         assert!(
             head.contains("drain_sl_results") && head.contains("drain_tp_results"),
-            "P1-3 recon dedupe ÖNCESİ spawn kanallarını DRAIN ETMELİ: {head}"
+            "recon, dedupe ÖNCESİ spawn kanallarını DRAIN ETMELİ: {head}"
         );
  // yetim temizliği TP'yi "yetim" SANMAMALI
         let orphan = prod.split("Yetim emir temizliği").nth(1).unwrap_or("");
@@ -4675,9 +4674,10 @@ mod restart_inherit_tests {
 /// ── — BOOT TEMİZLİĞİ SIRASININ ISPATI ──────────────────────────────
 #[cfg(test)]
 mod boot_order_tests {
- /// Ölçülen canlı vaka: açılış yetim temizliği, pozisyon haritası
- /// doldurulmadan ÖNCE koşuyordu → harita boş → gerçek pozisyonun
- /// TP/SL çifti "yetim" sanılıp iptal → pozisyon KORUMASIZ.
+ /// BOOT SIRA KONTRATI: açılış yetim temizliği, pozisyon haritası
+ /// DOLDUKTAN SONRA koşar — aksi halde harita boştur, gerçek
+ /// pozisyonun TP/SL çifti "yetim" sanılıp iptal edilir ve
+ /// pozisyon KORUMASIZ kalır.
     #[test]
     fn boot_temizligi_pozisyon_haritasi_ile_kosar() {
         let prod = include_str!("engine_loop.rs")
@@ -4702,8 +4702,8 @@ mod boot_order_tests {
 #[cfg(test)]
 mod recover_attr_tests {
     use super::*;
- /// Devralınan pozisyon (FLATTEN=0 restart) attr'sız kalınca kapanışı
- /// SAYILMIYORDU (Not: PONS +2.19 kapanışı 8/100'de kaldı).
+ /// Devralınan pozisyon (FLATTEN=0 restart) attr'sız kapanışında
+ /// sayım ÜRETMEZ; sentinel attr bunu garanti eder.
  /// Sentez: gerçek entry/side/size + %2 risk fallback + voters BOŞ
  /// (tracker'a atıf kanıtı YAZILMAZ — sahi olmayan stratejiye kredi yok).
     #[test]

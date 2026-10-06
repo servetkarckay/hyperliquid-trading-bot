@@ -127,9 +127,10 @@ impl Default for AllocationConfig {
             max_correlation: 0.70,
             sl_atr_mult: 1.5,
             tp_atr_mult: 3.0,
- // Ölçek düzeltmesi (kelly büyüklüğü) sonrası yeniden kalibre:
+ // Ölçek (kelly büyüklüğü) kalibrasyonu:
  // Elliott öncülü 3 oy → 0.039; zayıf karışık oy ~0.001, keşif oyu
- // ayrı baypas. 0.05 eski pay ölçeğine göre ayarlanmıştı.
+ // ayrı baypas. Ağırlık-payı ölçeği: %12+ sermaye yönlü (güç ve
+ // volatilite indirimi sonrası). Tek zayıf oy ~0.005.
  // Ağırlık-payı ölçeğiyle: %12+ sermaye yönlü (güç ve volatilite
  // indirimi sonrası). Tek zayıf oy ~0.005, keşif oyu ayrı baypas.
             min_conviction: 0.12,
@@ -339,11 +340,11 @@ impl AllocationManager {
  // $7.50'ye düşüyor ve ikisi de eleniyordu (Not: "2 aday $10 altı
  // tahsisle elendi"). Bu yüzden taban = keşifçi sayısı × $10.
         let n_explore = picked.iter().filter(|c| c.explorer_share > 0.0).count();
- // HAVUZ MATEMATİĞİ (çelişki çözüldü): eskiden
- // `explore_budget = max(bütçe×%5, n_keşifçi×$10)` idi — iki kısıt
- // matematiksel olarak ÇELİŞİYORDU: 13 keşifçi → taban $130 > hesabın
- // tamamı; küçük hesapta %5 = $5.85 < $10 tabanı. Doğrusu:
- // finanse edilebilir keşifçi = min(N, ⌊havuz/$10⌋)
+ // HAVUZ MATEMATİĞİ: iki kısıt birlikte tutarlıdır —
+ // `explore_budget ≤ bütçe×%5` ve taban ≤ havuz; finanse edilebilir
+ // keşifçi = min(N, ⌊havuz/$10⌋). (bütçe×%5 havuzun tamamını aşamaz;
+ // taban havuzu aşamaz — 13 keşifçi × $10 = $130 gibi %5'i aşan
+ // taban matematiksel olarak finansman dışıdır.)
  // Havuz asla %5'i aşmaz, taban asla havuzu aşamaz.
         let cap_usd = budget_usd * self.cfg.explore_cap_frac;
         let max_funded = if cap_usd >= MIN_NOTIONAL_USD {
@@ -416,8 +417,8 @@ impl AllocationManager {
         }
  // 5c) POZİSYON BAŞINA TAVAN: tahsis risk kapısıyla aynı tavanı
  // aşamaz. Aksi halde tek güçlü aday TÜM bütçeyi alıyor
- // (Not: bütçe $300, tek aday → $300 tahsis → "coin toplamı
- // 299.99 USD > 50.00" ile reddedildi, sinyal boşa gitti).
+ // (aksi halde tek güçlü aday coin-tavanına takılır ve sinyal
+ // tahsis alamadan boşa gider).
         for c in picked.iter_mut() {
             if c.allocated_usd > self.cfg.max_position_usd {
                 tracing::info!(
@@ -582,10 +583,8 @@ mod tests {
 
     #[test]
     fn kesif_tabani_havuzu_asamaz() {
- // ÇELİŞKİ KURALI: eskiden `max(bütçe×%5, n_keşifçi×$10)` idi —
- // 13 keşifçi → taban $130, küçük hesapta %5 = $5.85 < $10. İkisi
- // matematiksel olarak çelişiyordu. Doğrusu:
- // finansedilebilir keşifçi = min(N, ⌊havuz/$10⌋)
+ // KURAL: `explore_budget ≤ bütçe×%5` ve taban ≤ havuz birlikte
+ // tutarlıdır; finansedilebilir keşifçi = min(N, ⌊havuz/$10⌋)
  // → havuz asla %5'i aşmaz, taban asla havuzu aşamaz.
         let mut cfg = AllocationConfig::default();
         cfg.max_correlation = 0.0;
@@ -661,7 +660,8 @@ mod tests {
 // → R = 0.25 / 0.19 ≈ **1.3** (risk 19 bps, hedef 25 bps)
 // → TP = 2×SL = %0.50 → R:R = 2:1 → başabaş WR = 1/(1+2) = %33 + fee ≈ **%59**
 // Yani %59'a kadar kazanma oranı **yapısal olarak negatif EV** üretir.
-// Ölçülen: tüm kayıp örnekleri R ≈ $0.125 ile stop'landı (min_dist tabanı).
+// Gözlenen profil: kayıplar min_dist tabanında R ≈ $0.125 ile
+// stop'lanır — başabaş WR için stop mesafesi ≥ 75 bps şarttır.
 //
 // KURAL: `min_risk_dist_bps = max(75, 3 × round_trip_cost_bps)`
 // 3×19 = 57 bps → 75 bps (%0.75) kazanır. Yani stop mesafesi en az
@@ -687,7 +687,7 @@ mod tests {
 pub struct CostModel {
  /// taker fee (bps) — Hyperliquid taker %0.045 = 4.5 bps
     pub fee_bps: f64,
- /// taban slippage (bps) — ölçülen: ince testnet defteri ~5 bps
+ /// taban slippage (bps) — ince testnet defteri ~5 bps
     pub base_slip_bps: f64,
  /// EV tabanı (bps)
     pub ev_min_dist_bps: f64,
@@ -695,7 +695,7 @@ pub struct CostModel {
 
 /// Yürütme fiyat bandının operasyonel tabanı (bps): ince testnet defterinde
 /// model maliyeti bu değerden KÜÇÜKSE bile IOC "could not immediately match"
-/// ile reddediliyordu (ölçülen). Model maliyeti daha büyükse band modelden gelir.
+/// ile reddedilir. Model maliyeti daha büyükse band modelden gelir.
 pub const EXECUTION_BAND_FLOOR_BPS: f64 = 50.0;
 
 impl Default for CostModel {
@@ -759,7 +759,7 @@ impl CostModel {
     }
 }
 
-/// Varsayılanlar **ölçülen** değerler: Hyperliquid taker 4.5 bps, ince
+/// Varsayılanlar gözlenen gerçek değerlerdir: Hyperliquid taker 4.5 bps, ince
 /// testnet defterinde gözlenen slippage ~5.0 bps.
 pub const DEFAULT_TAKER_FEE_BPS: f64 = 4.5;
 pub const DEFAULT_SLIPPAGE_BPS: f64 = 5.0;
@@ -779,7 +779,7 @@ mod ev_tests {
 
     #[test]
     fn dusuk_volatilite_skip_uretiyor() {
- // ÖLÇÜLEN: tüm kayıp örnekleri 1.5×ATR ≈ %0.25'te stop'landı.
+ // Gözlenen profil: kayıplar 1.5×ATR ≈ %0.25'te stop'lanır.
  // Round-trip 19 bps → 25 bps stop = R 1.3 → 2:1'de başabaş WR %59.
         let atr_pct = 0.0025 / 1.5; // ATR = %0.1667 → 1.5×ATR = %0.25
         let (ok, risk_bps, floor) = m().ev_ok(atr_pct, 1.5, 0.0);
@@ -798,7 +798,7 @@ mod ev_tests {
 
     #[test]
     fn taban_maliyetin_ucun_kati() {
- // spread=0 → taban slippage 5 bps → tek yön 9.5 → rt 19 (eski ile AYNI)
+ // spread=0 → taban slippage 5 bps → tek yön 9.5 → rt 19
         assert!((m().round_trip_cost_bps(0.0) - 19.0).abs() < 1e-9, "2×(4.5+5.0)");
         assert!((m().min_risk_dist_bps(0.0) - 75.0).abs() < 1e-9);
     }
@@ -881,7 +881,7 @@ mod ev_tests {
  // (clamp olsaydı 25 bps stop daha da yakınlaştırılır ve EV kötüleşirdi)
         let (ok, risk_bps, floor) = m().ev_ok(0.001, 1.5, 0.0); // risk 15 bps
         assert!(!ok);
-        assert!((risk_bps - 15.0).abs() < 1e-6, "ölçülen risk DEĞİŞMEDİ");
+        assert!((risk_bps - 15.0).abs() < 1e-6, "risk mesafesi DEĞİŞMEDİ");
         assert!(risk_bps < floor, "sadece karşılaştırma yapıldı");
     }
 
@@ -965,12 +965,12 @@ mod cluster_tests {
         );
         // küme haritası tutarlı + DÜRÜST: 18 stratejinin hepsi eşlenmeli VE
         // haritalar dokümante edilmiş kümelerle birebir (harita bozulursa —
-        // hepsi tek kümeye eşlenirse — bağımsızlık düzeltmesi sessizce ölü olur)
+        // hepsi tek kümeye eşlenirse — bağımsızlık düzeltmesi etkisizleşir)
         let distinct: std::collections::HashSet<strategy::InfoCluster> =
             strategy::registry_names().iter().map(|n| strategy::info_cluster(n)).collect();
         assert!(
             distinct.len() >= 7,
-            "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi ölü olur): {}",
+            "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi etkisizleşir): {}",
             distinct.len()
         );
         assert_eq!(strategy::info_cluster("Kelly Sizing"), strategy::InfoCluster::Sizing);

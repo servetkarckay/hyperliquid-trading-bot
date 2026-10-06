@@ -1,9 +1,18 @@
-//! RISK MANAGER — emir öncesi risk kapıları (pre_trade).
+//! RISK MANAGER — kalıcı risk hafızası + emir öncesi risk kapıları.
 //!
-//! Kapılar: pozisyon/toplam notional tavanı, kaldıraç, minimum equity,
-//! max açık pozisyon, drawdown limiti. `is_halted` yalnız operatörle
-//! `resume` olur (otomatik açılış yok). İhlal → `RiskViolation` (emir
-//! gönderilmez); kapı EV/tahsis kapısından BAĞIMSIZdır (savunma derinliği).
+//! Sorumluluklar:
+//! - equity ve peak_equity takibi (drawdown hafızası),
+//! - drawdown koruması (peak'e göre; peak=80 SANILMAZ),
+//! - pozisyon / toplam notional / kaldıraç / min equity /
+//!   max açık pozisyon tavanları,
+//! - risk halt durumu (`is_halted` yalnız operatörle `resume` olur —
+//!   otomatik açılış yok).
+//!
+//! Kalıcı state (`save_state`/`load_state`): peak_equity, current_equity,
+//! halted. Atomik yazım (tmp+rename); restart'ta yüklenir — yeniden
+//! başlatma drawdown hafızasını SIFIRLAMAZ. İhlal → `RiskViolation`
+//! (emir gönderilmez); kapı EV/tahsis kapısından BAĞIMSIZdır (savunma
+//! derinliği).
 use std::collections::HashMap;
 
 use crate::executor::Position;

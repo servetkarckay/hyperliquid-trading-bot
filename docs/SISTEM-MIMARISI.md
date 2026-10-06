@@ -1,241 +1,536 @@
-# SISTEM MİMARİSİ — hyperliquid-trading-bot
+# SİSTEM MİMARİSİ — hyperliquid-trading-bot
 
-*Bu doküman 2026-10-05'te sıfırdan yeniden yazıldı; içerik koddan doğrulanmıştır.*
-
-Testnet'te çalışan, testnet'te çalışan, algoritmik ticaret botu. Amaç **motorun doğruluğu** — kâr iddiası DEĞİL.
-
----
-
-## 1. Sistemin işleyişi
-
-```
- ┌──────────────────────────────────────────────┐
- Hyperliquid WS/REST → │ ingestor (shard'lı WS) → StreamEvent │
- │ ├→ aggregator (tick→mum, taker akışı) │
- │ └→ market_ctx (funding/OI/mark serileri) │
- └───────────────┬──────────────────────────────┘
- ▼
- engine_loop::run_cycle — her 300 sn'de bir
- ─────────────────────────────────────────────
- FAZ 1 TARAMA : kapanmış mumlar + canlı son bar → MarketInput
- → 18 strateji (panik-izole) → ensemble → rejim kapısı
- FAZ 2 TAHSİS : conviction + korelasyon + bütçe → Candidate
- FAZ 3 YÜRÜTME : durum makinesi Action'ları → WireOrder/Cancel
- → TEK batch POST (cloid'li)
- FAZ 4 ÇIKIŞLAR : borsada asılı SL/TP trigger'lar + trailing ratchet
- + makine ExitNow + çıkış kanalları
- FAZ 5 ÖĞRENME : kapanan işlem R → tracker → etkin ağırlıklar
-```
-
-### Execution graph (kanıtlanmış sözleşme)
-
-```
-strategy
- → ensemble (oylar → skor; Exit ayrı kanal: exit_requested)
- → decision (rejim kapısı + conviction + min_score)
- → order (IOC giriş, mark-bağlı fiyat bandı, cloid'li)
- → fill (WS orderUpdates + user fills; TP/SL oid eşleşmesi)
- → position state (Flat → Pending → InPosition → PendingExit → Flat)
- → exit reason (birebir kaynak eşleşmesi — bkz. mimari dokümanı)
-```
+Bu doküman sistemin mevcut çalışma mimarisini, katmanlarını, veri akışını,
+risk kontratlarını, execution yaşam döngüsünü ve öğrenme modelini tanımlar.
+Kaynak: repository'deki kod. Her bölüm kodla birebir senkronizedir.
 
 ---
 
-## 2. Crate'ler
+## 1. Sistem amacı ve sınırları
 
-| Crate | Tek görev | Önemli API |
-|---|---|---|
-| `hyperliquid-api` | Borsa I/O (imza, emir, okuma, WS) | `Config`, `Exchange`, `Info`, `sign_l1_action`, `WsClient`, `ApiError` |
-| `data` | WS→tick→mum + bağlam + kalıcılık + evren | `Ingestor`, `Aggregator`, `MarketCtx`, `Storage`, `TradingUniverse` |
-| `math` | Saf sayısal çekirdek (f64, bağımlılıksız) | `indicators`, `linalg`, `portfolio`, `stats` |
-| `strategy` | Sinyal sözleşmesi + 18 strateji | `Strategy`, `Signal`, `MarketInput`, `registry` |
-| `engine` | Karar→emir→pozisyon→öğrenme | `Engine`, `Executor`, `AllocationManager`, `PositionStateMachine`, `RiskManager`, `StrategyTracker` |
-| `utils` | Logger + NTP zaman | `logger::init`, `time::now_ms` |
+Sistem, Hyperliquid perpetual borsasında **testnet** üzerinde çalışan
+algoritmik bir işlem botudur. Tek amacı vardır: gerçek kapanmış işlemlerden
+öğrenen, kontratlarla korunan bir işlem motorunu 100 gerçek kapanmış işlemlik
+öğrenme döneminde koşturmak.
 
-### api
+Sınırlar:
 
-- **signing** — EIP-712 phantom-agent; `ExchangeOutcome`: SUCCESS / ERROR / **UNKNOWN** (ağ zaman aşımı: borsada işlenmiş OLABİLİR → yukarıya reconciliation için taşınır, asla yutulmaz).
-- **exchange_endpoint** — tek/toplu emir, `OrderStatuses` (resting_oid / filled / error), fiyat 5-anlamlı-basamak, lot `szDecimals`.
-- **info_endpoint** — market/hesap ham sorguları; `candle_snapshot` endTime ms ZORUNLU.
-- **websocket** — 50 sn ping, 5 sn otomatik reconnect; alıcı düşerse görev sonlanır.
-- **error_responses** — "emin olunamayan" hata KRİTİK sayılır (sessiz yutma yok).
-- **config** — .env doğrulama (https/wss/32B-hex); hatalı konfig → süreci düşür.
+- Bot bir **motor**dur: karar, tahsis, emir, çıkış, öğrenme. Piyasa tahmini
+  iddiası yoktur; her karar ölçülebilir kontratlara bağlıdır.
+- Öğrenme dönemi TESTNET'tir. Canlı endpoint'e karşı başlatma **yapısal
+  olarak engellenir**.
+- `ready_for_live` otomatik canlı işlem demek değildir (bkz. §26).
 
-### data
+## 2. Genel mimari
 
-- **ingestor** — shard başına ~160 abonelik; evren DIŞARIDAN (`with_universe`) — sessiz kırpma yok.
-- **aggregator** — çoklu interval mum; `is_stale` → sinyale karışmaz.
-- **market_ctx** — `delta_oi` (likidasyon kadransı), funding/OI serileri, basis.
-- **storage** — ClickHouse (üretim) / Memory (test+fallback) / Redis (sıcak cache); URL boşsa indirimli mod loglanır.
-- **universe** — `UniverseSpec{All, Exact, TopByVolume}`; `verify_layers`: katman uyuşmazlığı → AÇILIŞ DURUR.
-- **backfill_job** — sayfalı REST geçmiş pompası (5000 bar/istek).
-
----
-
-## 3. Risk-kapı katmanları (savunma derinliği)
-
-| Katman | Kapı | Otomatik açılır mı |
-|---|---|---|
-| 1. Strateji | veri yok → Skip; panik → Skip | — |
-| 2. Rejim | SQUEEZE/VOL_SPIKE → yeni giriş yasak (çıkış serbest) | rejim değişince |
-| 3. EV (CostModel) | `sl×ATR < max(EV_MIN_DIST, 3×rt)` → SKIP | — |
-| 4. Tahsis | conviction < min → düşür; korelasyon > %70 → çakışan düşer | — |
-| 5. Pre-trade | notional/kaldıraç/equity/drawdown tavanları | **HAYIR** — halt yalnız operatörle resume |
-| 6. EntryGate | `entries_allowed = health_ok && !risk_locked` | health dönerse |
-| 7. Risk-lock | flatten başarısız → kilit; **2 ardışık DOĞRULANMIŞ flat döngü** | otomatik (sync ile doğrulanırsa) |
-| 8. Kill-switch | 5 ardışık karar-kritik hata → halt | **HAYIR** |
-
-**EntryGate invariant **: `entries_allowed` bir **alan değildir**; `EntryGate { health_ok, risk_locked }` üzerinden türetilir. Hiçbir runtime yolu doğrudan yazamaz; `entries_allowed_alan_olarak_saklanmaz` testi kaynak taramasıyla korur. Auto-unlock yalnız gerçek `sync_positions_from` ile doğrulanmış flat döngülerde ilerler (`rest_sync_verified`).
-
----
-
-## 4. Çıkış sözleşmesi (birebir)
-
-| Gerçek kaynak | ExitReason | trade-exit kodu |
-|---|---|---|
-| SL trigger fill (oid eşleşmesi) | `StopLoss` | `stop` |
-| TP trigger fill (oid eşleşmesi) | `TakeProfit` | `tp` |
-| Trailing ratchet'li SL fill | `TrailingStop` | `trailing` |
-| Makine ExitNow (skor tersi) | `SignalExit` | `signal` |
-| Kill-switch / black-swan flatten | `EmergencyFlatten` | `emergency` |
-| Manuel | `Manual` | `manual` |
-
-**Kural**: `exit_reason_from_fill` — bayrak (oid eşleşmesi) yoksa reason ÜRETİLMEZ; **MFE pozitif diye TakeProfit yazılmaz**. `apply_exit_reason` = first-write-wins.
-
----
-
-## 5. TP / SL / trailing
-
-```
-SL(LONG) = entry_eff − 1.5×ATR SL(SHORT) = entry_eff + 1.5×ATR
-tp_dist = max( (tp_atr_mult/sl_atr_mult) × risk , 2 × risk )
-TP(LONG) = entry_eff + tp_dist TP(SHORT) = entry_eff − tp_dist
+```text
+┌────────────────────────────────────────────────────────────┐
+│ bot (engine/src/bin/bot.rs)                                │
+│  NTP → ENV → epoch → risk recovery → WS ingestor → döngü   │
+└──────────────┬─────────────────────────────────────────────┘
+               │ her ENGINE_CYCLE_SECS (300 sn)
+┌──────────────▼─────────────────────────────────────────────┐
+│ engine_loop                                                │
+│  tarama → ensemble → rejim → tahsis → EV → risk →          │
+│  emir → dolum → çıkış → R → tracker → canlı ağırlık        │
+└──────┬─────────────┬───────────────┬───────────────────────┘
+       │             │               │
+   data katmanı  executor       kalıcılık (config/*.json,
+   (WS/REST)     (borsa I/O)    ClickHouse/Redis opsiyonel)
 ```
 
-- `entry_eff` = **gerçek dolum** (REST `entryPx`); IOC kayma düzeltmesi `EntryAttr::apply_real_fill` ile tek noktada (giriş + TP yeniden türetme).
-- **TP artık gerçek kapanıştır **: giriş dolumunda reduce-only TP trigger (`tpsl="tp"`, cloid'li) borsaya asılır; fill → `TakeProfit`.
-- Çift emir yasağı: `sl_orders`/`tp_orders` haritaları + `TS_GRACE_MS` grace + `restore_tp_orders` (recon'da borsadan ±%0.1 fiyat eşleşmesiyle oid geri yükleme — körlemesine duplicate yok).
-- Trailing : mark tepe/dip ratchet; kural: **önce yeni stop, sonra eski iptal**; `TRAIL_ATR_K=1.5`, `TRAIL_MIN_STEP=0.25`.
-- **Kontrat (G)**: Long `SL < entry < TP`, Short `TP < entry < SL`; TP ≥ 2R; negatif fiyat (dejenere ATR) → **emir yok** (`entry_contract_ok`, 192 kombinasyonlu matris testi).
+Crate bağımlılık yönü: `math` ← `strategy` ← `engine`; `api` ← `data`,
+`engine`; `utils` hepsine hizmet eder. Motor mantığı `strategy` veya
+`data` içinde yaşamaz.
 
----
+## 3. Runtime veri akışı
 
-## 6. Öğrenme hattı
-
+```text
+Hyperliquid WS (shard'lı)                 Hyperliquid REST
+    │ Ingestor                                 │ backfill / snapshot
+    ▼                                          ▼
+StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
+    │                                          │
+    ├──► MarketCtx (funding/OI/mark/oracle)    │
+    ▼                                          ▼
+        MarketInput (18 stratejiye TEK girdi sözleşmesi)
+                       │
+                       ▼
+        Strategy Layer (panik-izole evaluate)
+                       │
+                       ▼
+        Ensemble (skor + yön + exit kanalı)
+                       │
+                       ▼
+        Regime Gate (Rejim Tespiti kapısı)
+                       │
+                       ▼
+        Allocation (conviction → Candidate + SL/TP kontratı)
+                       │
+                       ▼
+        EV / Cost Gate (TEK maliyet modeli)
+                       │
+                       ▼
+        Risk (pre_trade kapıları + EntryGate)
+                       │
+                       ▼
+        State Machine (Action) → batch WireOrder → borsa
+                       │
+                       ▼
+        Fill (orderUpdates/userEvents) → Reconciliation
+                       │
+                       ▼
+        Position State → Exit (SL/TP/trailing/ExitNow)
+                       │
+                       ▼
+        Realized R → StrategyTracker → Live Weights
 ```
-fill (kapanış) → R = net PnL / (risk_px × size)
- → StrategyTracker (pencere 100)
- → effective_weights:
- n < min_n(10) → donmuş 1.0 (cold-start; öldürme yok)
- 10 ≤ n < 30 → dinamik Kelly, clamp [0.1, 2.0]
- n ≥ full_n(30) → win < %35 → 0 (sustur)
- keşif: n < full_n → kuyruk (round-robin, döngüde en fazla 1)
- → ensemble.cfg.weights
+
+## 4. Crate / modül sorumlulukları
+
+| Crate | Sorumluluk |
+|---|---|
+| `api` | Hyperliquid I/O façade: imza (EIP-712), exchange/info endpoint, WS, hata taksonomisi, wire yuvarlama. Bot mantığı İÇERMEZ. |
+| `data` | Piyasa verisi hattı: WS ingestor, tick→mum aggregator, market context, storage soyutlaması, evren tek kaynağı. |
+| `strategy` | `Strategy` trait'i + 18 strateji + ensemble + rejim + `InfoCluster` + `exit_intent`. |
+| `engine` | Motor: döngü, executor, allocation, risk, durum makinesi, tracker, epoch. |
+| `math` | Saf deterministik sayısal çekirdek: göstergeler, vol modelleri, linalg/OLS, istatistik testleri, portföy metrikleri. |
+| `utils` | Logger + NTP saat senkronu. |
+| `scripts` | Operasyon: `start_bot.sh` (timeout'suz süresiz koşu). |
+| `bin/probe_px` | Fiyat/lot hassasiyet keşif aracı (pozisyon üretmez). |
+| `bin/trail_report` | `trade_exits.jsonl` offline analitiği (MFE/MAE, çıkış dağılımı). |
+
+## 5. Market data pipeline
+
+- **Ingestor**: evreni shard'lara böler (shard başına ~160 kanal), her shard
+  için ayrı WS açar. Ham kanallar (`trades / l2Book / activeAssetCtx /
+  orderUpdates / userEvents`) `StreamEvent`'e çevrilir. Evren DIŞARIDAN
+  verilir; sessiz kırpma yoktur.
+- **Aggregator**: tick → kapanmış mum + canlı son bar; taker akışı toplar.
+  Parse edilemeyen/finite olmayan mum **saklanmaz** — o bar düşürülür;
+  geçersiz veri gerçek sıfır fiyat gibi sinyale girmez.
+- **MarketCtx**: funding / OI / mark / oracle / prevDayPx serilerini WS +
+  REST'ten birleştirir. Alan parse edilemezse son bilinen değer korunur
+  (UNKNOWN ≠ geçerli sıfır). HL `funding` alanı **saatlik** orandır;
+  dönüşüm strateji katmanındadır.
+- **Storage**: `Storage` trait — ClickHouse (üretim arşivi, ReplacingMergeTree
+  dedup, resume imleci), Memory (test/fallback), Redis (sıcak mids/ctx).
+  URL boşsa sistem Memory ile çalışmayı sürdürür (indirimli mod loglanır).
+- **Backfill**: sayfalı geçmiş mum/funding pompası; motorun ısınma penceresi
+  (`ENGINE_HIST_BARS`) REST snapshot ile açılır.
+- **Stale koruması**: `LocalBook::is_stale/is_sane` — bayat/bozuk defter
+  sinyale ve emre gitmez.
+
+## 6. Trading universe
+
+`TradingUniverse` **tek kaynaktır**: `UniverseSpec::parse(ENGINE_COINS)` →
+`all` (tüm aktif evren, ~158 coin) / `Exact` (birebir liste; eksik coin =
+hata) / `TopByVolume(N)` (deterministik kırıcı: volume desc, isim asc).
+
+`verify_layers` açılışta engine/ingestor/risk/WS katmanlarının aynı listeyi
+kullandığını doğrular; uyuşmazlıkta **açılış durur**.
+
+## 7. Strategy pipeline
+
+- `Strategy` trait'i: `name()`, `evaluate(&MarketInput) -> Signal`,
+  `status()`, `exit_intent(&ExitCtx) -> Option<ExitIntent>`.
+- `MarketInput`: kapanmış mumlar + canlı son bar + L2 defter (`Option` —
+  yoksa `None`, sahte sıfır DEĞİL) + ctx (OI/funding) + portfolio kanıtı +
+  equity + evren getirileri.
+- 18 strateji `registry()`'de tanımlıdır. `evaluate` panik-izole çalışır
+  (bir stratejinin paniki döngüyü düşürmez; Skip'e döner).
+- `Signal`: Long/Short/Hold/Skip/Exit — `None` gösterge asla sahte oy
+  üretmez (gösterge yok = katkı yok).
+- `status()`: `Active / Auxiliary / DataMissing` — rapor dürüstlüğü.
+  `DataMissing` (Vol Arbitraj: IV feed yok; Değer Yatırım: temel feed yok)
+  yön üretmez.
+
+## 8. Regime detection
+
+`Rejim Tespiti` ADX + Hurst + vol rejiminden `RegimeGate` üretir. ADX/Hurst
+hesaplanamıyorsa strateji **Skip** üretir; `classify` `None` dönerse motor
+güvenli **Open** kapısına düşer — sahte rejim değeri (0/0.5) üretilmez.
+TrendBoost rejim filtresi **yalnız skor çarpanıdır**: `dir`/eşik kararı
+combine'da verilmiştir, rejim katmanı onu yeniden hesaplamaz.
+
+## 9. Ensemble / voting
+
+`Ensemble::combine` strateji oylarını ağırlıklı skora indirger:
+`ConsensusSignal { dir, score, contributors, note, exit_requested,
+exit_contributors }`. `|skor| < ENGINE_MIN_SCORE` → nötr.
+
+**Çıkış kanalı ayrıdır**: `Signal::Exit` skora nötr etki eder; en az bir
+Exit oyu varsa `exit_requested=true` taşınır. Motor yalnız AÇIK pozisyonda
+bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
+
+## 10. InfoCluster ve breadth
+
+18 strateji aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
+**ham oy sayısına göre verilmez**. `strategy::info_cluster(name)` tek
+kaynaktır — 8 bilgi kümesi:
+
+```text
+Trend (Wyckoff, Dow, Turtle, Breakout, Elliott, Klasik, Rejim)
+MeanReversion (Davranışsal, Değer Yatırım)
+OrderFlow (LOB, Market Making, Optimal Execution)
+CrossSectional (Kesit Momentum)
+Carry · Volatility (GARCH kompoziti, VRP) · Liquidation (OI) · Sizing (Kelly)
 ```
 
-- **Canlı ağırlık snapshot'ı** (`origin:"live"`): 300 sn'de bir ATOMİK yazım; açılışta doğrulanmış okuma. Kanıtsız tracker'a EZİLMEZ (`merge_effective_weights`: kanıt varsa tracker kazanır, yoksa snapshot korunur). Bozuk dosya → **açılış başarısız**.
-- Tracker state: `config/track_state.json` (atomik; restart'ta silinmez).
-- Trade-exit arşivi: `trade_exits.jsonl` (append-only; epoch+git).
+Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
+`breadth = 1 + 0.1×(ayrı_küme−1)` (0.5..1.5 clamp). Aynı kümeden oylar
+genişlik ödülünü çoğaltmaz.
 
----
+## 11. Allocation
 
-## 7. TESTNET öğrenme dönemi
+`AllocationManager::allocate`:
 
+1. Aday filtresi: yönlü + mid > 0 + min conviction.
+2. Conviction: `share × breadth × strength / risk` (keşif oyu indirimi ile).
+3. Tahsis: conviction² kare ağırlıklı bütçe dilimleri; **pozisyon başına
+   tavan** (`max_position_usd`).
+4. SL/TP kontratı karar anında türetilir: `sl = entry ± sl_atr_mult×ATR`;
+   `tp = entry ∓ max(tp/sl×risk, 2×risk)` — TP **gerçek risk mesafesinin**
+   en az iki katı kapılıdır.
+5. Keşif şeridi: kanıtı yetersiz (n < full_n) stratejiler küçük lotla
+   sınanır; keşif havuzu bütçe×%5'i aşamaz, taban havuzu aşamaz;
+   finanse edilebilir keşifçi = `min(N, ⌊havuz/$10⌋)`.
+
+## 12. Cost / EV gate
+
+`CostModel` **TEK** maliyet kaynağıdır: taker fee (4.5 bps) + taban
+slippage (5 bps) + `EV_MIN_DIST_BPS` (75). Kural:
+`min_risk_dist_bps = max(75, 3×round_trip_cost_bps)`. EV kapısını geçmeyen
+aday tahsis edilmez. Yürütme fiyat bandı aynı modelden gelir; operasyonel
+taban `EXECUTION_BAND_FLOOR_BPS=50` ince defterde dolum kaçışını önler.
+Motor içinde ad-hoc ikinci maliyet modeli yoktur.
+
+## 13. Risk architecture
+
+`RiskManager` — kalıcı risk hafızası + emir öncesi kapılar.
+
+- Kalıcı state: `peak_equity`, `current_equity`, `halted`
+  (`RISK_STATE_PATH`, atomik tmp+rename; boot'ta yüklenir).
+- Drawdown: peak'e göre hesaplanır; restart drawdown hafızasını sıfırlamaz.
+- Kapılar: pozisyon notional tavanı, toplam notional, kaldıraç, minimum
+  equity, max açık pozisyon sayısı, drawdown limiti.
+- İhlal → `RiskViolation`; emir gönderilmez. Kapı EV/tahsis kapısından
+  bağımsızdır (savunma derinliği).
+- `is_halted` yalnız operatörle `resume` olur; otomatik açılış yoktur.
+
+## 14. EntryGate / risk-lock
+
+```text
+entries_allowed = health_ok && !risk_locked
 ```
-TESTNET_FRESH_START=1 (İLK çalıştırma; epoch dosyası yoksa)
- ├→ eski tracker state silinir → tüm stratejiler nötr w=1.0
- ├→ eski canlı ağırlık snapshot silinir (look-ahead'den temiz)
- ├→ eski trade_exits.jsonl ARŞİVLENİR (*.prev — kayıp yok, karışma yok)
- ├→ yeni LearningEpoch yazılır: epoch_id / environment=testnet /
- │ started_at / starting_trade_count=0 / completed_trade_count=0
- └→ tüm pozisyonlar kapatılır + açık emirler iptal edilir (temiz taban)
 
-normal restart / ENV kaldırıldığında
- └→ HİÇBİR state silinmez: sayaç + öğrenme kaldığı yerden devam eder
+`entries_allowed` **alan değildir** — `EntryGate`'ten türetilir ve elle
+yazılamaz (kaynak taraması testi korunur). Kaynaklar:
+
+- `health.on_error` taksonomisi: yalnız **karar-kritik** hatalar sayılır
+  (WS reconnect / geçici REST timeout / 429 sayılmaz); eşik
+  `ENGINE_CRIT_THRESHOLD` (5).
+- WS fırtınası (>10 kopma/5 dk) → `ExitsOnly`: kill yok; çıkışlar çalışır,
+  girişler kapalıdır.
+- `risk_locked` drawdown haltden gelir; sağlığa dönünce kilit kendiliğinden
+  kalkar (tek denklem — iki bayrak).
+
+## 15. Order construction
+
+- `WireOrder` + `make_cloid`: **0x + 32 hane hex (128-bit)**; aynı
+  (coin, fiyat, boyut, döngü) için aynı anahtar → retry idempotency.
+  Kısa/16 hane gönderim API 422 ile reddedilir.
+- Girişler Ioc; çıkışlar reduce-only.
+- Fiyat/boyut borsa kurallarına göre yuvarlanır (`round_5sig`, `szDecimals`,
+  `$10` minimum notional); bazı coinler 6 haneyi reddeder — ızgara bir hane
+  azaltarak dener.
+- TP ve SL **ayrı cloid tuzu** alır (`TP_CLOID_SALT` / SL tuzu) — TP emri
+  SL dedupe'sine yakalanamaz.
+- Emirler **TEK batch POST** ile iletilir (`batch_execute`); `place_limit`
+  adaptif tick keşfi kullanmaz (6 hane reddeden coinlerde kapanabilir).
+
+## 16. Execution lifecycle
+
+```text
+State Machine Action
+   │ Place / ExitNow / Cancel
+   ▼
+batch WireOrder ──► ExchangeOutcome
+   │                    │
+   │        SUCCESS (resting_oid / filled)
+   │                    │ ERROR → RetryPolicy (4xx retry YOK)
+   │                    │ UNKNOWN (ağ zaman aşımı — borsada işlenmiş
+   │                    │   OLABİLİR) → reconciliation zorunlu
+   ▼                    ▼
+orderUpdates / userEvents (WS) ──► FillEvent (is_tp_fill/is_sl_fill oid ile)
+   │
+   ▼
+EntryAttr::apply_real_fill (REST entryPx) → SL/TP dolum fiyatına kalibre
 ```
 
-- **İşlem sayımı**: 1 gerçek kapanmış pozisyon = 1 `completed_trade_count`
- (sinyal/emir/fill sayısı İŞLEM DEĞİLDİR; TP/SL/trailing/signal-exit/
- emergency hepsi sayılır). Duplicate/replay fill'ler tid dedup ile
- düşer → ikinci kez sayım yok. Sayaç `learning_epoch.json`'da ATOMİK
- kalıcı; `trade_exits.jsonl` ile birebir tutarlı (her kapanışta tek
- TradeExit + tek sayım).
-- Log: `[TESTNET] completed trades: N/100` … `100/100 tamamlandı — LIVE
- geçişi için hazır (otomatik canlı işlem YOK)`.
-- 100 sonrası: `status = ready_for_live` kalıcı yazılır; canlı emir
- **başlatılmaz** (operatör kararı).
-- **Yapısal koruma**: testnet epoch `NETWORK != testnet` veya canlı API
- url ile BAŞLAMAZ (emir hiç atılmadan süreç durur); `TESTNET_FRESH_START`
- yalnız testnet endpoint'te geçerlidir.
-- P0/P1 güvenlikleri aynen korunur: reconciliation, state recovery,
- SL/TP, risk-lock, UNKNOWN reconciliation, live-weight validation,
- tracker persistence, tid dedup.
+## 17. Fill reconciliation
 
-## 8. Strateji durum raporu
+- **Dolum kaynakları**: WS `orderUpdates` (anlık) + `userEvents` (fill) +
+  periyodik REST recon (30 sn). WS koparsa kapanış kaydı REST taramasından
+  yine yazılır.
+- **UNKNOWN emir sonucu**: borsada bulunursa oid bağlanır; bulunamazsa
+  yalnız `oid==0` pending girişte Flat revert serbesttir — sessiz state
+  değişimi yoktur.
+- **Açılış/kapanış ayrımı** `dir` alanından yapılır (`Open Long/Short`,
+  `Close Long/Short`, `Long > Short/Short > Long` = ters çevirme → açılış);
+  `closedPnl` KULLANILMAZ (break-even kapanışta 0'dır).
+- `closed_pnl` haritası closing fill'i `dir`'e bakmadan taşır — break-even
+  kapanış kaydı kaybolmaz.
+- Borsa `assetPositions`'ı **boş dizi** döndürürse harita SIFIRLANIR
+  (tüm pozisyonlar kapanmıştır); anahtar yok/null ise hatadır ve önceki
+  harita korunur.
 
-`[STRAT]` (saatte bir) her stratejiyi sınıflandırır — sessiz ölü strateji yasak:
+## 18. Position state machine
 
-| Durum | Anlam | Kimler |
-|---|---|---|
-| `ACTIVE` | girdisi tam, yönlü sinyal üretebilir | 14 strateji |
-| `AUXILIARY` | giriş stratejisi değil (boyut/kote/plan önerisi) | Kelly Sizing, Market Making, Optimal Execution |
-| `DATA-MISSING` | girdisi bağlı değil → Skip; sahte veri yok | Vol Arbitraj (IV feed yok), Değer Yatırım (temel feed yok) |
+```text
+        Place                fill                ExitNow/force_exit
+Flat ─────────► Pending ─────────► InPosition ─────────────► PendingExit ──► Flat
+  ▲                │  reject → Flat  ▲    borsa TP/SL/external
+  │                │                 │    close → recon → Flat
+  └────────────────┴─────────────────┘
+```
 
-**Dürüst sınırlar** (icat yapılmadı): Elliott SHORT kolu kodda yok (testle kanıtlı); Değer Yatırım temel verisi harici (proxy Hold); likidasyon feed'i yok (OI'dan çıkarımsal); MM emir yolu global IOC TIF ile çelişir (quote planı yalnız not); **"Wyckoff" isim iddiası sınırlıdır** — gerçek Wyckoff analizi (faz sayımı, spring/upthrust, schematics) DEĞİLDİR; model = efor/sonuç prensibinin basitleştirilmiş hâli (trend + hacim eforu + aralık konumu). İsim, öğrenme kanıtının sürekliliği için sabit tutulmuştur.
+`PosState`: `Flat / Pending{side,oid,remaining,ts} / InPosition{side,entry,
+size,peak} / PendingExit{oid,side}`. Garantiler: Pending'te aynı yön →
+Nothing (çift emir yok); Flat'ta çıkış emri ÜRETİLMEZ; bilinmeyen oid →
+no-op; revert yalnız oid==0 pending'de.
 
----
+## 19. TP / SL / trailing
 
-## 9. Test katmanları
+- **SL**: giriş dolumunda reduce-only trigger (`tpsl="sl"`) borsaya asılır.
+  Stop fiyatı **gerçek dolumdan** hesaplanır — IOC kayması mesafe kontratını
+  bozamaz. Sert yan kapısı: stop dolumun hatalı tarafına konulamaz.
+- **TP**: reduce-only trigger-LIMIT (`tpsl="tp"`); fill →
+  `ExitReason::TakeProfit`. TP **gerçek kapanış kaynağıdır**.
+- **Trailing**: yalnız SL ratchet'lenir (`TRAIL_ATR_K×ATR`,
+  `TRAIL_MIN_STEP` — gevşetme yasak). `replace_sl` önce YENİYİ kurar,
+  sonra öncekini iptal eder; yerleştirme başarısızsa önceki stop ayakta
+  kalır (korumasız pozisyon yok).
+- **Dedupe**: aynı coin'de birden fazla stop = yetim; en yeni oid tutulur,
+  öncekiler iptal edilir. TP/SL ayrımı `is_our_tp_row` fiyat-yakınlığıyla
+  yapılır — dedupe kendi TP'sini iptal edemez.
+- **Zaman damgası grace kapısı** (`TS_GRACE_MS`): reconnect'te harita boşsa
+  aynı stop tekrar kurulamaz.
+- **Stop fiyatı REST'ten ters hesaplanır**: `openOrders` yalnız `limitPx`
+  döndürür; `limitPx/1.05` (satış-stop) veya `/0.95` (alış-stop).
 
-| Katman | Ne kanıtlar | Sayı |
-|---|---|---|
-| Strateji unit (18/18) | Long/Short koşulu, missing-data Skip, güç aralığı | 65 |
-| Future-leak (prefix-replay) | onay verisi olmadan sinyal yok; gelecek barlar geçmişi değiştirmez | 6 strateji |
-| Yön-simetri | Long/Short simetri; ters sahte sinyal yok | 6 strateji |
-| Execution contract | SL/TP/RR 192 kombinasyon; yaşam döngüsü; UNKNOWN-cloid | 3 modül |
-| Maliyet modeli | EV↔yürütme tek model; yüksek spread/kayma → SKIP | 3 |
-| Metrikler | gerçek fill verisi; kanıt yoksa None; "%99" yasağı | 2 |
-| Risk invariant | EntryGate denklemi + kaynak taraması; risk-lock | 21 |
+## 20. Exit ownership / ExitReason
 
-`cargo test --workspace`: engine 164 + api 5 + data 9 + strategy 69 = **246 passed / 0 failed** (+1 ignored doc-test). Kalite raporu üç katman ayrıdır: **COMPILES PASS · TESTS PASS · TRADING LOGIC VERIFIED (koşullu: sınırlar "Dürüst sınırlar" başlığında)**.
+Çıkış kararlarının sahibi bellidir:
 
----
+```text
+ExitReason: Unknown | StopLoss | TakeProfit | TrailingStop |
+            SignalExit | EmergencyFlatten | Manual
+```
 
-## 10. ENV referansı
+- **Strateji sahipliği**: çıkış KURALLARI `Strategy::exit_intent(&ExitCtx)`
+  API'sinde yaşar (Kesit rank kayması, Turtle 55-bar altı). Motor kural
+  fonksiyonlarını doğrudan çağıramaz (kaynak taraması testi).
+- **Ensemble çıkışı**: `exit_requested` → `force_exit` (Flat'ta emir yok).
+- **Borsa sahipliği**: SL/TP trigger fill → oid eşleşmesiyle
+  `StopLoss`/`TakeProfit`.
+- Her kapanış TAM BİR `ExitReason` alır; kaynak-eşleşme testleriyle
+  korunur (TP fill → TakeProfit; SL fill → StopLoss; karışım yasak).
+
+## 21. Learning / tracker
+
+`StrategyTracker` her strateji için n / win / PF / ΣR tutar ve ağırlık
+üretilir:
+
+- `n < LEARN_MIN_N (10)` → ağırlık DONMUŞ `1.0` (kanıt yetersiz → öldürme yok).
+- `min_n ≤ n < full_n` → kısmi kurallar + keşif kuyruğu.
+- `n ≥ LEARN_FULL_N (30)` → tam kurallar (win < %35 → 0) + keşif dışı.
+
+Yalnız **gerçek kapanış R** kaydı girer: TP/SL/exit fill →
+`record_outcome_r(voters, ts, R)`. Sentetik ±1R, backtest satırı, fake
+win-loss kaydı yazılamaz (dosya formatı `origin:"live"` + `rs` gerçek R
+history ile korunur). PnL çözülemeyen kapanış tracker'a **0R YAZILMAZ**
+(TradeExit + sayaç kaydolur; öğrenme kanıtı oluşmaz).
+
+## 22. Live weight persistence
+
+- Etkin ağırlık = tracker türevi × canlı snapshot birleşimi
+  (`merge_effective_weights`); canlı dosya yüklenirse **birebir**
+  uygulanır — bir sonraki uygulamada sessizce 1.0'a ezilemez.
+- Dosya: `ENSEMBLE_LIVE_WEIGHTS_OUT` — atomik tmp+rename, 300 sn'de bir dump.
+- Okuma: `ENSEMBLE_WEIGHTS_IN` — **yalnız `origin:"live"`** kabul edilir;
+  `origin` olmayan / backtest-üretimli dosya reddedilir; bozuk sayı/sema →
+  **AÇILIŞ BAŞARISIZ** (sessiz cold-start = öğrenme kaybı); dosya yok →
+  nötr cold-start (18 × 1.0).
+- `schema_version: 2`, gerçek R history saklanır; restart'ta birebir yüklenir.
+
+## 23. Learning epoch
+
+`LearningEpoch` (`LEARNING_EPOCH_PATH`) testnet deneyinin kaydıdır:
+
+```text
+TESTNET ──► cold start ──► 100 gerçek kapanmış işlem ──► ready_for_live
+```
+
+- `status`: `Learning → ReadyForLive` (100. kapanışta geçer).
+- `completed_trade_count` = **kapanmış pozisyon** sayısı — sinyal, emir veya
+  fill sayısı değildir. `1 gerçek kapanmış pozisyon = 1 completed trade`;
+  her kapanış tam BİR kez sayılır (tid dedup + EntryAttr tek-yazım).
+- Sayaç kalıcıdır; restart'ta kaldığı yerden devam eder. Bozuk epoch
+  dosyası **açılışı durdurur** (sessiz sıfırlama yok).
+- `TESTNET_FRESH_START=1`: yalnız İLK çalıştırmada sıfırlar — tracker,
+  canlı ağırlık, risk hafızası, epoch temizlenir; açık emirler iptal,
+  pozisyonlar flatten; `trade_exits.jsonl` arşivlenir. Sonraki
+  restartlarda ENV kalsa bile state KORUNUR.
+
+## 24. Restart / recovery
+
+- **Pozisyon devri** (`ENGINE_FLATTEN=0`): borsadaki pozisyonlar recovery
+  ile makinelere bağlanır; TP/SL emirleri borsada durur ve cloid tuzu
+  deterministik olduğundan **körlemesine ikinci emir atılmaz** — oid
+  GERİ YÜKLENİR.
+- Devralınan pozisyon attr'sızsa **sentetik EntryAttr** kurulur: gerçek
+  entry/side/size + %2 risk fallback + voters BOŞ (kapanış sayılır,
+  tracker'a atıf kanıtı YAZILMAZ — sahipsiz stratejiye kredi yok).
+- **Boot sırası kontratı**: state recovery → pozisyon haritası dolu →
+  yetem temizliği → çift-stop dedupe. Yetem temizliği harita boşken
+  koşarsa gerçek pozisyonun TP/SL'si "yetim" sanılıp iptal edilir;
+  sıra testlerle korunur.
+- Risk hafızası boot'ta yüklenir; drawdown koruması süreklidir.
+
+## 25. Testnet learning protocol
+
+- Bot yalnız `NETWORK=testnet` + testnet endpoint'leriyle başlar;
+  `assert_testnet_endpoint` canlı API/NETWORK ile başlatmayı emir atılmadan
+  reddeder. TESTNET_FRESH_START canlı endpoint'te çalışamaz.
+- Öğrenme dönemi tek deneydir: aynı konfigürasyonla (stratejiler, eşikler,
+  risk limitleri, evren) 100 gerçek kapanış toplanır. Deney sırasında
+  parametre değişikliği yapılmaz.
+- `cargo test --workspace`: **246 passed / 0 failed** (engine 164,
+  data 9, api 5, strategy 68). Release build ayrı derlenir.
+
+## 26. Mainnet promotion boundary
+
+```text
+Testnet learning (100 completed trades)
+        ↓
+ready_for_live          ← epoch durum yazımı
+        ↓
+operator decision       ← İNSAN kararı; otomatik geçiş YOK
+        ↓
+mainnet promotion       ← ayrı operasyon; bot kendisi mainnet'e geçmez
+```
+
+`ready_for_live != automatically live`. Sistem mainnet konfigürasyonuyla
+başlatılırsa öğrenme dönemi mantığı devre dışıdır; canlıya geçiş yalnız
+operatörün ayrı, bilinçli adımıdır.
+
+## 27. Persistence files
+
+| State | Dosya | Amaç | Restart'ta |
+|---|---|---|---|
+| Tracker | `config/track_state.json` | n/win/PF/ΣR + gerçek R history | yüklenir (atomik) |
+| Live weights | `config/ensemble_weights_live.json` | `origin:"live"` ağırlık snapshot | doğrulanır + yüklenir |
+| Learning epoch | `config/learning_epoch.json` | dönem + kalıcı işlem sayacı | korunur |
+| Risk state | `config/risk_state.json` | peak_equity + halted | yüklenir |
+| Tick cache | `config/tick_cache.json` | coin→fiyat hassasiyeti | yüklenir |
+| Trade exits | `config/trade_exits.jsonl` | kapanmış işlem arşivi (append) | append/recovery |
+
+Tümü atomik yazılır (`.tmp` + rename). `FRESH_START` tracker/weights/
+epoch/risk'i temizler, `trade_exits.jsonl`'i arşivler. Testnet state'i
+mainnet state'inden ayrı tutulur: mainnet operasyonu kendi dosya
+yollarıyla (`*_PATH` ENV) yapılandırılır; dönem dosyası mainnet'te
+anlamsızdır.
+
+## 28. ENV configuration
+
+`.env.example` kod ve operasyon scriptiyle senkrondur (gizli değerler
+`.env`'de, repoya girmez):
 
 | ENV | Varsayılan | Anlam |
 |---|---|---|
-| `ENGINE_INTERVAL` | 3600 | mum aralığı (sn) |
-| `ENGINE_CYCLE_SECS` | 300 | motor döngü periyodu (sn) |
-| `ENGINE_COINS` | tüm evren | evren spec (isim listesi / tamsayı N / all) |
-| `ENGINE_HIST_BARS` | 4400 | indikatör ısınma penceresi |
-| `ENGINE_BUDGET_USD` | 300 | döngü bütçesi |
-| `ENGINE_TOP_N` / `ENGINE_MIN_SCORE` | 3 / 0.30 | pozisyon tavanı / ensemble eşiği |
-| `ENGINE_LEVERAGE` | 5 | hesap kaldıracı |
-| `ENGINE_FLATTEN` | 0 | açılışta pozisyon devri (recovery) — düzleşme YOK; her restart pozisyonları korur |
-| `ENGINE_EXPLORE` | 1 | keşif kuyruğu |
-| `ENGINE_CRIT_THRESHOLD` | 5 | kill-switch eşiği |
-| `TRAIL_ON / TRAIL_ATR_K / TRAIL_MIN_STEP` | 1 / 1.5 / 0.25 | trailing stop |
-| `LEARN_MIN_N / LEARN_FULL_N` | 10 / 30 | öğrenme eşikleri |
-| `TRACK_STATE_PATH` | config/track_state.json | tracker persistence |
-| `ENSEMBLE_WEIGHTS_IN` | config/ensemble_weights_live.json | canlı ağırlık girişi (origin=live zorunlu) |
-| `ENSEMBLE_LIVE_WEIGHTS_OUT` | aynı dosya | atomik dump hedefi |
-| `ENGINE_TICK_CACHE` | config/tick_cache.json | öğrenilen tick hassasiyeti |
-| `TRADE_EXITS_PATH` | config/trade_exits.jsonl | trade-exit arşivi |
-| `TESTNET_FRESH_START` | (yok) | =1: İLK çalıştırmada temiz deney (sonraki restartlar state'i korur) |
-| `LEARNING_EPOCH_PATH` | config/learning_epoch.json | öğrenme dönemi + kalıcı işlem sayacı |
-| `RISK_STATE_PATH` | config/risk_state.json | kalıcı risk hafızası (peak_equity + halted; FRESH_START siler) |
-| `EV_TAKER_FEE_BPS / EV_SLIPPAGE_BPS / EV_MIN_DIST_BPS` | 4.5 / 5.0 / 75 | TEK maliyet modeli |
-| `CLICKHOUSE_URL / REDIS_URL` | (boş) | kalıcılık; boşsa Memory fallback |
-| `RUST_LOG / LOG_LEVEL` | info | log seviyesi |
+| `NETWORK` | `testnet` | `testnet`/`mainnet`; testnet epoch canlı endpoint'i reddeder |
+| `HYPERLIQUID_API_URL` / `_WS_URL` | testnet uçları | REST + WS |
+| `HYPERLIQUID_PRIVATE_KEY` / `API_WALLET_ADDRESS` / `USER_ADDRESS` | — | imzalayan agent + master hesap adresi |
+| `ENGINE_INTERVAL` | `3600` | mum aralığı (sn) |
+| `ENGINE_CYCLE_SECS` | `300` | döngü periyodu |
+| `ENGINE_COINS` | `all` | evren spesifikasyonu (tek kaynak) |
+| `ENGINE_HIST_BARS` | `4400` | ısınma penceresi |
+| `ENGINE_BUDGET_USD` | `300` | döngü bütçesi |
+| `ENGINE_TOP_N` | `3` | eşzamanlı pozisyon tavanı |
+| `ENGINE_MIN_SCORE` | `0.30` | ensemble eşik |
+| `ENGINE_LEVERAGE` | `5` | hesap kaldıracı |
+| `ENGINE_FLATTEN` | `0` | açılışta düzleşme (0 = devral) |
+| `ENGINE_EXPLORE` | `1` | keşif şeridi |
+| `ENGINE_CRIT_THRESHOLD` | `5` | kill-switch eşiği (karar-kritik) |
+| `TRAIL_ON` / `TRAIL_ATR_K` / `TRAIL_MIN_STEP` | `1 / 1.5 / 0.25` | trailing stop |
+| `LEARN_MIN_N` / `LEARN_FULL_N` | `10 / 30` | öğrenme pencere eşikleri |
+| `TRACK_STATE_PATH` | `config/track_state.json` | tracker kalıcılığı |
+| `ENSEMBLE_WEIGHTS_IN` / `_OUT` | `config/ensemble_weights_live.json` | canlı ağırlık okuma/yazma |
+| `ENGINE_TICK_CACHE` | `config/tick_cache.json` | fiyat hassasiyeti öğrenimi |
+| `TRADE_EXITS_PATH` | `config/trade_exits.jsonl` | kapanış arşivi |
+| `TESTNET_FRESH_START` | (boş) | 1 = yalnız ilk çalıştırma reset |
+| `LEARNING_EPOCH_PATH` | `config/learning_epoch.json` | dönem kaydı |
+| `RISK_STATE_PATH` | `config/risk_state.json` | kalıcı risk hafızası |
+| `EV_TAKER_FEE_BPS` / `EV_SLIPPAGE_BPS` / `EV_MIN_DIST_BPS` | `4.5 / 5.0 / 75` | tek maliyet modeli |
+| `CLICKHOUSE_URL` / `REDIS_URL` | (boş → Memory) | opsiyonel kalıcılık |
+| `LOG_LEVEL` / `RUST_LOG` | `info` | log seviyesi (LOG_LEVEL öncelikli) |
 
----
+`start_bot.sh` operasyon değerlerini export eder (bütçe 300, döngü 300 sn,
+1h mum, 4400 bar, FLATTEN=0) ve botu **timeout'suz süresiz** çalıştırır.
 
-## 11. Operasyon
+## 29. Failure modes / safe behavior
 
-- Başlatma: `scripts/start_bot.sh` (pgrep-temelli güvenli restart; önceki log `<log>.prev`).
-- Log: `/tmp/opencode/bot.log`.
-- Fiyat probu: `probe_px <COIN>`; trailing analitiği: `trail_report`.
-- CI: `.github/workflows/test.yml` — push/PR→master'da `cargo test --workspace`.
+| Arıza | Davranış |
+|---|---|
+| WS kopması | otomatik reconnect (5 sn); shard'lı; fırtınada ExitsOnly |
+| REST 429/timeout | geçici sınıftır; kill-switch saymaz; retry policy (4xx retry yok) |
+| UNKNOWN emir sonucu | borsada işlenmiş OLABİLİR → recon zorunlu; sessiz state değişimi yok |
+| Bozuk ağırlık dosyası | açılış BAŞARISIZ (sessiz cold-start yasak) |
+| Bozuk epoch dosyası | açılış DURUR (sessiz sayaç sıfırlama yasak) |
+| Bozuk risk state | yükleme reddedilir; fresh başlangıç loglanır |
+| Bayat/bozuk defter | sinyale ve emre gitmez (`is_stale/is_sane`) |
+| Geçersiz mum/ctx alanı | mum düşürülür; alan son bilinen değeri korur — sahte sıfır yok |
+| Gösterge None | strateji Skip — sahte yön yok |
+| ADX/Hurst hesaplanamaz | rejim Skip; `classify` None → güvenli Open |
+| Drawdown halt | yalnız operatör `resume`; state kalıcı |
+| Yetim/çift stop | boot dedupe + grace kapısı + dedupe_sl (en yeni oid kalır) |
+| Kill-switch | EmergencyFlatten; restart exponential backoff (30..300 sn) |
 
-*Test sayıları: engine 164, api 5, data 9, strategy 69 = **246 PASS / 0 FAIL** (+1 ignored doc-test). Son güncelleme: 2026-10-06.*
+## 30. Test architecture
+
+```text
+cargo test --workspace  →  246 passed / 0 failed
+engine 164 · data 9 · api 5 · strategy 68
+```
+
+- **Kontrat testleri**: EntryGate denklemi (kaynak taraması), exit sahipliği
+  (engine doğrudan kural çağrısı yasak), TP≥2R, cloid şeması, dedupe TP/SL
+  ayrımı, boot sırası, drain-sırası, UNKNOWN→recon.
+- **Golden path**: strateji → ensemble → rejim → tahsis → risk → emir
+  kontratı → fill → TP/SL → R → tracker zinciri ağsız gerçek tiplerle.
+- **Mutasyon kanıtlaması**: persistence, epoch sayacı, risk hafızası,
+  ağırlık validasyonu testleri mutasyonla doğrulanmıştır.
+- **Data dürüstlüğü**: None kontratı, bozuk mum düşürme, ctx bayat-değer
+  koruması testleri.
+- **CI** (`.github/workflows/test.yml`): `cargo test --workspace` +
+  `cargo build --release --workspace`. fmt/clippy adımları yoktur
+  (bkz. Dürüst sınırlar).
+
+## Dürüst sınırlar
+
+- **Elliott** yapısal olarak long-only eğilimlidir; short kolu mevcut
+  kontratta uygulanmaz (parametre normalizasyonu değiştirilmedi).
+- **Market Making** ve **Optimal Execution** AUXILIARY'dir: yönlü sinyal
+  üretmez / parent-order planner motor entegrasyonu yoktur (registry'de
+  işaretli, raporda görünür; sahte alpha kanıtı üretmez).
+- **Kelly Sizing** portföy-düzey öneridir; tahsise etkisi yoktur.
+- **Vol Arbitraj (VRP)** ve **Değer Yatırım** `DataMissing`: IV ve temel
+  feed bağlı değildir; Skip üretir, yön kanıtı üretmez.
+- **Volatilite Zaman Serisi** saf GARCH değil; vol sıkışması + momentum
+  kompozitidir.
+- **Backtest motoru yoktur**: ağırlıklar yalnız canlı kanıttan gelir;
+  backtest formatı yalnız reddedilmek üzere tanımlıdır.
+- CI fmt/clippy koşmaz; kalite kapısı test + release build'dir.
+- Arşiv kalıcılığı (ClickHouse/Redis) opsiyoneldir; boşsa Memory fallback
+  ile arşiv/backtest verisi birikmez.

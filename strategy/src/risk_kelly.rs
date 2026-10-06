@@ -1,9 +1,8 @@
 //! RİSK KELLY — işlem boyutu hesabı (yön üretmez, AUXILIARY).
 //!
 //! 1. f* = p − (1−p)/b — p ve b YALNIZ tracker'ın GERÇEK canlı kanıtından
-//! (`MarketInput::portfolio_*`); kanıt yok → Skip
-//! ("sabit %45 KULLANILMADI" — eski kod örnek istatistiği canlı veri
-//! gibi gösteriyordu).
+//! (`MarketInput::portfolio_*`); kanıt yok → Skip — sabit varsayılan
+//! win-rate ile boyutlama YASAKTIR.
 //! 2. Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle kanıtlı);
 //! not yalnız boyut ÖNERİSİdir.
 //! 3. Kapsam: **PORTFÖY-DÜZEY advisory** — coin/strateji-özel Kelly
@@ -52,9 +51,9 @@ mod kelly_tests {
     use super::*;
     use crate::ensemble::{Dir, Ensemble, EnsembleConfig};
 
- /// Sabit win-rate ile canlı sizing YOK: kanıt yoksa Skip + notta
- /// "KULLANILMADI" yazısı. (Eski kod %45 sabitini canlı veri gibi
- /// gösteriyordu.)
+ /// Sabit win-rate ile canlı sizing YAPILMAZ: kanıt yoksa Skip +
+ /// notta "KULLANILMADI" yazısı (sabit %45 gibi varsayılan, örnek
+ /// istatistiği canlı kanıt gibi gösteremez).
     #[test]
     fn kelly_does_not_use_hardcoded_live_win_rate() {
         let input = MarketInput {

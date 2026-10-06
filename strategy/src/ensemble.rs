@@ -30,8 +30,8 @@ pub struct ConsensusSignal {
     pub note: String,
  /// **ÇIKIŞ KANALI — ayrı bir karar hattı, entry skoruna KARIŞMAZ.**
  ///
- /// `Signal::Exit` skoru nötr etkiler (eski davranış) ama artık **note
- /// defterine gömülüp ölü kalmaz**: en az bir Exit oyu varsa `true`.
+ /// `Signal::Exit` skoru nötr etkiler; karar ayrı bir kanal olarak
+ /// taşınır: en az bir Exit oyu varsa `exit_requested=true`.
  /// Motor, `exit_requested && pozisyon açık` iken gerçek `ExitNow`
  /// yürütür; Flat pozisyonda hiçbir emir üretmez.
     pub exit_requested: bool,
@@ -274,7 +274,7 @@ impl Ensemble {
 mod exit_channel_tests {
     use super::*;
 
- /// Exit oyu ARTIK ÖLÜ DEĞİL: `exit_requested=true` + `exit_contributors`.
+ /// Exit oyu ayrı KANAL taşıyıcısıdır: `exit_requested=true` + `exit_contributors`.
  /// Skor HÂLÂ nötr etkilidir (entry konsensüsü ayrı kanal).
     #[test]
     fn ensemble_exit_signal_is_not_ignored() {
@@ -287,7 +287,7 @@ mod exit_channel_tests {
         assert_eq!(cs.exit_contributors, vec!["B".to_string()]);
  // skor Exit'ten etkilenmez: yalnız A'nın Long katkısı
         assert!((cs.score - 0.9).abs() < 1e-9);
- // eski davranıştan fark: eski kod yalnız note'a yazardı; note da hâlâ var
+ // note defteri de güncellenir — ama karar kanalı bayraktır
         assert!(cs.note.contains("EXIT"), "note korunur ama tek kanal o değil");
     }
 

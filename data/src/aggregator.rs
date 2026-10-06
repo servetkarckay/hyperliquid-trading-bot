@@ -259,7 +259,7 @@ impl Aggregator {
         let end = hyperliquid_api::now_ms() as i64;
         let start = end - (interval_secs as i64) * 1000 * (bars as i64 + 1);
         let raw = info.candle_snapshot(coin, iv_name, start, end).await?;
- // en yeni `bars` mum, eskiden yeniye push edilir
+ // en yeni `bars` mum, eski→yeni sırayla push edilir
         let recent: Vec<&hyperliquid_api::types::Candle> =
             raw.iter().rev().take(bars).collect();
         let mut n = 0;

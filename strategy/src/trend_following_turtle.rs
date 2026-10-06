@@ -3,10 +3,9 @@
 //! 1. Giriş: kapanış önceki 20-bar kanalın üstünde → Long [0.7];
 //! altında → Short [0.7] (kanal ÖNCEKİ barın — kırılım konvansiyonu).
 //! 2. Filtre: 55-bar kanal üstü → Hold (trend sürüyor, piramit koşulu).
-//! 3. **Ölü sinyal düzeltmesi **: `price<ll55→Exit` dalı yapısal
-//! ölüydü (ll55 ≤ ll20 ⟹ Short önce); kural `long_exit_signal`
-//! helper'ına taşındı; bugün kural `exit_intent` TRAIT API'siyle
-//! stratejinin kendisinde (motor yalnız yönlendirir).
+//! 3. **LONG çıkış kuralı**: `price < ll55` → LONG Exit; kural
+//! `exit_intent` TRAIT API'siyle stratejinin kendisinde yaşar
+//! (kurallar tek yerde — motor yalnız yönlendirir).
 //! 4. ATR ≤ 0 / kanal serisi kısa → Skip; <56 mum → Skip.
 use crate::{closes, highs, lows, MarketInput, Signal, Strategy, ExitCtx, ExitIntent, ExitPositionInfo};
 use math::indicators;
@@ -15,8 +14,7 @@ pub struct TurtleTrendFollowing;
 
 /// Turtle **long Exit kuralı** (doküman): kapanış 55-bar kanalın altı →
 /// long trend bitti. Strateji pozisyon tarafını BİLMEDİĞİ için bu kural
-/// evaluate içinde ölüydü (ll55 ≤ ll20 ⟹ Short önce yakalardı);
-/// bugün kural `exit_intent` API'sinde — kural + çağrı stratejide.
+/// çıkış kuralı `exit_intent` API'sinde — kural + durum stratejide.
 pub fn long_exit_signal(candles: &[data::Candle]) -> bool {
     if candles.len() < 56 {
         return false; // veri yok → karar yok (sahte exit yasak)
@@ -149,7 +147,7 @@ mod audit_tests {
     }
 
  /// A — **long_exit_signal**: kapanış 55-bar kanalın altı → Exit kuralı
- /// CANLI (ölü sinyal düzeltmesi — önceden Exit dalı asla çalışmıyordu).
+ /// 55-bar kanal altına sarkan LONG pozisyonun çıkış kuralı.
     #[test]
     fn turtle_55bar_alti_exit_kurali_canli() {
  // 55 bar 100'ün altı yok → kanal ~100; kırılım 80 → long exit
@@ -161,7 +159,7 @@ mod audit_tests {
         assert!(!long_exit_signal(&candles2));
  // veri yetersiz → karar yok
         assert!(!long_exit_signal(&H::flat(10, 100.0)));
- // evaluate artık ölü dal içermez: 80 fiyatlı durumda Short (ters yön)
+ // evaluate Exit dalı içermez: 80 fiyatlı durumda Short (ters yön)
         let input = MarketInput { coin: "T".into(), candles, equity: 10_000.0, ..Default::default() };
         assert!(matches!(TurtleTrendFollowing.evaluate(&input), Signal::Short { .. }));
     }

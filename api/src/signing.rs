@@ -456,7 +456,8 @@ mod exchange_unknown_tests {
         );
     }
 
- /// 4xx ASLA retry edilmez (mevcut davranış, regresyon koruması).
+ /// 4xx yanıtında emir borsaya hiç ulaşmamıştır: yeniden deneme
+ /// (retry) yapılmaz — sonuç ERROR olarak döner.
     #[tokio::test]
     async fn exchange_4xx_retry_yok() {
         let f = fake_exchange(vec![Some(("400 Bad Request", r#"{"error":"bad"}"#))]).await;

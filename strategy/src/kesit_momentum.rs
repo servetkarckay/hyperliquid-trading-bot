@@ -5,15 +5,15 @@
 //! alt %20 BottomShort / %40-60 Mid.
 //! 3. Long/Short [0.6] dilim üyeliği; orta dilim Hold.
 //! 4. `rank_shift_exit_long`: LONG, Top'tan alt %40'a düştü → Exit
-//! — çıkış kuralı + durumu (önceki band) STRATEJİNDE yaşar; motor
+//! — çıkış kuralı + durumu (önceki band) STRATEJİDE yaşar; motor
 //! `exit_intent` API'siyle yalnız yönlendirir (kurallar tek yerde).
 use crate::{closes, MarketInput, Signal, Strategy, ExitCtx, ExitIntent};
 use math::indicators;
 
 pub struct KesitMomentum {
     /// **Önceki döngünün sıralama bandı** (coin → band) — çıkış kuralının
-    /// DURUMU stratejinin KENDİSİNDE yaşar ("kurallar tek yerde" prensibi;
-    /// önceki tasarım bu haritayı engine'de tutuyordu). `Mutex` = `&self`
+    /// DURUMU ("kurallar tek yerde" prensibi: çıkış kuralı ve durumu
+    /// stratejide yaşar, motor yalnız yönlendirir). `Mutex` = `&self`
     /// API'siyle tekil strateji nesnesinde iç mutasyon.
     prev: std::sync::Mutex<std::collections::HashMap<String, RankBand>>,
 }
