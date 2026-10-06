@@ -133,12 +133,8 @@ mod kelly_tests {
         assert!(cs.contributors.is_empty(), "Kelly skora KATKI YAZMAZ: {cs:?}");
  // durum: AUXILIARY
         assert_eq!(RiskKelly.status(&MarketInput::default()), StratStatus::Auxiliary);
- // Optimal Execution ve Market Making de AUXILIARY; VRP IV'süz DATA-MISSING
-        use crate::{optimal_execution::OptimalExecution, market_making::MarketMaking, volatilite_arbitraj::VolatiliteArbitraj};
-        assert_eq!(OptimalExecution.status(&MarketInput::default()), StratStatus::Auxiliary);
+ // Market Making de AUXILIARY (yönlü sinyal üretmez)
+        use crate::market_making::MarketMaking;
         assert_eq!(MarketMaking.status(&MarketInput::default()), StratStatus::Auxiliary);
-        assert_eq!(VolatiliteArbitraj.status(&MarketInput::default()), StratStatus::DataMissing);
-        let iv = MarketInput { iv: Some(0.65), ..Default::default() };
-        assert_eq!(VolatiliteArbitraj.status(&iv), StratStatus::Active);
     }
 }

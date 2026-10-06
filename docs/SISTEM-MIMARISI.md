@@ -53,7 +53,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
     │                                          │
     ├──► MarketCtx (funding/OI/mark/oracle)    │
     ▼                                          ▼
-        MarketInput (18 stratejiye TEK girdi sözleşmesi)
+        MarketInput (15 stratejiye TEK girdi sözleşmesi)
                        │
                        ▼
         Strategy Layer (panik-izole evaluate)
@@ -92,7 +92,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
 |---|---|
 | `api` | Hyperliquid I/O façade: imza (EIP-712), exchange/info endpoint, WS, hata taksonomisi, wire yuvarlama. Bot mantığı İÇERMEZ. |
 | `data` | Piyasa verisi hattı: WS ingestor, tick→mum aggregator, market context, storage soyutlaması, evren tek kaynağı. |
-| `strategy` | `Strategy` trait'i + 18 strateji + ensemble + rejim + `InfoCluster` + `exit_intent`. |
+| `strategy` | `Strategy` trait'i + 15 strateji + ensemble + rejim + `InfoCluster` + `exit_intent`. |
 | `engine` | Motor: döngü, executor, allocation, risk, durum makinesi, tracker, epoch. |
 | `math` | Saf deterministik sayısal çekirdek: göstergeler, vol modelleri, linalg/OLS, istatistik testleri, portföy metrikleri. |
 | `utils` | Logger + NTP saat senkronu. |
@@ -137,13 +137,14 @@ kullandığını doğrular; uyuşmazlıkta **açılış durur**.
 - `MarketInput`: kapanmış mumlar + canlı son bar + L2 defter (`Option` —
   yoksa `None`, sahte sıfır DEĞİL) + ctx (OI/funding) + portfolio kanıtı +
   equity + evren getirileri.
-- 18 strateji `registry()`'de tanımlıdır. `evaluate` panik-izole çalışır
+- 15 strateji `registry()`'de tanımlıdır. `evaluate` panik-izole çalışır
   (bir stratejinin paniki döngüyü düşürmez; Skip'e döner).
 - `Signal`: Long/Short/Hold/Skip/Exit — `None` gösterge asla sahte oy
   üretmez (gösterge yok = katkı yok).
-- `status()`: `Active / Auxiliary / DataMissing` — rapor dürüstlüğü.
-  `DataMissing` (Vol Arbitraj: IV feed yok; Değer Yatırım: temel feed yok)
-  yön üretmez.
+- `status()`: `Active / Auxiliary` — rapor dürüstlüğü. Girdisi yapısal
+  olarak sağlanamayan stratejiler (IV feed, temel veri, parent-order
+  planner) registry'de YER ALMAZ — boş koltuk doldurmaz, sahte yön
+  üretmez.
 
 ## 8. Regime detection
 
@@ -165,16 +166,16 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 
 ## 10. InfoCluster ve breadth
 
-18 strateji aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
+15 strateji aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
 **ham oy sayısına göre verilmez**. `strategy::info_cluster(name)` tek
 kaynaktır — 8 bilgi kümesi:
 
 ```text
 Trend (Wyckoff, Dow, Turtle, Breakout, Elliott, Klasik, Rejim)
-MeanReversion (Davranışsal, Değer Yatırım)
-OrderFlow (LOB, Market Making, Optimal Execution)
+MeanReversion (Davranışsal)
+OrderFlow (LOB, Market Making)
 CrossSectional (Kesit Momentum)
-Carry · Volatility (GARCH kompoziti, VRP) · Liquidation (OI) · Sizing (Kelly)
+Carry · Volatility (sıkışma+momentum kompoziti) · Liquidation (OI) · Sizing (Kelly)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
@@ -361,7 +362,7 @@ history ile korunur). PnL çözülemeyen kapanış tracker'a **0R YAZILMAZ**
 - Okuma: `ENSEMBLE_WEIGHTS_IN` — **yalnız `origin:"live"`** kabul edilir;
   `origin` olmayan / backtest-üretimli dosya reddedilir; bozuk sayı/sema →
   **AÇILIŞ BAŞARISIZ** (sessiz cold-start = öğrenme kaybı); dosya yok →
-  nötr cold-start (18 × 1.0).
+  nötr cold-start (15 × 1.0).
 - `schema_version: 2`, gerçek R history saklanır; restart'ta birebir yüklenir.
 
 ## 23. Learning epoch
@@ -521,12 +522,9 @@ engine 164 · data 9 · api 5 · strategy 68
 
 - **Elliott** yapısal olarak long-only eğilimlidir; short kolu mevcut
   kontratta uygulanmaz (parametre normalizasyonu değiştirilmedi).
-- **Market Making** ve **Optimal Execution** AUXILIARY'dir: yönlü sinyal
-  üretmez / parent-order planner motor entegrasyonu yoktur (registry'de
-  işaretli, raporda görünür; sahte alpha kanıtı üretmez).
+- **Market Making** AUXILIARY'dir: yönlü sinyal üretmez (raporda
+  görünür; sahte alpha kanıtı üretmez).
 - **Kelly Sizing** portföy-düzey öneridir; tahsise etkisi yoktur.
-- **Vol Arbitraj (VRP)** ve **Değer Yatırım** `DataMissing`: IV ve temel
-  feed bağlı değildir; Skip üretir, yön kanıtı üretmez.
 - **Volatilite Zaman Serisi** saf GARCH değil; vol sıkışması + momentum
   kompozitidir.
 - **Backtest motoru yoktur**: ağırlıklar yalnız canlı kanıttan gelir;

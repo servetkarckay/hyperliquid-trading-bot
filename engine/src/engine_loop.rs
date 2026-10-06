@@ -3,7 +3,7 @@
 //!
 //! Fazlar (run_cycle):
 //! 1. TARAMA: her coin için kapanmış mumlar + canlı son bar → `MarketInput`
-//! → 18 strateji (panik-izole) → ensemble → rejim kapısı.
+//! → 15 strateji (panik-izole) → ensemble → rejim kapısı.
 //! 2. TAHSİS: conviction + korelasyon + bütçe → `Candidate`.
 //! 3. YÜRÜTME: makine `Action`'ları → WireOrder/Cancel — TEK batch POST.
 //! 4. ÇIKIŞLAR: SL/TP trigger'lar borsada asılı (TP fill →
@@ -886,7 +886,7 @@ impl Engine {
         let strategies = strategy::registry();
  // Nötr cold-start listesi: registry'deki stratejilerin ADLARI.
  // `Strategy::name` trait'i üzerinden; ağırlık dosyası yoksa bile
- // 18 strateji w=1.0 ile başlar .
+ // 15 strateji w=1.0 ile başlar.
         let strategy_names: Vec<String> = strategies.iter().map(|s| s.name().to_string()).collect();
         let mut tracker = StrategyTracker::default();
  // PERSISTENCE: canlı öğrenme durumunu diskten yükle .
@@ -2184,8 +2184,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                     .map(|p| p.szi * p.entry_px)
                     .unwrap_or(0.0),
  // order_size_usd: parent emir planı tahsisden SONRA oluşur →
- // strategy evaluation'a beslenemez. `Optimal Execution` bu
- // yüzden AUXILIARY (bkz. `Strategy::status`).
+ // strategy evaluation'a beslenemez (0.0).
                 order_size_usd: 0.0,
  // E: Kelly için tracker'ın GERÇEK canlı kanıtı
                 portfolio_win_rate: self.tracker.portfolio_stats().map(|s| s.0),

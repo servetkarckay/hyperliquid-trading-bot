@@ -1,4 +1,4 @@
-//! STRATEGY — sinyal sözleşmesi ve 18-strateji registry.
+//! STRATEGY — sinyal sözleşmesi ve 15-strateji registry.
 //!
 //! Sözleşme:
 //! 1. `Strategy::evaluate(&MarketInput) -> Signal` — SAFTIR: pozisyon
@@ -7,17 +7,17 @@
 //! önerisi — engine exit kanalına gider) / Skip (veri yok — SAHTE
 //! sinyal üretilmez; `unwrap_or(0.5)` fallback'leri yasak).
 //! 3. `Strategy::status(input)`: ACTIVE / AUXILIARY (yönsüz yardımcı:
-//! Kelly/MM/OptExec) / DATA-MISSING (VRP IV'süz) — sessiz ölü
-//! strateji raporlanmak zorunda.
+//! Kelly/MM) — HL'de girdisi yapısal olarak olmayan strateji
+//! (IV feed, temel veri, parent-order) registry'de YER ALMAZ;
+//! sessiz ölü strateji raporlanmak zorundadır.
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
 //! (funding/OI/taker/imbalance/universe_returns).
-//! 5. `registry`: 18 strateji; `strat_test_helpers` yalnız-test
+//! 5. `registry`: 15 strateji; `strat_test_helpers` yalnız-test
 //! deterministik mum üreteci.
 pub mod wyckoff;
 pub mod kesit_momentum;
 pub mod lob_emir_akisi;
 pub mod market_making;
-pub mod optimal_execution;
 pub mod volatilite_zaman_serisi;
 pub mod carry_funding_basis;
 pub mod oi_likidasyon;
@@ -28,10 +28,8 @@ pub mod davranissal_finans;
 pub mod ensemble;
 pub mod klasik_indikatorler;
 pub mod elliott_dalga;
-pub mod deger_yatirim;
 pub mod trend_following_turtle;
 pub mod breakout_kirilim;
-pub mod volatilite_arbitraj;
 
 use data::market_ctx::CtxState;
 use data::Candle;
@@ -127,9 +125,8 @@ pub trait Strategy: Send + Sync {
  ///
  /// Varsayılan: girdisi tam gelen yönlü strateji (`ACTIVE`).
  /// Geçersiz kılanlar (kendisini en iyi bilen stratejinin kendisidir):
- /// `Kelly Sizing`, `Market Making`, `Optimal Execution` → `AUXILIARY`
- /// (yön üretmez / parent-emir planı, gerçek parayla giriş sinyali DEĞİL),
- /// `Vol Arbitraj (VRP)` → IV feed yoksa `DATA-MISSING` (SAHTE IV ÜRETMEZ).
+ /// `Kelly Sizing`, `Market Making` → `AUXILIARY`
+ /// (yön üretmez, gerçek parayla giriş sinyali DEĞİL).
     fn status(&self, input: &MarketInput) -> StratStatus {
         let _ = input;
         StratStatus::Active
@@ -193,9 +190,9 @@ pub struct ExitIntent {
 pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
-        "Optimal Execution", "Volatilite Zaman Serisi", "Carry", "OI Likidasyon",
+        "Volatilite Zaman Serisi", "Carry", "OI Likidasyon",
         "Rejim Tespiti", "Kelly Sizing", "Dow", "Davranışsal", "Klasik Göstergeler",
-        "Elliott", "Değer Yatırım", "Turtle", "Breakout", "Vol Arbitraj (VRP)",
+        "Elliott", "Turtle", "Breakout",
     ]
 }
 
@@ -205,7 +202,6 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(kesit_momentum::KesitMomentum::default()),
         Box::new(lob_emir_akisi::LobEmirAkisi),
         Box::new(market_making::MarketMaking),
-        Box::new(optimal_execution::OptimalExecution),
         Box::new(volatilite_zaman_serisi::VolatiliteZamanSerisi),
         Box::new(carry_funding_basis::CarryFundingBasis),
         Box::new(oi_likidasyon::OiLikidasyon),
@@ -216,10 +212,8 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(davranissal_finans::DavranissalFinans),
         Box::new(klasik_indikatorler::KlasikIndikatorler),
         Box::new(elliott_dalga::ElliottDalga),
-        Box::new(deger_yatirim::DegerYatirim),
         Box::new(trend_following_turtle::TurtleTrendFollowing),
         Box::new(breakout_kirilim::BreakoutKirilim),
-        Box::new(volatilite_arbitraj::VolatiliteArbitraj),
         
     ]
 }
@@ -234,15 +228,15 @@ pub enum InfoCluster {
     /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle, Breakout,
     /// Elliott, Klasik Göstergeler, Rejim Tespiti
     Trend,
-    /// kontra/ortalama-dönüş: Davranışsal, Değer Yatırım
+    /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,
-    /// defter/akış: LOB, Market Making, Optimal Execution
+    /// defter/akış: LOB, Market Making
     OrderFlow,
     /// evren geneli göreli güç: Kesit Momentum
     CrossSectional,
     /// funding/basis taşıma: Carry
     Carry,
-    /// vol modelleri: GARCH, VRP
+    /// vol modelleri: Volatilite Zaman Serisi (sıkışma+momentum kompoziti)
     Volatility,
     /// OI/likidasyon kadransı
     Liquidation,
@@ -255,11 +249,11 @@ pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
         "Kelly Sizing" => InfoCluster::Sizing,
         "Kesit Momentum" => InfoCluster::CrossSectional,
-        "LOB Emir Akışı" | "Market Making" | "Optimal Execution" => InfoCluster::OrderFlow,
-        "Volatilite Zaman Serisi" | "Vol Arbitraj (VRP)" => InfoCluster::Volatility,
+        "LOB Emir Akışı" | "Market Making" => InfoCluster::OrderFlow,
+        "Volatilite Zaman Serisi" => InfoCluster::Volatility,
         "Carry" => InfoCluster::Carry,
         "OI Likidasyon" => InfoCluster::Liquidation,
-        "Davranışsal" | "Değer Yatırım" => InfoCluster::MeanReversion,
+        "Davranışsal" => InfoCluster::MeanReversion,
         // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
         // Turtle, Breakout, Rejim Tespiti
         _ => InfoCluster::Trend,
@@ -285,7 +279,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 18;
+pub const STRATEGY_COUNT: usize = 15;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]
