@@ -70,13 +70,13 @@ impl MarketCtx {
     pub fn apply_stream(&mut self, ev: &StreamEvent) {
         if let StreamEvent::Ctx { coin, funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, ts } = ev {
             let prev = self.latest.get(coin).cloned();
-            let r = |o: &Option<f64>, d: f64| o.unwrap_or_else(|| prev.as_ref().map(|p| d).unwrap_or(0.0));
+            let keep = |o: &Option<f64>, prev_v: f64| o.unwrap_or(prev_v);
             self.apply_event(CtxState {
                 coin: coin.clone(), funding: *funding, open_interest: *open_interest,
                 mark_px: *mark_px, oracle_px: *oracle_px,
-                premium: r(premium, prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
-                day_ntl_vlm: r(day_ntl_vlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
-                prev_day_px: r(prev_day_px, prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
+                premium: keep(premium, prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
+                day_ntl_vlm: keep(day_ntl_vlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
+                prev_day_px: keep(prev_day_px, prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
                 ts: *ts,
             });
         }
