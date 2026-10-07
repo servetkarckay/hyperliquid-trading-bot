@@ -24,6 +24,8 @@ fi
 # taşır, silinmez.
 
 # Bot süresiz çalışır; durdurma kararı operatördedir.
-nohup "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
+# setsid: kendi session'ı — başlatan shell/arka plan işi temizlenirse
+# process-group kill'i botu öldüremez (sessiz ölüm yasağı).
+setsid nohup "$ROOT/target/release/bot" >"$LOG" 2>&1 </dev/null &
 sleep 3
 pgrep -af "$ROOT/target/release/bot"
