@@ -244,9 +244,97 @@ impl StratStats {
     }
 }
 
+
+/// ── GERÇEK TRADE-LEVEL PORTFOLIO HISTORY (attribution'dan ayrı) ──────
+/// Kapanan pozisyon başına TAM OLARAK BİR outcome: (ts, r).
+/// Duplicate koruması: aynı (coin, tid) kapanışı bir kez (tid dedup
+/// üst akışta zaten var; burada ek olarak aynı-ts-sıfır-r koruması
+/// YOK — dürüst 0R ayrıca yazılamaz).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PortfolioHistory {
+    /// (ts, r) — gerçek kapanmış pozisyon başına tek girdi
+    pub trades: Vec<(u64, f64)>,
+}
+
+impl PortfolioHistory {
+    pub fn record(&mut self, ts: u64, r: f64) {
+        self.trades.push((ts, r));
+        // pencere tavanı: 600 trade (hafıza sınırı — stats penceresiyle uyumlu)
+        while self.trades.len() > 600 {
+            self.trades.remove(0);
+        }
+    }
+
+    pub fn n(&self) -> usize {
+        self.trades.len()
+    }
+
+    /// win rate (r > 0)
+    pub fn win_rate(&self) -> Option<f64> {
+        let n = self.n();
+        if n == 0 {
+            return None;
+        }
+        Some(self.trades.iter().filter(|(_, r)| *r > 0.0).count() as f64 / n as f64)
+    }
+
+    /// ort kazanç R (r > 0)
+    pub fn avg_win(&self) -> Option<f64> {
+        let wins: Vec<f64> = self.trades.iter().map(|(_, r)| *r).filter(|r| *r > 0.0).collect();
+        if wins.is_empty() {
+            return None;
+        }
+        Some(wins.iter().sum::<f64>() / wins.len() as f64)
+    }
+
+    /// ort kayıp R (r ≤ 0)
+    pub fn avg_loss(&self) -> Option<f64> {
+        let losses: Vec<f64> = self.trades.iter().map(|(_, r)| *r).filter(|r| *r <= 0.0).collect();
+        if losses.is_empty() {
+            return None;
+        }
+        Some(losses.iter().sum::<f64>() / losses.len() as f64)
+    }
+
+    /// win/loss ratio: ort kazanç / |ort kayıp|
+    pub fn wl_ratio(&self) -> Option<f64> {
+        let w = self.avg_win()?;
+        let l = self.avg_loss()?;
+        if l == 0.0 {
+            return None;
+        }
+        Some(w / l.abs())
+    }
+
+    /// expectancy: ort R (tüm trade'ler)
+    pub fn expectancy(&self) -> Option<f64> {
+        let n = self.n();
+        if n == 0 {
+            return None;
+        }
+        Some(self.trades.iter().map(|(_, r)| *r).sum::<f64>() / n as f64)
+    }
+
+    /// toplam R
+    pub fn total_r(&self) -> f64 {
+        self.trades.iter().map(|(_, r)| *r).sum()
+    }
+
+    /// restart load: kayıt listesini birebir yükle (duplicate yok —
+    /// dosyadaki satır sayısı = kayıt sayısı; birebir tutarlılık).
+    pub fn replace_all(&mut self, trades: Vec<(u64, f64)>) {
+        self.trades = trades;
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct StrategyTracker {
     stats: HashMap<String, StratStats>,
+    /// GERÇEK trade-level portfolio outcome history (attribution'dan
+    /// AYRI): kapanan pozisyon başına TAM BİR kayıt — Kelly/portfolio
+    /// istatistikleri BURADAN hesaplanır; strateji-attribution
+    /// (stats) yalnız strategy-weights için.
+    portfolio: PortfolioHistory,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -336,9 +424,24 @@ impl StrategyTracker {
 
  /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).
     pub fn record_outcome_r(&mut self, strategy_names: Vec<String>, ts: u64, r: f64) {
+        // STRATEJİ ATTRIBUTION — değişmedi: her voter kendi stats'ına
+        // aynı gerçek kapanışı alır (strategy-performance kaynağı).
         for name in strategy_names {
             self.stats.entry(name).or_default().record_r(ts, r);
         }
+    }
+
+    /// GERÇEK PORTFOLIO OUTCOME — kapanan pozisyon başına TAM OLARAK BİR
+    /// kayıt (attribution'dan AYRI storage): Kelly/portfolio istatistik
+    /// kaynağı. WS close + REST recon aynı kapanışı İKİNCİ kez
+    /// kaydetmemeli (tid dedup üst akışta garanti; burada çağrı noktası
+    /// finalize başına tektir).
+    pub fn record_portfolio_outcome(&mut self, ts: u64, r: f64) {
+        self.portfolio.record(ts, r);
+    }
+
+    pub fn portfolio_n(&self) -> usize {
+        self.portfolio.n()
     }
 
 
@@ -488,24 +591,36 @@ impl StrategyTracker {
  /// Kelly sizing'in sabit %45 yerine GERÇEK veri kullanabilmesi için
  /// (`RiskKelly` → `MarketInput::portfolio_*`). Kanıt yoksa `None`:
  /// sabit varsayım DÖNDÜRMEZ — çağıran (strateji) `Skip` üretir.
+    /// PORTFÖY İSTATİSTİĞİ — GERÇEK trade-level kayıtlarından
+    /// (attribution toplaması DEĞİL): (win_rate, wl_ratio). Kelly
+    /// kaplaması bu ikisini kullanır.
     pub fn portfolio_stats(&self) -> Option<(f64, f64)> {
-        let wins: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).count() as f64).sum();
-        let losses: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r < 0.0).count() as f64).sum();
-        let n = wins + losses;
-        if n <= 0.0 {
-            return None;
-        }
-        let win_r: f64 = self.stats.values().map(|x| x.rs.iter().filter(|r| **r > 0.0).sum::<f64>()).sum();
-        let loss_r: f64 = self
-            .stats
-            .values()
-            .map(|x| x.rs.iter().filter(|r| **r < 0.0).sum::<f64>())
-            .sum::<f64>()
-            .abs();
-        let wl = if loss_r > 0.0 { (win_r / wins.max(1.0)) / (loss_r / losses.max(1.0)) } else { 0.0 };
-        Some((wins / n, wl))
+        let wr = self.portfolio.win_rate()?;
+        let wl = self.portfolio.wl_ratio()?;
+        Some((wr, wl))
     }
 
+    /// Geniş portfolio raporu — GERÇEK trade-level kayıtlardan.
+    pub fn portfolio_report(&self) -> String {
+        let n = self.portfolio.n();
+        if n == 0 {
+            return "portfolio: kayıt yok".into();
+        }
+        let wr = self.portfolio.win_rate().unwrap_or(0.0);
+        let aw = self.portfolio.avg_win();
+        let al = self.portfolio.avg_loss();
+        let wl = self.portfolio.wl_ratio();
+        let ex = self.portfolio.expectancy();
+        let tr = self.portfolio.total_r();
+        format!(
+            "portfolio n={n}: win%={:.0} avgWin={} avgLoss={} k/z={} expectancy={} ΣR={tr:+.2}",
+            wr * 100.0,
+            aw.map(|x| format!("{x:+.2}")).unwrap_or("-".into()),
+            al.map(|x| format!("{x:+.2}")).unwrap_or("-".into()),
+            wl.map(|x| format!("{x:.2}")).unwrap_or("-".into()),
+            ex.map(|x| format!("{x:+.3}")).unwrap_or("-".into()),
+        )
+    }
  /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
  ///
  /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).
@@ -610,7 +725,16 @@ impl StrategyTracker {
             entries.push(entry);
         }
         let strategies = entries.join(",\n");
-        let s = format!("{{\n  \"origin\": \"live\",\n  \"schema_version\": 2,\n  \"strategies\": {{\n{strategies}\n  }}\n}}");
+        // GERÇEK trade-level portfolio history — AYNI dosyada ayrı alan
+        // (ikinci gerçeklik kaynağı YOK; atomik yazım aynı tmp+rename).
+        let port: Vec<String> = self
+            .portfolio
+            .trades
+            .iter()
+            .map(|(ts, r)| format!("[{ts},{r:.6}]"))
+            .collect();
+        let port_s = port.join(",");
+        let s = format!("{{\n  \"origin\": \"live\",\n  \"schema_version\": 2,\n  \"portfolio\": [{port_s}],\n  \"strategies\": {{\n{strategies}\n  }}\n}}");
         if let Some(par) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(par);
         }
@@ -670,13 +794,34 @@ impl StrategyTracker {
  // r_hist YOK → bu strateji YÜKLENMEZ (sentetik R yazmak, R hiç yazmamaktan kötüdür)
             tracing::warn!("[LEARN] {name}: r_hist eksik — strateji ATLANIYOR (sentetik R YOK)");
         }
-        if loaded > 0 {
+        // GERÇEK portfolio trade history — RESTART DUPLICATE YASAĞI:
+        // replace_all (append değil) → dosyadaki kayıt sayısı = kayıt
+        // sayısı (birebir; iki kez yükleme çoğaltamaz). Alan yoksa
+        // (eski dosya) → fresh: attribution-türev portfolio zaten
+        // sahteydi; 0R gibi sahte kayıtla doldurma.
+        if let Some(arr) = v.get("portfolio").and_then(|x| x.as_array()) {
+            let trades: Vec<(u64, f64)> = arr
+                .iter()
+                .filter_map(|e| {
+                    let a = e.as_array()?;
+                    Some((a.first()?.as_u64()?, a.get(1)?.as_f64()?))
+                })
+                .collect();
+            self.portfolio.replace_all(trades);
             tracing::info!(
-                "[LEARN] tracker durumu yüklendi: {loaded} strateji ← {path} \
-                 (gerçek R history korundu — cold-start YOK, origin=live, schema=v2)"
+                "[LEARN] portfolio history yüklendi: {} GERÇEK trade (trade-level, attribution ayırı)",
+                self.portfolio.n()
             );
         }
-        loaded > 0
+        let ok = loaded > 0 || self.portfolio.n() > 0;
+        if ok {
+            tracing::info!(
+                "[LEARN] tracker durumu yüklendi: {loaded} strateji + {} portfolio trade ← {path} \
+                 (gerçek R history korundu — cold-start YOK, origin=live, schema=v2)",
+                self.portfolio.n()
+            );
+        }
+        ok
     }
 }
 
@@ -1365,5 +1510,108 @@ mod health_tests {
         h.on_cycle_ok();
         h.reset();
         assert!(h.entries_allowed(), "reset → normal");
+    }
+}
+
+#[cfg(test)]
+mod portfolio_tests {
+    use super::*;
+
+    /// SPEC: 1 gerçek trade + 4 strategy voter → portfolio n=1;
+    /// strategy attribution n=4 (her voter kendi stats'ında 1'er kayıt).
+    #[test]
+    fn portfolio_n1_attribution_n4() {
+        let mut t = StrategyTracker::default();
+        t.record_outcome_r(
+            vec!["Wyckoff".into(), "Dow".into(), "Turtle".into(), "Kesit".into()],
+            1000,
+            2.0,
+        );
+        t.record_portfolio_outcome(1000, 2.0);
+        assert_eq!(t.portfolio_n(), 1, "tek gerçek trade = TEK portfolio kayıt");
+        // attribution: 4 voter × 1 kayıt
+        for name in ["Wyckoff", "Dow", "Turtle", "Kesit"] {
+            assert_eq!(t.evidence_n(name), 1, "{name}");
+        }
+        // portfolio istatistiği: TEK kayıttan — ama wl tanımsızdır
+        // (kayıp yok → k/z hesaplanamaz → stats None; Kelly de None
+        // alır = kanonik: tek kazançtan k/z çıkarılmaz)
+        assert!(t.portfolio_stats().is_none(), "1-trade all-win: k/z tanımsız");
+        assert_eq!(t.portfolio.win_rate(), Some(1.0));
+    }
+
+    /// 2 gerçek trade, farklı strategy kombinasyonları → portfolio n=2.
+    #[test]
+    fn iki_trade_farkli_kombinasyonlar() {
+        let mut t = StrategyTracker::default();
+        t.record_portfolio_outcome(1000, 1.5);
+        t.record_outcome_r(vec!["A".into(), "B".into()], 1000, 1.5);
+        t.record_portfolio_outcome(2000, -0.5);
+        t.record_outcome_r(vec!["C".into()], 2000, -0.5);
+        assert_eq!(t.portfolio_n(), 2);
+        assert_eq!(t.evidence_n("A"), 1);
+        assert_eq!(t.evidence_n("C"), 1);
+        let (wr, wl) = t.portfolio_stats().unwrap();
+        assert_eq!(wr, 0.5);
+        assert_eq!(wl, 3.0, "avgWin 1.5 / avgLoss 0.5 = 3.0");
+    }
+
+    /// Kelly GERÇEK portfolio sample kullanır: 4-voter'lı +1.0 ve −0.5 →
+    /// (wr, wl) trade-level'dan: avgWin 1.0 / avgLoss 0.5 = 2.0.
+    #[test]
+    fn kelly_gercek_portfolio_sample() {
+        let mut t = StrategyTracker::default();
+        t.record_portfolio_outcome(1000, 1.0);
+        t.record_outcome_r(vec!["W".into(), "D".into(), "T".into(), "K".into()], 1000, 1.0);
+        t.record_portfolio_outcome(2000, -0.5);
+        t.record_outcome_r(vec!["W".into(), "D".into(), "T".into(), "K".into()], 2000, -0.5);
+        let (wr, wl) = t.portfolio_stats().unwrap();
+        assert_eq!(wr, 0.5);
+        assert_eq!(wl, 2.0, "attribution toplaması DEĞİL — trade-level ort");
+        // 4 voter × 2 trade = 8 attribution kaydı VAR ama portfolio n=2
+        assert_eq!(t.portfolio_n(), 2);
+    }
+
+    /// RESTART DUPLICATE YASAĞI: save → yeni tracker → load →
+    /// portfolio n korunur (replace_all; çift yükleme çoğaltamaz).
+    #[test]
+    fn restart_sonrasi_duplicate_olmamali() {
+        let mut t = StrategyTracker::default();
+        t.record_portfolio_outcome(1000, 1.0);
+        t.record_portfolio_outcome(2000, -0.5);
+        let dir = std::env::temp_dir().join("portfolio-persist");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("track.json").to_str().unwrap().to_string();
+        t.save_state(&path).unwrap();
+        let mut t2 = StrategyTracker::default();
+        assert!(t2.load_state(&path), "yüklenmeli");
+        assert_eq!(t2.portfolio_n(), 2, "load n=2 (4 DEĞİL — duplicate yasak)");
+        // İKİNCİ yükleme (restart race) → yine 2 (replace_all)
+        assert!(t2.load_state(&path));
+        assert_eq!(t2.portfolio_n(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// PnL ÇÖZÜLMEDİ = portfolio'ya kayıt YAZMAZ (fake 0R yasak):
+    /// write_ws_exit_record'un pnl_resolved=false çağrıları portfolio
+    /// kaydı ÜRETMEZ — kaynak taraması (5 çağrı noktası: 3 true / 2 false).
+    #[test]
+    fn pnl_cozulmeyen_portfolio_yazmaz() {
+        let src = include_str!("engine_loop.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap_or("");
+        assert_eq!(
+            prod.matches("self.write_ws_exit_record(").count(),
+            5,
+            "5 çağrı noktası (2 WS-true, 1 recon-false, 1 REST-true, 1 REST-false)"
+        );
+        assert!(prod.matches(", true);").count() >= 3, "gerçek R → true");
+        assert!(prod.matches(", false);").count() >= 2, "çözülmeyen → false");
+        // portfolio kaydı yalnız pnl_resolved altında:
+        let wbody = prod.split("fn write_ws_exit_record").nth(1).unwrap_or("");
+        let head = wbody.split("pub fn").next().unwrap_or(wbody);
+        assert!(
+            head.contains("if pnl_resolved {") && head.contains("record_portfolio_outcome"),
+            "portfolio kaydı pnl_resolved kapısının ALTINDA olmalı"
+        );
     }
 }

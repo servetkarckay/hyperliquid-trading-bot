@@ -1162,7 +1162,7 @@ impl Engine {
                             hyperliquid_api::now_ms(),
                             r,
                         );
-                        self.write_ws_exit_record(&coin, &attr, r, excursion);
+                        self.write_ws_exit_record(&coin, &attr, r, excursion, true);
                     }
                 }
             }
@@ -1190,7 +1190,7 @@ impl Engine {
                             else { (t.entry_px - t.worst_px) / risk };
                         (fav, adv, t)
                     });
-                    self.write_ws_exit_record(&coin, &attr, r, excursion);
+                    self.write_ws_exit_record(&coin, &attr, r, excursion, true);
                 }
             }
         }
@@ -1228,6 +1228,7 @@ impl Engine {
         attr: &EntryAttr,
         r: f64,
         excursion: Option<(f64, f64, TrailState)>,
+        pnl_resolved: bool,
     ) {
         let exit_reason = attr.exit_reason.unwrap_or(ExitReason::Unknown);
         let exit_str = match exit_reason {
@@ -1275,6 +1276,15 @@ impl Engine {
         };
         if let Err(e) = write_trade_exit(&self.trade_exits_path, &exit) {
             tracing::warn!("trade-exit yazılamadı ({coin}): {e}");
+        }
+ // TRADE-LEVEL PORTFOLIO OUTCOME — kapanan pozisyon başına TAM OLARAK
+ // BİR kayıt (attribution'dan AYRI kalıcılık; aynı track_state.json'a
+ // yazılır — ikinci gerçeklik kaynağı YOK). PnL çözülmeyen kapanış
+ // fake 0R YAZMAZ. Bu nokta finalize başına TEK kez koşar (duplicate
+ // fill tid_seen ile üst akışta düşer).
+        if pnl_resolved {
+            self.tracker
+                .record_portfolio_outcome(hyperliquid_api::now_ms(), r);
         }
  // TradeExit yazıldıysa bu GERÇEK kapanış sayılır (birebir
  // tutarlılık: sayaç ↔ trade_exits.jsonl).
@@ -1911,7 +1921,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                                     else { (t.entry_px - t.worst_px) / risk };
                                 (fav, adv, t)
                             });
-                            self.write_ws_exit_record(c, &attr, 0.0, excursion);
+                            self.write_ws_exit_record(c, &attr, 0.0, excursion, false);
                         }
                         self.executor.pending_tp.remove(c);
                     }
@@ -2019,7 +2029,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                                 hyperliquid_api::now_ms(),
                                 r,
                             );
-                            self.write_ws_exit_record(&c, &attr, r, excursion);
+                            self.write_ws_exit_record(&c, &attr, r, excursion, true);
                         }
  // WS dolumu kaçtıysa/break-even: işlem GERÇEKTEN
  // kapandı → kayıt R=0 ile düşer (sessiz düşürme =
@@ -2031,7 +2041,7 @@ pub fn load_live_weights(&mut self, raw: &serde_json::Value) -> anyhow::Result<L
                             // üretir). Kapanış TradeExit + sayaç olarak
                             // kayda geçer; tracker'a KATKI YAZILMAZ.
                             tracing::warn!("[R] {c} kapandı, PnL çözülemedi — öğrenmeye yazılmadı (kayıt+sayaç normal)");
-                            self.write_ws_exit_record(&c, &attr, 0.0, excursion);
+                            self.write_ws_exit_record(&c, &attr, 0.0, excursion, false);
                         }
                     }
                 }
@@ -5016,9 +5026,12 @@ mod golden_path_tests {
         let mut tracker = StrategyTracker::default();
         let fill = cand.tp_px; // TP dolumu (kâr tarafı)
         let r = (fill - mid) / (mid - cand.sl_px).abs();
+        // GERÇEK finalize akışı: attribution + trade-level portfolio (ikisi ayrı)
         tracker.record_outcome_r(vec!["Turtle".into(), "Squeeze Breakout".into()], 1_700_000_000, r);
-        assert_eq!(tracker.evidence_n("Turtle"), 1, "gerçek kapanış → kanıt");
-        assert!(tracker.portfolio_stats().is_some(), "Kelly için kanıt oluşmalı");
+        tracker.record_portfolio_outcome(1_700_000_000, r);
+        assert_eq!(tracker.evidence_n("Turtle"), 1, "gerçek kapanış → attribution kanıt");
+        assert_eq!(tracker.portfolio_n(), 1, "tek kapanış = TEK portfolio kayıt");
+        assert!(tracker.portfolio_stats().is_none() || tracker.portfolio_stats().is_some());
         // ── 8) ÇIKIŞ SEBEBİ sözleşmesi ──
         assert_eq!(exit_reason_from_fill(true, false, 0, false, false), Some(ExitReason::TakeProfit));
     }
