@@ -201,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let lc = LoopConfig {
         coins,
+        cycle_secs,
         interval_secs: interval,
         hist_bars,
         min_score,
@@ -265,9 +266,11 @@ async fn main() -> anyhow::Result<()> {
                     async move { hyperliquid_api::WsClient::new(cfg).run(subs, tx).await }
                 },
                 std::time::Duration::from_secs(5),
-                move |episode, r| match r {
+                move |episode, r| {
+                    match r {
                     Ok(()) => tracing::warn!("[WS] kullanıcı akışı döndü — bölüm {episode} yeniden başlatılıyor"),
                     Err(e) => tracing::error!("[WS] kullanıcı akışı ÖLDÜ: {e} — bölüm {episode} 5 sn sonra yeniden başlatılıyor (fill geri beslemesi bu arada REST recon'dan)"),
+                }
                 },
             ));
             Some(rx)
@@ -549,7 +552,7 @@ mod supervisor_tests {
         );
         // Döngünün kendisi artık KANITLANMIŞ helper'daydı:
         // api::supervisor::keepalive (+4 runtime testi: ölüm algılama,
-        // respawn, event tüketimi, tek-atımlık değişmezlği).
+        // respawn, event tüketimi, tek-atımlık değişmezliği).
         assert!(
             src.contains("supervisor::keepalive"),
             "kullanıcı akışı keepalive helper'ını kullanmıyor — respawn garantisi zayıflar"

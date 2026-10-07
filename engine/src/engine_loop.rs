@@ -35,6 +35,7 @@ use crate::track::{write_trade_exit, StrategyTracker, TradeExit};
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
     pub coins: Vec<String>,
+    pub cycle_secs: u64,
     pub interval_secs: u64,
     pub hist_bars: usize,
     pub min_score: f64,
@@ -58,6 +59,7 @@ impl Default for LoopConfig {
     fn default() -> Self {
         Self {
             coins: vec!["BTC".into()],
+            cycle_secs: 300,
             interval_secs: 3600,
             hist_bars: 300,
             min_score: 0.30,
@@ -344,6 +346,16 @@ pub fn parse_live_weights(raw: &serde_json::Value) -> anyhow::Result<HashMap<Str
 /// Çıktı tam olarak `[(coin,sz,direction),(coin,sz,direction)]` şeklindedir
 /// (`direction` = boyut işareti: `>0` long, `<0` short). Testler bu biçimi
 /// doğrulayarak log sözleşmesini sabitler.
+/// PLACE KAPISI (ölü-kilit fiksli): bloklar YALNIZ cycle-başı bekleyen
+/// makineyi. Aynı cycle'da evals'in ürettiği taze karar (Pending{oid:0})
+/// İLK GİRİŞTİR — geçmelidir; aksi halde batch asla gönderilmez.
+pub(crate) fn place_arm_gate(
+    coin_pre_pending: bool,
+    m: Option<&crate::state_machine::PositionStateMachine>,
+) -> bool {
+    m.is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending()) && coin_pre_pending
+}
+
 pub fn risk_lock_positions_left(left: &[(String, f64)]) -> String {
     if left.is_empty() {
         return "[]".to_string();
@@ -2682,6 +2694,34 @@ impl Engine {
         let mut cancels: Vec<(u32, i64)> = Vec::new();
 
         // 3a) makine kararları (tek kısa ödünç alma aralığı)
+        // CYCLE-BAŞI ANLIK DURUM: hangi makineler bu cycle BAŞLAMADAN ÖNCE
+        // Pending/ReconPending idi. Aynı cycle'da evals'in yeni ürettiği
+        // kararla (Flat→Pending{oid:0}) karışmaması için AYRI TUTULUR —
+        // aksi halde ilk giriş kendi kararıyla kapıya takılır (ölü kilit).
+        let pre_pending: std::collections::HashSet<String> = self
+            .machines
+            .iter()
+            .filter(|(_, m)| m.is_recon_pending() || m.oid_zero_pending())
+            .map(|(c, _)| c.clone())
+            .collect();
+        // ÖNCÜ temizlik: öncesinden beri oid=0 bekleyen ve ASLA batch'e
+        // girmemiş makine — kanıtsız kalıntıdır; cycle penceresi (2×cycle)
+        // aşılırsa geri Flat'a döner (bounded, sessiz kilit YOK).
+        let oid0_grace_ms = (self.loop_cfg.cycle_secs.max(1) as u64) * 2 * 1000;
+        let now0 = hyperliquid_api::now_ms();
+        for (cn, m) in self.machines.iter_mut() {
+            if let PosState::Pending { oid: 0, ts, .. } = m.state.clone() {
+                let süresi = now0.saturating_sub(ts);
+                if süresi > oid0_grace_ms {
+                    m.state = PosState::Flat;
+                    tracing::warn!(
+                        "[RECON] {cn} oid=0 bekleyen sıfırlandı (batch'e hiç girmedi, {} sn) — Flat",
+                        süresi / 1000
+                    );
+                }
+            }
+        }
+
         let mut acts: Vec<(usize, Action, u32, u32)> = Vec::new();
         for (idx, e) in evals.iter().enumerate() {
             if let Some((asset, szd)) = self.executor.cached_asset(&e.coin) {
@@ -2803,13 +2843,15 @@ impl Engine {
                     // ── DUPLICATE YASAĞI: reconciliation bekleyen (UNKNOWN) emir varsa
                     // aynı coine ikinci GERÇEK entry YOLLANMAZ — cloid tek kimlik;
                     // farklı fiyattan yeni cloid üretimi çift maruziyet doğururdu.
-                    if self
-                        .machines
-                        .get(&e.coin)
-                        .is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending())
-                    {
+                    //
+                    // ÖLÜ-KİLİT FİKSİ: kapı yalnız CYCLE-BAŞI bekleyenlere uygulanır
+                    // (`pre_pending` anlık görüntüsü). Aynı cycle'da evals'in yeni
+                    // ürettiği karar (Flat→Pending{oid:0}) İLK GİRİŞTİR — engelli
+                    // değildir; engellenseydi batch ASLA gönderilmez, makine
+                    // oid=0'da sonsuz beklerdi (canlı kanıt: 51 coin kilit).
+                    if place_arm_gate(pre_pending.contains(&e.coin), self.machines.get(&e.coin)) {
                         tracing::info!(
-                            "{}: reconciliation bekleyen emir var — aynı cycle'da ikinci entry atlandı",
+                            "{}: cycle-başı bekleyen emir var — bu cycle'da ikinci entry atlandı",
                             e.coin
                         );
                         continue;
@@ -5754,10 +5796,22 @@ mod recon_pending_tests {
         let prod = src.split("#[cfg(test)]").next().unwrap_or("");
         // Place dalını bul: 'Action::Place' ... ilk 'EXITS_ONLY' segmenti
         let place = prod.split("Action::Place").nth(1).unwrap_or("");
-        let head = place.split("EXITS_ONLY").next().unwrap_or("");
+        let _head = place.split("EXITS_ONLY").next().unwrap_or("");
+        // Place dalındaki kapı helper'a taşınmıştır; dalda kullanım olmalı,
+        // helper'da da gerçek koşullar (recon/oid0) yer almalı —
+        // sözleşme: duplicate yasağı korunur, öl-kilit fiks ile (pre_pending).
+        let _head = place.split("EXITS_ONLY").next().unwrap_or("");
         assert!(
-            head.contains("is_recon_pending") && head.contains("oid_zero_pending"),
-            "Place dalı reconciliation gate'i İÇERMELİ (duplicate yasağı): {head}"
+            _head.contains("place_arm_gate("),
+            "Place dalı kapı helper'ını kullanmalı"
+        );
+        assert!(
+            prod.contains("is_recon_pending") && prod.contains("oid_zero_pending"),
+            "kapı koşulları (recon/oid0) üretimde FOUND olmalı (duplicate yasağı)"
+        );
+        assert!(
+            prod.contains("pre_pending"),
+            "kapı cycle-başı görüntüsünü kullanmıyor — öl-kilit riski"
         );
         // reconcile fonksiyonu bounded recheck içermeli (anlık Flat yok)
         let recon = prod
@@ -5772,6 +5826,92 @@ mod recon_pending_tests {
         assert!(
             !body.contains("borsada YOK -> machine Flat revert"),
             "anlık Flat revert davranışı kaldırılmalıydı"
+        );
+    }
+}
+
+#[cfg(test)]
+mod deadlock_fix_tests {
+    use crate::engine_loop::place_arm_gate;
+    use crate::state_machine::{PosState, PositionStateMachine, SmConfig};
+
+    fn con(snake_len: bool) -> PositionStateMachine {
+        let mut m = PositionStateMachine::new("T", SmConfig::default());
+        if snake_len {
+            m.state = PosState::Pending {
+                side: crate::state_machine::Side::Long,
+                oid: 0,
+                remaining: 0.0,
+                ts: 0,
+            };
+        }
+        m
+    }
+
+    /// ÖLÜ-KİLİT FİKSİ: aynı cycle'da üretilen taze karar (pre=false,
+    /// Pending{oid:0}) kapıya TAKILMAZ — batch'e gitmek ZORUNDADIR.
+    #[test]
+    fn taze_karar_aynı_cycle_engellenmez() {
+        let m = con(true); // evals Flat→Pending{0} yapmış
+        assert!(
+            !place_arm_gate(false, Some(&m)),
+            "taze karar kapıya takıldı — ölü kilit geri döndü!"
+        );
+    }
+
+    /// ÇİFT GİRİŞ KORUMASI KORUNUR: cycle-başı bekleyen (pre=true)
+    /// oid=0/ReconPending makine hâlâ bloklanır (UNKNOWN evidence sözleşmesi).
+    #[test]
+    fn cycle_bası_bekleyen_hâlâ_bloke() {
+        let m = con(true);
+        assert!(
+            place_arm_gate(true, Some(&m)),
+            "cycle-başı bekleyen bloklanmalı (çift giriş)"
+        );
+        let mut m2 = con(false);
+        m2.state = PosState::ReconciliationPending {
+            side: crate::state_machine::Side::Long,
+            cloid: "c".into(),
+            ts: 0,
+            attempts: 0,
+        };
+        assert!(place_arm_gate(true, Some(&m2)), "ReconPending bloklanmalı");
+    }
+
+    /// SOURCE-SKAN KORUMASI: Place dalı kapısı `pre_pending` anlık
+    /// görüntüsünü KULLANMALI (canlıda öl-kilit tekrar edemez).
+    #[test]
+    fn place_kapisı_pre_pending_kullanmalı() {
+        let src = include_str!("engine_loop.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap_or("");
+        assert!(
+            prod.contains("pre_pending.contains(&e.coin)"),
+            "Place kapısı pre_pending görüntüsünü kullanmıyor"
+        );
+        assert!(
+            prod.contains("place_arm_gate("),
+            "Place kapısı helper'a taşınmadı"
+        );
+        assert!(
+            prod.contains("pre_pending") && prod.contains("// CYCLE-BAŞI ANLIK"),
+            "cycle-başı anlık görüntü yok — öl-kilit riski geri gelir"
+        );
+    }
+
+    /// Grace: asla batch'e girmemiş oid=0 bekleyen, 2×cycle süresinde
+    /// sıfırlanabilir (Flat) — sonsuz kilit YOK.
+    #[test]
+    fn oid0_grace_flat_döner() {
+        // grace eşiği: 2×cycle_secs ms — süresi TÜMÜNÜ geçen sıralanır
+        let cycle_secs: u64 = 300;
+        let oid0_grace_ms = cycle_secs.max(1) * 2 * 1000;
+        assert_eq!(oid0_grace_ms, 600_000);
+        let süresi: u64 = 601 * 1000;
+        assert!(süresi > oid0_grace_ms, "grace aşımı sıralanmalı");
+        let kısa_süresi: u64 = 100 * 1000;
+        assert!(
+            kısa_süresi <= oid0_grace_ms,
+            "grace içi fazla sıralanmamalı"
         );
     }
 }

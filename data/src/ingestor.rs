@@ -235,7 +235,9 @@ impl Ingestor {
                 },
                 std::time::Duration::from_secs(5),
                 move |episode, r| match r {
-                    Ok(()) => tracing::warn!("shard {shard} döndü — bölüm {episode} yeniden başlatılıyor"),
+                    Ok(()) => {
+                        tracing::warn!("shard {shard} döndü — bölüm {episode} yeniden başlatılıyor")
+                    }
                     Err(e) => tracing::error!(
                         "shard {shard} ÖLDÜ: {e} — bölüm {episode} 5 sn sonra yeniden başlatılıyor"
                     ),

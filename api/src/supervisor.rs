@@ -71,13 +71,23 @@ mod runtime_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(second, "yaşayan bölüm", "ölümden SONRA yeni bölüm event üretti");
+        assert_eq!(
+            second, "yaşayan bölüm",
+            "ölümden SONRA yeni bölüm event üretti"
+        );
 
         // Ölüm algılama kanıtı: on_episode Err(episode 0) + Ok(episode 1) gördü.
         let r = results.lock().unwrap();
         assert!(r.contains(&(0, false)), "ölüm algılanmadı: {r:?}");
-        assert!(r.contains(&(1, true)), "yeniden bölümnün döndüğü görülmedi: {r:?}");
-        assert_eq!(ep0.load(Ordering::SeqCst), 1, "epizot 0 tam bir kez çalıştı");
+        assert!(
+            r.contains(&(1, true)),
+            "yeniden bölümnün döndüğü görülmedi: {r:?}"
+        );
+        assert_eq!(
+            ep0.load(Ordering::SeqCst),
+            1,
+            "epizot 0 tam bir kez çalıştı"
+        );
         sup.abort();
     }
 
@@ -139,7 +149,10 @@ mod runtime_tests {
         tokio::time::sleep(Duration::from_millis(120)).await;
         sup.abort();
         let eps = episodes.lock().unwrap();
-        assert!(eps.len() >= 20, "yeniden bölümn yok — supervisor ölmüş: {eps:?}");
+        assert!(
+            eps.len() >= 20,
+            "yeniden bölümn yok — supervisor ölmüş: {eps:?}"
+        );
         // Monoton dizi: >1 kanıt yok — her bölüm üst üste binmez
         let mut sorted = eps.clone();
         sorted.sort();
