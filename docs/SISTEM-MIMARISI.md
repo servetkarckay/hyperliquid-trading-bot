@@ -173,8 +173,9 @@ kaynaktır — 8 bilgi kümesi:
 ```text
 Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Regime Detection)
 MeanReversion (Overreaction — De Bondt-Thaler)
+CrossSectional (Cross-Sectional Momentum — Jegadeesh-Titman)
 OrderFlow (Order Flow Imbalance, Market Making)
-CrossSectional (Kesit Momentum)
+CrossSectional (Cross-Sectional Momentum)
 Carry (Funding Carry — perp bacağı) · Volatility (GARCH koşullu volatilite rejimi) · Open Interest (Price×OI matrisi) · Sizing (Kelly)
 ```
 

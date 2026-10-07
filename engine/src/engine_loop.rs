@@ -8,7 +8,7 @@
 //! 3. YÜRÜTME: makine `Action`'ları → WireOrder/Cancel — TEK batch POST.
 //! 4. ÇIKIŞLAR: SL/TP trigger'lar borsada asılı (TP fill →
 //! `ExitReason::TakeProfit`); trailing ratchet; makine ExitNow.
-//! ÇIKIŞ KANALLARI ensemble `exit_requested` + kesit rank kayması +
+//! ÇIKIŞ KANALLARI ensemble `exit_requested` + kesit (cross-sectional) rank kayması +
 //! turtle 55-bar altı — yalnız AÇIK pozisyonda ExitNow; Flat'ta emir yok.
 //! INVARIANT `entries_allowed = health_ok && !risk_locked`
 //! (`EntryGate` — alan değil, türetilmiş; kaynak taramasıyla korunur).

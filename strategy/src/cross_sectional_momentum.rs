@@ -1,16 +1,33 @@
-//! KESİT MOMENTUM — evren geneli göreli güç sıralaması.
+//! CROSS-SECTIONAL MOMENTUM — kesit bazlı momentum (kanonik).
 //!
-//! 1. Girdi: evren **1g** getirileri (`mark/prevDay − 1`); <20 coin → Skip.
-//! 2. `rank_band` (tek kaynak — strateji + engine): üst %20 Top /
-//! alt %20 BottomShort / %40-60 Mid.
-//! 3. Long/Short [0.6] dilim üyeliği; orta dilim Hold.
-//! 4. `rank_shift_exit_long`: LONG, Top'tan alt %40'a düştü → Exit
-//! — çıkış kuralı + durumu (önceki band) STRATEJİDE yaşar; motor
-//! `exit_intent` API'siyle yalnız yönlendirir (kurallar tek yerde).
+//! KANONİK KAYNAK: Jegadeesh & Titman (1993), "Returns to Buying
+//! Winners and Selling Losers" — geçmiş 3-12 aylık getirilere göre
+//! sıralanan varlıklarda kazananları alan / kaybedenleri satan
+//! stratejiler 3-12 ay tutma dönemlerinde anlamlı pozitif getirir.
+//! Sıralama ondalıklara (decile) bölünür; en üst ondalık LONG, en alt
+//! SHORT; holding dönemi sonunda portföy yeniden kurulur.
+//!
+//! BU MODÜLÜN KONTRATI (kanonik + sapmalar beyanlı):
+//! 1. Girdi: evren **1g** getirileri (engine veri kontratı — kanonik
+//!    3-12 AY formation DEĞİL; kısa ufuk = hafif tersine-dönüş
+//!    bileşeni BİLİNCİLİ kalır; <20 coin → Skip).
+//! 2. Dilimler: üst %20 Top (Long) / alt %20 BottomShort (Short) /
+//!    %40-60 Mid (Hold) — kanonik decile yerine quintile (kalibrasyon;
+//!    Asness-vari quintile pratikte yaygın).
+//! 3. `rank_band` tek kaynak (strateji + engine ortak fonksiyon).
+//! 4. Çıkış kuralı: LONG, Top'tan alt %40'a düştü → Exit — durum +
+//!    kural stratejide (`exit_intent`); motor yalnız yönlendirir.
+//!    (Kanonik çıkış holding-dönemi sonudur; rank-kayması burada
+//!    onun bar-bazlı karşılığıdır.)
+//! 5. Kanonik "skip recent week" kuralı UYGULANAMAZ — veri kontratı
+//!    tek getiri verir (ayrışma yok) → kısa-dönem tersine-dönüş
+//!    bulaşması bilinçli (Dürüst sınırlar).
+//!
+//! Deterministik, replay-idempotent, panik yok.
 use crate::{closes, MarketInput, Signal, Strategy, ExitCtx, ExitIntent};
 use math::indicators;
 
-pub struct KesitMomentum {
+pub struct CrossSectionalMomentum {
     /// **Önceki döngünün sıralama bandı** (coin → band) — çıkış kuralının
     /// DURUMU ("kurallar tek yerde" prensibi: çıkış kuralı ve durumu
     /// stratejide yaşar, motor yalnız yönlendirir). `Mutex` = `&self`
@@ -18,7 +35,7 @@ pub struct KesitMomentum {
     prev: std::sync::Mutex<std::collections::HashMap<String, RankBand>>,
 }
 
-impl Default for KesitMomentum {
+impl Default for CrossSectionalMomentum {
     fn default() -> Self {
         Self { prev: std::sync::Mutex::new(std::collections::HashMap::new()) }
     }
@@ -77,9 +94,9 @@ pub fn rank_shift_exit_long(prev: Option<RankBand>, cur: Option<RankBand>) -> bo
     matches!(prev, Some(RankBand::Top)) && matches!(cur, Some(RankBand::Bottom) | Some(RankBand::BottomShort))
 }
 
-impl Strategy for KesitMomentum {
+impl Strategy for CrossSectionalMomentum {
     fn name(&self) -> &'static str {
-        "Kesit Momentum"
+        "Cross-Sectional Momentum"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -207,7 +224,7 @@ mod exit_tests {
             universe_returns: universe.clone(),
             ..Default::default()
         };
-        match KesitMomentum::default().evaluate(&input) {
+        match CrossSectionalMomentum::default().evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!((strength - 0.6).abs() < 1e-9);
                 assert!(note.contains("üst dilim"));
@@ -221,7 +238,7 @@ mod exit_tests {
             universe_returns: universe.clone(),
             ..Default::default()
         };
-        match KesitMomentum::default().evaluate(&input2) {
+        match CrossSectionalMomentum::default().evaluate(&input2) {
             Signal::Short { strength, .. } => {
                 assert!((strength - 0.6).abs() < 1e-9);
                 assert_eq!(rank_band(&universe, "C00"), Some(RankBand::BottomShort));
@@ -257,7 +274,7 @@ mod exit_intent_tests {
     /// coin'in KENDİ getirisinden geliyor → "C29" Top, "C01" alt %40.
     #[test]
     fn exit_intent_durum_stratejinin_icinde() {
-        let k = KesitMomentum::default();
+        let k = CrossSectionalMomentum::default();
         let u = universe();
         // 1. döngü: Top band → önceki YOK → niyet yok (false-positive yasağı)
         assert!(k.exit_intent(&ctx_long("C29", &u)).is_none(), "ilk döngüde niyet ÜRETİLMEZ");
@@ -274,7 +291,7 @@ mod exit_intent_tests {
     /// pozisyon açılışında durum fresh (girişte hemen çıkış ÜRETİLMEZ).
     #[test]
     fn exit_intent_flatte_niyet_ve_kayit_yok() {
-        let k = KesitMomentum::default();
+        let k = CrossSectionalMomentum::default();
         let u = universe();
         let flat = ExitCtx { coin: "C29".into(), candles: vec![], universe_returns: u.clone(), position: None };
         assert!(k.exit_intent(&flat).is_none());

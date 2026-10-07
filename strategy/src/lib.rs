@@ -15,7 +15,7 @@
 //! 5. `registry`: 15 strateji; `strat_test_helpers` yalnız-test
 //! deterministik mum üreteci.
 pub mod wyckoff;
-pub mod kesit_momentum;
+pub mod cross_sectional_momentum;
 pub mod order_flow_imbalance;
 pub mod market_making;
 pub mod garch_regime;
@@ -189,7 +189,7 @@ pub struct ExitIntent {
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
     vec![
-        "Wyckoff", "Kesit Momentum", "Order Flow Imbalance", "Market Making",
+        "Wyckoff", "Cross-Sectional Momentum", "Order Flow Imbalance", "Market Making",
         "GARCH", "Funding Carry", "Open Interest",
         "Regime Detection", "Kelly Sizing", "Dow Theory", "Overreaction", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
@@ -199,7 +199,7 @@ pub fn registry_names() -> Vec<&'static str> {
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(wyckoff::Wyckoff),
-        Box::new(kesit_momentum::KesitMomentum::default()),
+        Box::new(cross_sectional_momentum::CrossSectionalMomentum::default()),
         Box::new(order_flow_imbalance::OrderFlowImbalance),
         Box::new(market_making::MarketMaking),
         Box::new(garch_regime::GarchRegime),
@@ -232,7 +232,7 @@ pub enum InfoCluster {
     MeanReversion,
     /// defter/akış: Order Flow Imbalance, Market Making
     OrderFlow,
-    /// evren geneli göreli güç: Kesit Momentum
+    /// evren geneli göreli güç: Cross-Sectional Momentum
     CrossSectional,
     /// funding/basis taşıma: Carry
     Carry,
@@ -248,7 +248,7 @@ pub enum InfoCluster {
 pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
         "Kelly Sizing" => InfoCluster::Sizing,
-        "Kesit Momentum" => InfoCluster::CrossSectional,
+        "Cross-Sectional Momentum" => InfoCluster::CrossSectional,
         "Order Flow Imbalance" | "Market Making" => InfoCluster::OrderFlow,
         "GARCH" => InfoCluster::Volatility,
         "Funding Carry" => InfoCluster::Carry,
