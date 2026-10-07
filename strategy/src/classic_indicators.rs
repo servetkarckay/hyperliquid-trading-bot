@@ -1,18 +1,32 @@
-//! KLASİK GÖSTERSGELER — 5 göstergeli birleşik skor katmanı.
+//! CLASSIC INDICATORS — klasik teknik göstergeler bileşik skoru.
 //!
-//! Skor: RSI14 (30-50 → +1 dip bölge; >70 → −1 aşırı — SİMETRİ);
-//! MACD hist işareti (±1); Bollinger alt/üst temas (±1); OBV 10-bar
-//! eğimi (±0.5 — aşağı kol eklendi, gizli Long yanlılığı giderildi);
-//! VWAP konumu (±0.5). Skor ≥+2 → Long, ≤−2 → Short; arası Hold.
-//! <60 mum → Skip; None göstergeler oy KATMAZ (nötr fallback yok).
+//! Göstergelerin kanonik kaynakları:
+//! - **RSI(14)** — J. Welles Wilder, "New Concepts in Technical Trading
+//!   Systems" (1978): RSI < 30 = oversold (alım bölgesi, kanonik eşik);
+//!   30-50 = oversold-çıkış toparlanması (aynı yönde devam); RSI > 70 =
+//!   overbought. None → oy katmaz (sahte nötr 50 yasak).
+//! - **MACD(12,26,9)** — Gerald Appel: histogram işareti momentum.
+//! - **Bollinger(20, 2.0)** — John Bollinger: alt/üst bant teması
+//!   (mean-reversion kontratı).
+//! - **OBV** — Joe Granville (1963): 10-bar eğim = hacim akışı.
+//! - **VWAP(20)** — kurumsal referans fiyat: konum ±.
+//!
+//! BİLEŞİK: skor ≥ +2 → Long, ≤ −2 → Short (maks ±4'ün yarısı =
+//! çoğunluk konfluansı); arası Hold. Mean-reversion (RSI/BB) ve
+//! momentum (MACD) katmanlarının bilinçli konfluansı — klasik teknik
+//! analiz pratiği.
+//!
+//! None göstergeler oy KATMAZ; <60 mum → Skip; simetri kontratı:
+//! Long/Short skorları yapısal simetrik (tek yanlı asimetri =
+//! gizli yanlılık). Deterministik; panik yok.
 use crate::{closes, last, MarketInput, Signal, Strategy};
 use math::indicators;
 
-pub struct KlasikIndikatorler;
+pub struct ClassicIndicators;
 
-impl Strategy for KlasikIndikatorler {
+impl Strategy for ClassicIndicators {
     fn name(&self) -> &'static str {
-        "Klasik Göstergeler"
+        "Classic Indicators"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -30,9 +44,17 @@ impl Strategy for KlasikIndikatorler {
  // (tek yanlı ödül/ceza asimetrisi Long yanlılığı doğurur).
         // KONTRAT: None göstergeler oy KATMAZ. RSI hesaplanamazsa (None)
         // nötr 50 İLE SAHTE oy yazılmaz — gösterge yok = katkı yok.
+        // KANONİK WILDER(1978) ALIM SİNYALİ: RSI, oversold bölgesinden
+        // (30 altı) 30 ÜSTÜNE döndüğünde al sinyalidir. Bu yüzden (30,50)
+        // bandı +1'dir; RSI < 30 (düşen bıçak, henüz dönüş yok) OY VERMEZ
+        // — momentum komponentleriyle (MACD/BB) savaşmaz. > 70 =
+        // overbought (−1).
         match indicators::rsi(&c, 14).last().and_then(|v| *v).filter(|v| v.is_finite()) {
-            Some(rsi) if (30.0..50.0).contains(&rsi) => { score += 1.0; notes.push(format!("RSI {rsi:.0} dip bölge")); }
-            Some(rsi) if rsi > 70.0 => { score -= 1.0; notes.push(format!("RSI {rsi:.0} aşırı")); }
+            Some(rsi) if (30.0..50.0).contains(&rsi) => {
+                score += 1.0;
+                notes.push(format!("RSI {rsi:.0} oversold-çıkışı (Wilder alım bölgesi)"));
+            }
+            Some(rsi) if rsi > 70.0 => { score -= 1.0; notes.push(format!("RSI {rsi:.0} overbought (Wilder)")); }
             _ => {}
         }
 
@@ -115,7 +137,7 @@ mod audit_tests {
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
             let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
-            if let Signal::Long { strength, note } = KlasikIndikatorler.evaluate(&input) {
+            if let Signal::Long { strength, note } = ClassicIndicators.evaluate(&input) {
                 let last_close = full[cut - 1].c;
                 if last_close < 99.0 {
                     best = Some((cut, format!("w={strength:.2} {note}")));
@@ -136,7 +158,7 @@ mod audit_tests {
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
             let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
-            if let Signal::Short { strength, note } = KlasikIndikatorler.evaluate(&input) {
+            if let Signal::Short { strength, note } = ClassicIndicators.evaluate(&input) {
                 best = Some((cut, format!("w={strength:.2} {note}")));
                 break;
             }
@@ -149,6 +171,6 @@ mod audit_tests {
     #[test]
     fn klasik_veri_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(30, 100.0), ..Default::default() };
-        assert!(matches!(KlasikIndikatorler.evaluate(&input), Signal::Skip { .. }));
+        assert!(matches!(ClassicIndicators.evaluate(&input), Signal::Skip { .. }));
     }
 }

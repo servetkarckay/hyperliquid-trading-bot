@@ -171,7 +171,7 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 kaynaktır — 8 bilgi kümesi:
 
 ```text
-Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Regime Detection)
+Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Classic Indicators, Regime Detection)
 MeanReversion (Overreaction — De Bondt-Thaler)
 CrossSectional (Cross-Sectional Momentum — Jegadeesh-Titman)
 OrderFlow (Order Flow Imbalance, Market Making)

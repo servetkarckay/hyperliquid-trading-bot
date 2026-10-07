@@ -26,7 +26,7 @@ pub mod risk_kelly;
 pub mod dow_theory;
 pub mod overreaction;
 pub mod ensemble;
-pub mod klasik_indikatorler;
+pub mod classic_indicators;
 pub mod elliott_wave;
 pub mod turtle_system;
 pub mod squeeze_breakout;
@@ -191,7 +191,7 @@ pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Cross-Sectional Momentum", "Order Flow Imbalance", "Market Making",
         "GARCH", "Funding Carry", "Open Interest",
-        "Regime Detection", "Kelly Sizing", "Dow Theory", "Overreaction", "Klasik Göstergeler",
+        "Regime Detection", "Kelly Sizing", "Dow Theory", "Overreaction", "Classic Indicators",
         "Elliott", "Turtle", "Squeeze Breakout",
     ]
 }
@@ -210,7 +210,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(dow_theory::DowTheory),
         
         Box::new(overreaction::Overreaction),
-        Box::new(klasik_indikatorler::KlasikIndikatorler),
+        Box::new(classic_indicators::ClassicIndicators),
         Box::new(elliott_wave::ElliottWave),
         Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
@@ -226,7 +226,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InfoCluster {
     /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle,
-    /// Squeeze Breakout, Elliott, Klasik Göstergeler, Regime Detection
+    /// Squeeze Breakout, Elliott, Classic Indicators, Regime Detection
     Trend,
     /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,
@@ -254,7 +254,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "Funding Carry" => InfoCluster::Carry,
         "Open Interest" => InfoCluster::Liquidation,
         "Overreaction" => InfoCluster::MeanReversion,
-        // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
+        // fiyat/trend türevleri: Wyckoff, Dow, Classic Indicators, Elliott,
         // Turtle, Squeeze Breakout, Regime Detection
         _ => InfoCluster::Trend,
     }
