@@ -31,13 +31,9 @@ impl WsClient {
         Self { cfg }
     }
 
- /// Bağlanır, abonelik açar, mesajları kanala pompalar; otomatik ping (50 sn) + reconnect (5 sn).
- /// Kalıcı görev olarak çalışır; drop edilen receiver temiz kapanir.
-    pub async fn run(
-        &self,
-        subs: Vec<Value>,
-        tx: mpsc::Sender<WsEvent>,
-    ) -> Result<()> {
+    /// Bağlanır, abonelik açar, mesajları kanala pompalar; otomatik ping (50 sn) + reconnect (5 sn).
+    /// Kalıcı görev olarak çalışır; drop edilen receiver temiz kapanir.
+    pub async fn run(&self, subs: Vec<Value>, tx: mpsc::Sender<WsEvent>) -> Result<()> {
         let mut n_reconnect = 0u32;
         loop {
             match self.run_once(&subs, &tx).await {
@@ -69,7 +65,7 @@ impl WsClient {
             sink.send(Message::text(msg.to_string())).await?;
         }
 
- // 50 sn'de bir ping (server 60 sn sessizlikte kapatır)
+        // 50 sn'de bir ping (server 60 sn sessizlikte kapatır)
         let mut ping = tokio::time::interval(Duration::from_secs(50));
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 

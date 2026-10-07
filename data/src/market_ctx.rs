@@ -2,14 +2,15 @@
 //!
 //! Görevler:
 //! 1. `apply_event / apply_stream / apply_rest_snapshot`: WS + REST
+//!
 //! verisini tek `CtxState` haritasında birleştirir.
 //! 2. Türetilen seriler: `delta_oi` (OI değişimi — likidasyon kadransı
+//!
 //! girdisi), `oi_series`, `funding_series`, `basis` (perp-spot sapması).
 //! Ölçek notu: HL API `funding` alanı **saatlik** orandır (fundingHistory
 //! 1h aralıklı; yıllıklaştırma ×24×365) — burada dönüşüm YAPILMAZ, ham
 //! değer taşınır (dönüşüm strateji katmanındadır).
 use std::collections::{HashMap, VecDeque};
-
 
 use crate::ingestor::StreamEvent;
 
@@ -22,7 +23,7 @@ pub struct CtxState {
     pub oracle_px: f64,
     pub premium: f64,
     pub day_ntl_vlm: f64,
- /// dünkü kapanış (kesit momentum: mark/prevDay - 1)
+    /// dünkü kapanış (kesit momentum: mark/prevDay - 1)
     pub prev_day_px: f64,
     pub ts: i64,
 }
@@ -30,11 +31,11 @@ pub struct CtxState {
 #[derive(Debug, Clone)]
 pub struct MarketCtx {
     ctx_history_len: usize,
- /// coin -> en güncel ctx
+    /// coin -> en güncel ctx
     latest: HashMap<String, CtxState>,
- /// coin -> OI serisi (ts, oi) — ΔOI hesabı (strateji 09)
+    /// coin -> OI serisi (ts, oi) — ΔOI hesabı (strateji 09)
     oi_history: HashMap<String, VecDeque<(i64, f64)>>,
- /// coin -> funding serisi (ts, funding)
+    /// coin -> funding serisi (ts, funding)
     funding_history: HashMap<String, VecDeque<(i64, f64)>>,
 }
 
@@ -50,39 +51,69 @@ impl MarketCtx {
 
     pub fn apply_event(&mut self, c: CtxState) {
         let coin = c.coin.clone();
-        self.oi_history.entry(coin.clone()).or_default().push_back((c.ts, c.open_interest));
-        self.funding_history.entry(coin.clone()).or_default().push_back((c.ts, c.funding));
+        self.oi_history
+            .entry(coin.clone())
+            .or_default()
+            .push_back((c.ts, c.open_interest));
+        self.funding_history
+            .entry(coin.clone())
+            .or_default()
+            .push_back((c.ts, c.funding));
         if let Some(h) = self.oi_history.get_mut(&coin) {
-            while h.len() > self.ctx_history_len { h.pop_front(); }
+            while h.len() > self.ctx_history_len {
+                h.pop_front();
+            }
         }
         if let Some(h) = self.funding_history.get_mut(&coin) {
-            while h.len() > self.ctx_history_len { h.pop_front(); }
+            while h.len() > self.ctx_history_len {
+                h.pop_front();
+            }
         }
         self.latest.insert(coin, c);
     }
 
- /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır).
+    /// WS StreamEvent::Ctx'yi uygula (diğer event türleri yok sayılır).
     ///
     /// Çekirdek sayılar (funding/OI/mark/oracle) zaten ingestor'da
     /// doğrulanmıştır; meşru null edebilecek alanlar (premium/dayNtlVlm/
     /// prevDayPx) `None` gelirirse SON BİLİNEN değer korunur — sahte
     /// sıfır yazılmaz (REST yoluyla aynı dürüstlük kontratı).
     pub fn apply_stream(&mut self, ev: &StreamEvent) {
-        if let StreamEvent::Ctx { coin, funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, ts } = ev {
+        if let StreamEvent::Ctx {
+            coin,
+            funding,
+            open_interest,
+            mark_px,
+            oracle_px,
+            premium,
+            day_ntl_vlm,
+            prev_day_px,
+            ts,
+        } = ev
+        {
             let prev = self.latest.get(coin).cloned();
             let keep = |o: &Option<f64>, prev_v: f64| o.unwrap_or(prev_v);
             self.apply_event(CtxState {
-                coin: coin.clone(), funding: *funding, open_interest: *open_interest,
-                mark_px: *mark_px, oracle_px: *oracle_px,
+                coin: coin.clone(),
+                funding: *funding,
+                open_interest: *open_interest,
+                mark_px: *mark_px,
+                oracle_px: *oracle_px,
                 premium: keep(premium, prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
-                day_ntl_vlm: keep(day_ntl_vlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
-                prev_day_px: keep(prev_day_px, prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
+                day_ntl_vlm: keep(
+                    day_ntl_vlm,
+                    prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0),
+                ),
+                prev_day_px: keep(
+                    prev_day_px,
+                    prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0),
+                ),
                 ts: *ts,
             });
         }
     }
 
- /// REST metaAndAssetCtxs tam taraması — ctx index = universe sırası
+    /// REST metaAndAssetCtxs tam taraması — ctx index = universe sırası
     pub fn apply_rest_snapshot(
         &mut self,
         universe: &[String],
@@ -103,13 +134,30 @@ impl MarketCtx {
             let st = CtxState {
                 coin: coin.clone(),
                 funding: f(&c.funding, prev.as_ref().map(|p| p.funding).unwrap_or(0.0)),
-                open_interest: f(&c.openInterest, prev.as_ref().map(|p| p.open_interest).unwrap_or(0.0)),
+                open_interest: f(
+                    &c.openInterest,
+                    prev.as_ref().map(|p| p.open_interest).unwrap_or(0.0),
+                ),
                 mark_px: f(&c.markPx, prev.as_ref().map(|p| p.mark_px).unwrap_or(0.0)),
-                oracle_px: f(&c.oraclePx, prev.as_ref().map(|p| p.oracle_px).unwrap_or(0.0)),
-                premium: c.premium.clone().and_then(|p| p.parse::<f64>().ok()).filter(|v| v.is_finite())
+                oracle_px: f(
+                    &c.oraclePx,
+                    prev.as_ref().map(|p| p.oracle_px).unwrap_or(0.0),
+                ),
+                premium: c
+                    .premium
+                    .clone()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .filter(|v| v.is_finite())
                     .unwrap_or_else(|| prev.as_ref().map(|p| p.premium).unwrap_or(0.0)),
-                day_ntl_vlm: f(&c.dayNtlVlm, prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0)),
-                prev_day_px: c.prevDayPx.clone().and_then(|p| p.parse::<f64>().ok()).filter(|v| v.is_finite())
+                day_ntl_vlm: f(
+                    &c.dayNtlVlm,
+                    prev.as_ref().map(|p| p.day_ntl_vlm).unwrap_or(0.0),
+                ),
+                prev_day_px: c
+                    .prevDayPx
+                    .clone()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .filter(|v| v.is_finite())
                     .unwrap_or_else(|| prev.as_ref().map(|p| p.prev_day_px).unwrap_or(0.0)),
                 ts: now,
             };
@@ -127,7 +175,7 @@ impl MarketCtx {
         self.latest.values()
     }
 
- /// ΔOI: son iki ölçüm arasındaki open interest değişimi (strateji 09)
+    /// ΔOI: son iki ölçüm arasındaki open interest değişimi (strateji 09)
     pub fn delta_oi(&self, coin: &str) -> Option<f64> {
         let h = self.oi_history.get(coin)?;
         if h.len() < 2 {
@@ -141,19 +189,30 @@ impl MarketCtx {
         Some(oi1 - oi0)
     }
 
- /// Son N ölçümün OI serisi
+    /// Son N ölçümün OI serisi
     pub fn oi_series(&self, coin: &str) -> Vec<(i64, f64)> {
-        self.oi_history.get(coin).map(|d| d.iter().copied().collect()).unwrap_or_default()
+        self.oi_history
+            .get(coin)
+            .map(|d| d.iter().copied().collect())
+            .unwrap_or_default()
     }
 
- /// Funding serisi
+    /// Funding serisi
     pub fn funding_series(&self, coin: &str) -> Vec<(i64, f64)> {
-        self.funding_history.get(coin).map(|d| d.iter().copied().collect()).unwrap_or_default()
+        self.funding_history
+            .get(coin)
+            .map(|d| d.iter().copied().collect())
+            .unwrap_or_default()
     }
 
- /// Spot-perp basis (strateji 08): (perp mark - spot mid) / spot mid
- /// spot mid allMids'te `@<index>` anahtarıyla gelir.
-    pub fn basis(&self, coin: &str, spot_mids: &HashMap<String, f64>, spot_key: &str) -> Option<f64> {
+    /// Spot-perp basis (strateji 08): (perp mark - spot mid) / spot mid
+    /// spot mid allMids'te `@<index>` anahtarıyla gelir.
+    pub fn basis(
+        &self,
+        coin: &str,
+        spot_mids: &HashMap<String, f64>,
+        spot_key: &str,
+    ) -> Option<f64> {
         let mark = self.get(coin)?.mark_px;
         let spot = spot_mids.get(spot_key)?;
         if *spot <= 0.0 {
@@ -167,7 +226,6 @@ impl MarketCtx {
     }
 }
 
-
 #[cfg(test)]
 mod apply_stream_testleri {
     use super::*;
@@ -180,15 +238,25 @@ mod apply_stream_testleri {
     fn apply_stream_null_uyari_son_bilineni_korur() {
         let mut c = MarketCtx::new(8);
         c.apply_stream(&StreamEvent::Ctx {
-            coin: "BTC".into(), funding: 0.0001, open_interest: 10.0,
-            mark_px: 100.0, oracle_px: 99.0,
-            premium: Some(0.0025), day_ntl_vlm: Some(500.0), prev_day_px: Some(95.0),
+            coin: "BTC".into(),
+            funding: 0.0001,
+            open_interest: 10.0,
+            mark_px: 100.0,
+            oracle_px: 99.0,
+            premium: Some(0.0025),
+            day_ntl_vlm: Some(500.0),
+            prev_day_px: Some(95.0),
             ts: 1,
         });
         c.apply_stream(&StreamEvent::Ctx {
-            coin: "BTC".into(), funding: 0.0002, open_interest: 11.0,
-            mark_px: 101.0, oracle_px: 100.0,
-            premium: None, day_ntl_vlm: None, prev_day_px: None,
+            coin: "BTC".into(),
+            funding: 0.0002,
+            open_interest: 11.0,
+            mark_px: 101.0,
+            oracle_px: 100.0,
+            premium: None,
+            day_ntl_vlm: None,
+            prev_day_px: None,
             ts: 2,
         });
         let st = c.get("BTC").unwrap();
@@ -205,9 +273,14 @@ mod apply_stream_testleri {
     fn apply_stream_ilk_event_null_ile_baslar() {
         let mut c = MarketCtx::new(8);
         c.apply_stream(&StreamEvent::Ctx {
-            coin: "ETH".into(), funding: 0.0001, open_interest: 1.0,
-            mark_px: 3000.0, oracle_px: 2999.0,
-            premium: None, day_ntl_vlm: None, prev_day_px: None,
+            coin: "ETH".into(),
+            funding: 0.0001,
+            open_interest: 1.0,
+            mark_px: 3000.0,
+            oracle_px: 2999.0,
+            premium: None,
+            day_ntl_vlm: None,
+            prev_day_px: None,
             ts: 1,
         });
         let st = c.get("ETH").unwrap();

@@ -32,16 +32,18 @@ impl Strategy for ClassicIndicators {
     fn evaluate(&self, input: &MarketInput) -> Signal {
         let c = closes(&input.candles);
         if c.len() < 60 {
-            return Signal::Skip { reason: ">=60 mum gerekli".into() };
+            return Signal::Skip {
+                reason: ">=60 mum gerekli".into(),
+            };
         }
         let price = c[c.len() - 1];
         let mut score: f64 = 0.0;
         let mut notes = Vec::new();
 
- // 1) RSI14: 30<RSI<50 -> +1 (dip alım bölgesi), 50<RSI<70 -> -0.5 (aşırı)
- // I — SİMETRİ KONTRATI: dip alım ödülü (+1) ile aşırı alım cezası
- // eşit ağırlıkta; Short skoru Long skoruyla yapısal simetriktir
- // (tek yanlı ödül/ceza asimetrisi Long yanlılığı doğurur).
+        // 1) RSI14: 30<RSI<50 -> +1 (dip alım bölgesi), 50<RSI<70 -> -0.5 (aşırı)
+        // I — SİMETRİ KONTRATI: dip alım ödülü (+1) ile aşırı alım cezası
+        // eşit ağırlıkta; Short skoru Long skoruyla yapısal simetriktir
+        // (tek yanlı ödül/ceza asimetrisi Long yanlılığı doğurur).
         // KONTRAT: None göstergeler oy KATMAZ. RSI hesaplanamazsa (None)
         // nötr 50 İLE SAHTE oy yazılmaz — gösterge yok = katkı yok.
         // KANONİK WILDER(1978) ALIM SİNYALİ: RSI, oversold bölgesinden
@@ -49,43 +51,66 @@ impl Strategy for ClassicIndicators {
         // bandı +1'dir; RSI < 30 (düşen bıçak, henüz dönüş yok) OY VERMEZ
         // — momentum komponentleriyle (MACD/BB) savaşmaz. > 70 =
         // overbought (−1).
-        match indicators::rsi(&c, 14).last().and_then(|v| *v).filter(|v| v.is_finite()) {
+        match indicators::rsi(&c, 14)
+            .last()
+            .and_then(|v| *v)
+            .filter(|v| v.is_finite())
+        {
             Some(rsi) if (30.0..50.0).contains(&rsi) => {
                 score += 1.0;
-                notes.push(format!("RSI {rsi:.0} oversold-çıkışı (Wilder alım bölgesi)"));
+                notes.push(format!(
+                    "RSI {rsi:.0} oversold-çıkışı (Wilder alım bölgesi)"
+                ));
             }
-            Some(rsi) if rsi > 70.0 => { score -= 1.0; notes.push(format!("RSI {rsi:.0} overbought (Wilder)")); }
+            Some(rsi) if rsi > 70.0 => {
+                score -= 1.0;
+                notes.push(format!("RSI {rsi:.0} overbought (Wilder)"));
+            }
             _ => {}
         }
 
- // 2) MACD histogram işareti
+        // 2) MACD histogram işareti
         let (_, _, hist) = indicators::macd(&c, 12, 26, 9);
         let h_last = hist.last().and_then(|v| *v);
         match h_last {
-            Some(hv) if hv > 0.0 => { score += 1.0; notes.push("MACD hist +".into()); }
-            Some(_) => { score -= 1.0; notes.push("MACD hist -".into()); }
+            Some(hv) if hv > 0.0 => {
+                score += 1.0;
+                notes.push("MACD hist +".into());
+            }
+            Some(_) => {
+                score -= 1.0;
+                notes.push("MACD hist -".into());
+            }
             None => {}
         }
 
- // 3) Bollinger: alt banda temas -> +1
+        // 3) Bollinger: alt banda temas -> +1
         let bb = indicators::bollinger(&c, 20, 2.0);
         // PANİK YASAK: seri boşsa oy yok (unwrap yerine Option akışı)
         if let Some((Some(_), Some(up), Some(lo))) = bb.last().copied() {
-            if price <= lo { score += 1.0; notes.push("BB alt banda temas".into()); }
-            if price >= up { score -= 1.0; notes.push("BB üst banda temas".into()); }
-        }
-
- // 4) OBV eğimi (son 10 bar) — SİMETRİ (aşağı kol eklendi)
-        let obv = indicators::obv(&c, &vol_of(&input.candles));
-        if obv.len() >= 10 {
-            if obv[obv.len() - 1] > obv[obv.len() - 10] {
-                score += 0.5; notes.push("OBV yukarı".into());
-            } else if obv[obv.len() - 1] < obv[obv.len() - 10] {
-                score -= 0.5; notes.push("OBV aşağı".into());
+            if price <= lo {
+                score += 1.0;
+                notes.push("BB alt banda temas".into());
+            }
+            if price >= up {
+                score -= 1.0;
+                notes.push("BB üst banda temas".into());
             }
         }
 
- // 5) VWAP konumu
+        // 4) OBV eğimi (son 10 bar) — SİMETRİ (aşağı kol eklendi)
+        let obv = indicators::obv(&c, &vol_of(&input.candles));
+        if obv.len() >= 10 {
+            if obv[obv.len() - 1] > obv[obv.len() - 10] {
+                score += 0.5;
+                notes.push("OBV yukarı".into());
+            } else if obv[obv.len() - 1] < obv[obv.len() - 10] {
+                score -= 0.5;
+                notes.push("OBV aşağı".into());
+            }
+        }
+
+        // 5) VWAP konumu
         let vwap = last(&indicators::rolling_vwap(
             &input.candles.iter().map(|x| x.h).collect::<Vec<_>>(),
             &input.candles.iter().map(|x| x.l).collect::<Vec<_>>(),
@@ -94,17 +119,30 @@ impl Strategy for ClassicIndicators {
             20,
         ));
         if let Some(vw) = vwap {
-            if price > vw { score += 0.5; notes.push("fiyat VWAP üstü".into()); }
-            else { score -= 0.5; notes.push("fiyat VWAP altı".into()); }
+            if price > vw {
+                score += 0.5;
+                notes.push("fiyat VWAP üstü".into());
+            } else {
+                score -= 0.5;
+                notes.push("fiyat VWAP altı".into());
+            }
         }
 
- // skor -> sinyal (maks ~4)
+        // skor -> sinyal (maks ~4)
         if score >= 2.0 {
-            Signal::Long { strength: (score / 4.0).min(0.8), note: format!("skor {score:+.1}: {}", notes.join("; ")) }
+            Signal::Long {
+                strength: (score / 4.0).min(0.8),
+                note: format!("skor {score:+.1}: {}", notes.join("; ")),
+            }
         } else if score <= -2.0 {
-            Signal::Short { strength: ((-score) / 4.0).min(0.8), note: format!("skor {score:+.1}: {}", notes.join("; ")) }
+            Signal::Short {
+                strength: ((-score) / 4.0).min(0.8),
+                note: format!("skor {score:+.1}: {}", notes.join("; ")),
+            }
         } else {
-            Signal::Hold { note: format!("skor {score:+.1} — karışık: {}", notes.join("; ")) }
+            Signal::Hold {
+                note: format!("skor {score:+.1} — karışık: {}", notes.join("; ")),
+            }
         }
     }
 }
@@ -117,18 +155,20 @@ fn vol_of(candles: &[data::Candle]) -> Vec<f64> {
 mod audit_tests {
     use super::*;
     use crate::strat_test_helpers::helpers as H;
-    use std::f64::consts::PI;
 
- /// Deterministik sinüs serisi: döngüsel deneysel metrikler.
-
- /// A — dip noktasında çoklu onay → Long (skor ≥ +2).
+    /// Deterministik sinüs serisi: döngüsel deneysel metrikler.
+    /// A — dip noktasında çoklu onay → Long (skor ≥ +2).
     #[test]
     fn klasik_coklu_onay_long() {
         let full = H::sine(200, 60.0, 2.0, 150.0);
- // sinüsün DİP noktası: i = 3T/4 = 45 (i mod 60)
+        // sinüsün DİP noktası: i = 3T/4 = 45 (i mod 60)
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
-            let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
+            let input = MarketInput {
+                coin: "T".into(),
+                candles: full[..cut].to_vec(),
+                ..Default::default()
+            };
             if let Signal::Long { strength, note } = ClassicIndicators.evaluate(&input) {
                 let last_close = full[cut - 1].c;
                 if last_close < 99.0 {
@@ -141,15 +181,19 @@ mod audit_tests {
         eprintln!("klasik long: cut={cut} {info}");
     }
 
- /// C — Short simetrisi: zirve noktasında Short (skor ≤ −2).
+    /// C — Short simetrisi: zirve noktasında Short (skor ≤ −2).
     #[test]
     fn klasik_asiri_short() {
         let full = H::sine(200, 60.0, 2.0, 150.0);
- // zirve + DÖNÜŞ sonrası kısa inişte MACD hist − olur; zirve barında
- // hist hâlâ + olabilir → dönüşü izleyen barlarda ara
+        // zirve + DÖNÜŞ sonrası kısa inişte MACD hist − olur; zirve barında
+        // hist hâlâ + olabilir → dönüşü izleyen barlarda ara
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
-            let input = MarketInput { coin: "T".into(), candles: full[..cut].to_vec(), ..Default::default() };
+            let input = MarketInput {
+                coin: "T".into(),
+                candles: full[..cut].to_vec(),
+                ..Default::default()
+            };
             if let Signal::Short { strength, note } = ClassicIndicators.evaluate(&input) {
                 best = Some((cut, format!("w={strength:.2} {note}")));
                 break;
@@ -159,10 +203,17 @@ mod audit_tests {
         eprintln!("klasik short: cut={cut} {info}");
     }
 
- /// D — mum yoksa Skip.
+    /// D — mum yoksa Skip.
     #[test]
     fn klasik_veri_yoksa_skip() {
-        let input = MarketInput { coin: "T".into(), candles: H::flat(30, 100.0), ..Default::default() };
-        assert!(matches!(ClassicIndicators.evaluate(&input), Signal::Skip { .. }));
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: H::flat(30, 100.0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            ClassicIndicators.evaluate(&input),
+            Signal::Skip { .. }
+        ));
     }
 }

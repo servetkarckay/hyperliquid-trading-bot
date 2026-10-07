@@ -67,7 +67,7 @@ pub fn solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
         .collect();
 
     for col in 0..n {
- // pivot seç
+        // pivot seç
         let mut pivot = col;
         for r in col + 1..n {
             if m[r][col].abs() > m[pivot][col].abs() {
@@ -82,13 +82,14 @@ pub fn solve(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
         for r in col + 1..n {
             let f = m[r][col] * inv;
             if f != 0.0 {
-                for c in col..=n {
-                    m[r][c] -= f * m[col][c];
+                let crow: Vec<f64> = m[col][col..=n].to_vec();
+                for (ci, mr) in m[r][col..=n].iter_mut().enumerate() {
+                    *mr -= f * crow[ci];
                 }
             }
         }
     }
- // geri substitüsyon
+    // geri substitüsyon
     let mut x = vec![0.0; n];
     for i in (0..n).rev() {
         let mut s = m[i][n];
@@ -125,14 +126,15 @@ pub fn inverse(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
         }
         m.swap(col, pivot);
         let inv = 1.0 / m[col][col];
-        for c in 0..2 * n {
-            m[col][c] *= inv;
+        for mv in m[col][0..2 * n].iter_mut() {
+            *mv *= inv;
         }
         for r in 0..n {
             if r != col && m[r][col] != 0.0 {
                 let f = m[r][col];
-                for c in 0..2 * n {
-                    m[r][c] -= f * m[col][c];
+                let crow: Vec<f64> = m[col][0..2 * n].to_vec();
+                for (ci, mr) in m[r][0..2 * n].iter_mut().enumerate() {
+                    *mr -= f * crow[ci];
                 }
             }
         }
@@ -145,20 +147,30 @@ pub fn cholesky(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let n = a.len();
     let mut l = vec![vec![0.0; n]; n];
     for i in 0..n {
+        // Satır-güvenli form: i'den küçük satırlar (j<i) o döngüde
+        // değişmediğinden anlık görüntüyle okunur; i-satırı (`li`)
+        // canlı tutulur — l[i][k] okuması aynı i-döngüsünde yazılan
+        // değeri görmeye devam eder (orijinal matematik birebir).
+        let past_rows: Vec<Vec<f64>> = l[..i].to_vec();
+        let mut li: Vec<f64> = l[i].clone();
         for j in 0..=i {
             let mut s = a[i][j];
             for k in 0..j {
-                s -= l[i][k] * l[j][k];
+                let dik = li[k];
+                let djk = if j == i { li[k] } else { past_rows[j][k] };
+                s -= dik * djk;
             }
-            if i == j {
+            let v = if i == j {
                 if s <= 0.0 {
                     return None;
                 }
-                l[i][j] = s.sqrt();
+                s.sqrt()
             } else {
-                l[i][j] = s / l[j][j];
-            }
+                s / past_rows[j][j]
+            };
+            li[j] = v;
         }
+        l[i] = li;
     }
     Some(l)
 }
@@ -179,7 +191,7 @@ pub fn ols(x: &[Vec<f64>], y: &[f64]) -> Option<OlsResult> {
         .collect();
     let beta = solve(&xtx, &xty)?;
 
- // fitted + residuals
+    // fitted + residuals
     let mut rss = 0.0;
     let mut tss = 0.0;
     let ybar = y.iter().sum::<f64>() / n as f64;
@@ -191,14 +203,23 @@ pub fn ols(x: &[Vec<f64>], y: &[f64]) -> Option<OlsResult> {
     let df = (n - k) as i64;
     let sigma2 = if df > 0 { rss / df as f64 } else { 0.0 };
     let xtx_inv = inverse(&xtx)?;
- // SE(beta_j) = sqrt(sigma2 * diag((X'X)^-1)_jj)
-    let se: Vec<f64> = (0..k)
-        .map(|j| (sigma2 * xtx_inv[j][j]).sqrt())
+    // SE(beta_j) = sqrt(sigma2 * diag((X'X)^-1)_jj)
+    let se: Vec<f64> = (0..k).map(|j| (sigma2 * xtx_inv[j][j]).sqrt()).collect();
+    let t_stat: Vec<f64> = beta
+        .iter()
+        .zip(&se)
+        .map(|(b, s)| if *s > 0.0 { b / s } else { 0.0 })
         .collect();
-    let t_stat: Vec<f64> = beta.iter().zip(&se).map(|(b, s)| if *s > 0.0 { b / s } else { 0.0 }).collect();
     let r_squared = if tss > 0.0 { 1.0 - rss / tss } else { 0.0 };
 
-    Some(OlsResult { beta, se, t_stat, r_squared, n, df })
+    Some(OlsResult {
+        beta,
+        se,
+        t_stat,
+        r_squared,
+        n,
+        df,
+    })
 }
 
 /// Basit doğrusal regresyon: y = a + b x (tek değişkenli kapalı form)

@@ -109,13 +109,16 @@ pub fn kelly_continuous(mean_return: f64, variance: f64) -> Option<f64> {
 pub fn covariance_matrix(series: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let k = series.len();
     let n = series.first().map(|s| s.len()).unwrap_or(0);
-    let means: Vec<f64> = series.iter().map(|s| s.iter().sum::<f64>() / n as f64).collect();
+    let means: Vec<f64> = series
+        .iter()
+        .map(|s| s.iter().sum::<f64>() / n as f64)
+        .collect();
     let mut cov = vec![vec![0.0; k]; k];
     for i in 0..k {
         for j in i..k {
             let mut s = 0.0;
-            for t in 0..n {
-                s += (series[i][t] - means[i]) * (series[j][t] - means[j]);
+            for (t, sip) in series[i].iter().enumerate().take(n) {
+                s += (sip - means[i]) * (series[j][t] - means[j]);
             }
             let v = s / (n - 1) as f64;
             cov[i][j] = v;
@@ -133,7 +136,11 @@ pub fn correlation_matrix(series: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut corr = vec![vec![0.0; k]; k];
     for i in 0..k {
         for j in 0..k {
-            corr[i][j] = if sd[i] > 0.0 && sd[j] > 0.0 { cov[i][j] / (sd[i] * sd[j]) } else { 0.0 };
+            corr[i][j] = if sd[i] > 0.0 && sd[j] > 0.0 {
+                cov[i][j] / (sd[i] * sd[j])
+            } else {
+                0.0
+            };
         }
     }
     corr

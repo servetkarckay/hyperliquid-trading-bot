@@ -37,21 +37,28 @@ impl Strategy for OpenInterest {
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
         let Some(d_oi) = input.oi_delta else {
-            return Signal::Skip { reason: "ΔOI yok (ctx serisi kısa)".into() };
+            return Signal::Skip {
+                reason: "ΔOI yok (ctx serisi kısa)".into(),
+            };
         };
         let c = closes(&input.candles);
         if c.len() < 13 {
-            return Signal::Skip { reason: ">=13 mum gerekli".into() };
+            return Signal::Skip {
+                reason: ">=13 mum gerekli".into(),
+            };
         }
         let d_px = c[c.len() - 1] - c[c.len() - 13];
         // GÖRECE EŞİK: mutlak ΔOI tek başına anlamsız — seviyeye göre
         // ölçekle (|ΔOI| / OI). Eşik altı = gürültü → Hold (oy yok).
         // OI seviyesi yoksa görece ölçek hesaplanamaz → Skip.
         let Some(ctx) = &input.ctx else {
-            return Signal::Skip { reason: "OI seviyesi yok — görece ölçek hesaplanamaz".into() };
+            return Signal::Skip {
+                reason: "OI seviyesi yok — görece ölçek hesaplanamaz".into(),
+            };
         };
         let rel_oi = d_oi.abs() / ctx.open_interest.max(1e-12);
-        if !(rel_oi > REL_OI_THRESHOLD) {
+        // NaN/non-finite → Hold (orijinal `!(x > t)` ile birebir aynı)
+        if !rel_oi.is_finite() || rel_oi <= REL_OI_THRESHOLD {
             return Signal::Hold {
                 note: format!(
                     "ΔOI OI seviyesinin %{:.2}'sinin altında — gürültü, oy yok",
@@ -90,11 +97,27 @@ mod audit_tests {
     use crate::strat_test_helpers::helpers as H;
 
     fn ctx_oi(oi: f64) -> data::market_ctx::CtxState {
-        data::market_ctx::CtxState { coin: "T".into(), funding: 0.0, open_interest: oi, mark_px: 100.0, oracle_px: 100.0, premium: 0.0, day_ntl_vlm: 1e6, prev_day_px: 100.0, ts: 0 }
+        data::market_ctx::CtxState {
+            coin: "T".into(),
+            funding: 0.0,
+            open_interest: oi,
+            mark_px: 100.0,
+            oracle_px: 100.0,
+            premium: 0.0,
+            day_ntl_vlm: 1e6,
+            prev_day_px: 100.0,
+            ts: 0,
+        }
     }
 
     fn mk(candles: Vec<data::Candle>, d: f64, oi: f64) -> MarketInput {
-        MarketInput { coin: "T".into(), candles, oi_delta: Some(d), ctx: Some(ctx_oi(oi)), ..Default::default() }
+        MarketInput {
+            coin: "T".into(),
+            candles,
+            oi_delta: Some(d),
+            ctx: Some(ctx_oi(oi)),
+            ..Default::default()
+        }
     }
 
     /// A — OI↑ + P↑ → Long (yeni long, trend devam).
@@ -105,7 +128,7 @@ mod audit_tests {
         let input = mk(candles, 2.0, 400.0);
         match OpenInterest.evaluate(&input) {
             Signal::Long { strength, note } => {
-                assert!(strength >= 0.2 && strength <= 0.8);
+                assert!((0.2..=0.8).contains(&strength));
                 assert!(note.contains("yeni long"), "{note}");
             }
             other => panic!("Long beklenirdi: {other:?}"),
@@ -117,7 +140,9 @@ mod audit_tests {
     fn oi_up_px_down_short() {
         let down = H::linear(20, 110.0, -0.5);
         let input = mk(down, 2.0, 400.0);
-        assert!(matches!(OpenInterest.evaluate(&input), Signal::Short { strength, .. } if strength >= 0.2));
+        assert!(
+            matches!(OpenInterest.evaluate(&input), Signal::Short { strength, .. } if strength >= 0.2)
+        );
     }
 
     /// C — KANONİK MATRİS: OI↓ kadransları KONTRA GİRİŞ ÜRETMEZ
@@ -144,10 +169,23 @@ mod audit_tests {
     /// D — ΔOI yoksa Skip; OI seviyesi yoksa Skip (sahte kadrans yasağı).
     #[test]
     fn oi_veri_yoksa_skip() {
-        let input = MarketInput { coin: "T".into(), candles: H::flat(20, 100.0), oi_delta: None, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: H::flat(20, 100.0),
+            oi_delta: None,
+            ..Default::default()
+        };
         assert!(matches!(OpenInterest.evaluate(&input), Signal::Skip { .. }));
-        let no_lvl = MarketInput { coin: "T".into(), candles: H::flat(20, 100.0), oi_delta: Some(1.0), ..Default::default() };
-        assert!(matches!(OpenInterest.evaluate(&no_lvl), Signal::Skip { .. }), "OI seviyesi yok → Skip");
+        let no_lvl = MarketInput {
+            coin: "T".into(),
+            candles: H::flat(20, 100.0),
+            oi_delta: Some(1.0),
+            ..Default::default()
+        };
+        assert!(
+            matches!(OpenInterest.evaluate(&no_lvl), Signal::Skip { .. }),
+            "OI seviyesi yok → Skip"
+        );
     }
 
     /// GÖRECE EŞİK: pencerenin %0.2'sinin altındaki ΔOI = gürültü → oy YOK.

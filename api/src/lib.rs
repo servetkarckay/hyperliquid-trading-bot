@@ -9,8 +9,8 @@
 //! `error_responses` — `ApiError` hata taksonomisi
 //! `types` — info endpoint wire şemaları
 //! `websocket`— canlı akış (ping + otomatik yeniden bağlanma)
-pub mod error_responses;
 pub mod config;
+pub mod error_responses;
 pub mod exchange_endpoint;
 pub mod info_endpoint;
 pub mod signing;
@@ -18,7 +18,10 @@ pub mod types;
 pub mod websocket;
 
 pub use config::Config;
-pub use exchange_endpoint::{perp_price, perp_price_verified, round_5sig, round_px_for, round_px_wire, round_sz_up, Exchange, OrderStatuses, Tif};
+pub use exchange_endpoint::{
+    perp_price, perp_price_verified, round_5sig, round_px_for, round_px_wire, round_sz_up,
+    Exchange, OrderStatuses, Tif,
+};
 pub use info_endpoint::Info;
 pub use signing::{now_ms, HyperliquidClient, L1Signature};
 pub use websocket::WsClient;

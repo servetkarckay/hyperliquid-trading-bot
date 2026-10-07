@@ -64,7 +64,7 @@ pub fn rsi(closes: &[f64], n: usize) -> Vec<Option<f64>> {
         gains.push(d.max(0.0));
         losses.push((-d).max(0.0));
     }
- // seed: ilk n değişimin ortalaması (index n-1'e denk gelir)
+    // seed: ilk n değişimin ortalaması (index n-1'e denk gelir)
     let avg_gain: f64 = gains[..n].iter().sum::<f64>() / n as f64;
     let avg_loss: f64 = losses[..n].iter().sum::<f64>() / n as f64;
     out[n] = Some(rsi_from(avg_gain, avg_loss));
@@ -86,12 +86,7 @@ fn rsi_from(avg_gain: f64, avg_loss: f64) -> f64 {
 
 /// MACD: ema_fast - ema_slow; signal = ema_n9(macd); hist = macd - signal
 /// (macd None bölgeleri signal hesabına katılmaz: kırpılmış seriyle ilerler)
-pub fn macd(
-    closes: &[f64],
-    fast: usize,
-    slow: usize,
-    signal: usize,
-) -> (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>) {
+pub fn macd(closes: &[f64], fast: usize, slow: usize, signal: usize) -> TripleSeries {
     let ef = ema(closes, fast);
     let es = ema(closes, slow);
     let macd_line: Vec<Option<f64>> = ef
@@ -102,7 +97,10 @@ pub fn macd(
             _ => None,
         })
         .collect();
-    let first = macd_line.iter().position(|v| v.is_some()).unwrap_or(macd_line.len());
+    let first = macd_line
+        .iter()
+        .position(|v| v.is_some())
+        .unwrap_or(macd_line.len());
     let compact: Vec<f64> = macd_line[first..].iter().map(|v| v.unwrap()).collect();
     let sig_c = ema(&compact, signal);
     let mut sig = vec![None; macd_line.len()];
@@ -138,6 +136,8 @@ pub fn bollinger(data: &[f64], n: usize, k: f64) -> Vec<(Option<f64>, Option<f64
     out
 }
 
+pub type TripleSeries = (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>);
+
 /// True Range: max(H-L, |H-Cprev|, |L-Cprev|); ilk bar: H-L
 pub fn true_range(high: &[f64], low: &[f64], close: &[f64]) -> Vec<f64> {
     let mut tr = Vec::with_capacity(high.len());
@@ -172,12 +172,7 @@ pub fn atr(high: &[f64], low: &[f64], close: &[f64], n: usize) -> Vec<Option<f64
 }
 
 /// ADX sistemi: (+DI, -DI, ADX) — Wilder. Dönüş: (plus_di, minus_di, adx)
-pub fn adx(
-    high: &[f64],
-    low: &[f64],
-    close: &[f64],
-    n: usize,
-) -> (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>) {
+pub fn adx(high: &[f64], low: &[f64], close: &[f64], n: usize) -> TripleSeries {
     let len = high.len();
     let mut pdi = vec![None; len];
     let mut mdi = vec![None; len];
@@ -185,7 +180,7 @@ pub fn adx(
     if len < 2 * n + 1 || n == 0 {
         return (pdi, mdi, adx_out);
     }
- // +DM / -DM / TR
+    // +DM / -DM / TR
     let mut plus_dm = vec![0.0; len - 1];
     let mut minus_dm = vec![0.0; len - 1];
     for i in 1..len {
@@ -196,7 +191,7 @@ pub fn adx(
     }
     let tr = true_range(high, low, close);
     let tr1 = &tr[1..];
- // seed: ilk n ortalaması
+    // seed: ilk n ortalaması
     let str1: f64 = tr1[..n].iter().sum::<f64>() / n as f64;
     let spdm: f64 = plus_dm[..n].iter().sum::<f64>() / n as f64;
     let smdm: f64 = minus_dm[..n].iter().sum::<f64>() / n as f64;
@@ -205,7 +200,7 @@ pub fn adx(
     let p_rest = wilder_ema_from(&plus_dm[n..], n, spdm);
     let m_rest = wilder_ema_from(&minus_dm[n..], n, smdm);
     let tr_rest = wilder_ema_from(&tr1[n..], n, str1);
- // DX serisi
+    // DX serisi
     let mut dx: Vec<f64> = Vec::new();
     for i in 0..p_rest.len() {
         let p = 100.0 * p_rest[i] / tr_rest[i];
@@ -278,7 +273,11 @@ pub fn stochastic(
 }
 
 /// Donchian kanalları: (üst = HH n, alt = LL n, orta) — güncel bar dahil
-pub fn donchian(high: &[f64], low: &[f64], n: usize) -> Vec<(Option<f64>, Option<f64>, Option<f64>)> {
+pub fn donchian(
+    high: &[f64],
+    low: &[f64],
+    n: usize,
+) -> Vec<(Option<f64>, Option<f64>, Option<f64>)> {
     let mut out = Vec::with_capacity(high.len());
     for i in 0..high.len() {
         if i + 1 >= n {
@@ -302,8 +301,16 @@ pub fn fib_levels(low: f64, high: f64) -> Vec<(f64, f64)> {
 }
 
 /// Rolling VWAP: son n barın (tipik fiyat × hacim) ortalaması
-pub fn rolling_vwap(high: &[f64], low: &[f64], close: &[f64], volume: &[f64], n: usize) -> Vec<Option<f64>> {
-    let tp: Vec<f64> = (0..close.len()).map(|i| (high[i] + low[i] + close[i]) / 3.0).collect();
+pub fn rolling_vwap(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    volume: &[f64],
+    n: usize,
+) -> Vec<Option<f64>> {
+    let tp: Vec<f64> = (0..close.len())
+        .map(|i| (high[i] + low[i] + close[i]) / 3.0)
+        .collect();
     let mut out = vec![None; close.len()];
     let mut pv = 0.0;
     let mut v = 0.0;
@@ -371,7 +378,12 @@ pub fn parkinson(high: &[f64], low: &[f64], n: usize, annualization: f64) -> Vec
         if i + 1 >= n {
             let w = &high[i + 1 - n..=i];
             let wl = &low[i + 1 - n..=i];
-            let m: f64 = w.iter().zip(wl).map(|(h, l)| (h / l).ln().powi(2)).sum::<f64>() / n as f64;
+            let m: f64 = w
+                .iter()
+                .zip(wl)
+                .map(|(h, l)| (h / l).ln().powi(2))
+                .sum::<f64>()
+                / n as f64;
             out[i] = Some((c * m * annualization).sqrt());
         }
     }
@@ -389,7 +401,7 @@ pub fn garman_klass(
 ) -> Vec<Option<f64>> {
     let mut out = vec![None; high.len()];
     let c2 = 2.0 * std::f64::consts::LN_2 - 1.0;
-    for i in 0..high.len() {
+    for (i, slot) in out.iter_mut().enumerate() {
         if i + 1 >= n {
             let mut s = 0.0;
             for j in i + 1 - n..=i {
@@ -397,7 +409,7 @@ pub fn garman_klass(
                 let co = (close[j] / open[j]).ln();
                 s += 0.5 * hl * hl - c2 * co * co;
             }
-            out[i] = Some((s / n as f64 * annualization).sqrt());
+            *slot = Some((s / n as f64 * annualization).sqrt());
         }
     }
     out
@@ -454,6 +466,5 @@ pub fn garch11_fit(returns: &[f64], steps: usize) -> (f64, f64, f64, f64) {
 
 /// Yıllıklaştırma çarpanı: bar başına saniye -> yıl (365 gün, kripto 7/24)
 pub fn annualization_factor(bar_seconds: u64) -> f64 {
-    let bars_per_year = 365.0 * 24.0 * 3600.0 / bar_seconds as f64;
-    bars_per_year
+    365.0 * 24.0 * 3600.0 / bar_seconds as f64
 }

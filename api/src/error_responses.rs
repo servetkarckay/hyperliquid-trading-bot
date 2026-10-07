@@ -26,7 +26,10 @@ pub enum ApiError {
 
 impl From<reqwest::Error> for ApiError {
     fn from(e: reqwest::Error) -> Self {
-        ApiError::Http { status: 0, body: e.to_string() }
+        ApiError::Http {
+            status: 0,
+            body: e.to_string(),
+        }
     }
 }
 

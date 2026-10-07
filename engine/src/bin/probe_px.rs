@@ -26,8 +26,8 @@ async fn main() -> Result<()> {
         .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
         .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {coin}"))?;
 
- // -rest: TEK bir GTC emir bırak (defterde asılı kalır). "orphan emir"
- // testi için: bot açılış yetim temizliğinin bunu iptal etmesi gerekir.
+    // -rest: TEK bir GTC emir bırak (defterde asılı kalır). "orphan emir"
+    // testi için: bot açılış yetim temizliğinin bunu iptal etmesi gerekir.
     if args.get(1).map(|s| s.as_str()) == Some("--rest") {
         let coin2 = args.get(2).cloned().unwrap_or_else(|| "BTC".into());
         let (a2, sd2, _) = meta
@@ -38,8 +38,11 @@ async fn main() -> Result<()> {
             .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
             .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {coin2}"))?;
         let mids2 = info.all_mids().await?;
-        let m2: f64 = mids2.get(&coin2).and_then(|m| m.parse().ok()).unwrap_or(0.0);
- // alışta, mid'in %5 ALTINDA → asılı kalır (post-only değil, GTC)
+        let m2: f64 = mids2
+            .get(&coin2)
+            .and_then(|m| m.parse().ok())
+            .unwrap_or(0.0);
+        // alışta, mid'in %5 ALTINDA → asılı kalır (post-only değil, GTC)
         let px2 = hyperliquid_api::round_px_wire(m2 * 0.95);
         let sz2 = hyperliquid_api::round_sz_up(20.0 / m2, sd2);
         let ex2 = Exchange::new(cfg)?;
@@ -52,7 +55,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
- // -cancel <ASSET_ID> <OID>: tek emri oid ile iptal et ( yetim temizliği).
+    // -cancel <ASSET_ID> <OID>: tek emri oid ile iptal et ( yetim temizliği).
     if args.get(1).map(|s| s.as_str()) == Some("--cancel") {
         let a2: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
         let oid: i64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -66,10 +69,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
- // -cloid: **cloid yeniden kullanım testi** (P2-H).
- // place → cancel → AYNI cloid ile tekrar place. Red gelirse cloid
- // emri-ömrü boyunca tek kullanımlıktır → `make_cloid`'a proses-içi
- // monotonik sayaç eklenmeli (idempotency amacı bozulmadan).
+    // -cloid: **cloid yeniden kullanım testi** (P2-H).
+    // place → cancel → AYNI cloid ile tekrar place. Red gelirse cloid
+    // emri-ömrü boyunca tek kullanımlıktır → `make_cloid`'a proses-içi
+    // monotonik sayaç eklenmeli (idempotency amacı bozulmadan).
     if args.get(1).map(|s| s.as_str()) == Some("--cloid") {
         let cn = args.get(2).cloned().unwrap_or_else(|| "ME".into());
         let (a2, sd2, _) = meta
@@ -81,7 +84,7 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {cn}"))?;
         let mids2 = info.all_mids().await?;
         let m2: f64 = mids2.get(&cn).and_then(|m| m.parse().ok()).unwrap_or(0.0);
- // ME gibi ucuz coinlerde 6 hane reddediliyor -> 5 significant figure
+        // ME gibi ucuz coinlerde 6 hane reddediliyor -> 5 significant figure
         let px2 = hyperliquid_api::round_5sig(m2 * 0.95); // alışta -> asili kalir
         let sz2 = hyperliquid_api::round_sz_up(20.0 / m2, sd2);
         let ex2 = Exchange::new(cfg)?;
@@ -131,11 +134,14 @@ async fn main() -> Result<()> {
     let ex = Exchange::new(cfg)?;
     let sz = hyperliquid_api::round_sz_up(200.0 / mid, szd).max(1.0 / 10f64.powi(szd as i32));
 
- // denenecek yuvarlamalar
+    // denenecek yuvarlamalar
     let cands: Vec<(&str, f64)> = vec![
         ("ham (%.10f)", mid * 0.98),
         ("round_5sig", hyperliquid_api::round_5sig(mid * 0.98)),
-        ("round_px_wire(6 hane)", hyperliquid_api::round_px_wire(mid * 0.98)),
+        (
+            "round_px_wire(6 hane)",
+            hyperliquid_api::round_px_wire(mid * 0.98),
+        ),
         ("5 hane", (mid * 0.98 * 1e5).round() / 1e5),
         ("4 hane", (mid * 0.98 * 1e4).round() / 1e4),
         ("3 hane", (mid * 0.98 * 1e3).round() / 1e3),
@@ -143,13 +149,11 @@ async fn main() -> Result<()> {
         ("5 sig (tam)", round5sig_ref(mid * 0.98)),
     ];
     for (name, px) in cands {
-        if !(px > 0.0) {
+        if px <= 0.0 || !px.is_finite() {
             println!("{name:22} px={px:.10} -> GEÇERSİZ (skip)");
             continue;
         }
-        let st = ex
-            .place_limit(asset, true, sz, px, Tif::Alo, false)
-            .await;
+        let st = ex.place_limit(asset, true, sz, px, Tif::Alo, false).await;
         match st {
             Ok(s) => match (s.resting_oid(0), s.error(0)) {
                 (Some(oid), _) => {
@@ -157,7 +161,10 @@ async fn main() -> Result<()> {
                     let _ = ex.cancel(asset, oid).await;
                 }
                 (None, Some(e)) => println!("{name:22} px={px:.10} -> RED: {e}"),
-                (None, None) => println!("{name:22} px={px:.10} -> belirsiz: {}", s.status(0).unwrap_or(&serde_json::Value::Null)),
+                (None, None) => println!(
+                    "{name:22} px={px:.10} -> belirsiz: {}",
+                    s.status(0).unwrap_or(&serde_json::Value::Null)
+                ),
             },
             Err(e) => println!("{name:22} px={px:.10} -> HATA: {e}"),
         }

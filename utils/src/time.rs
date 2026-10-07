@@ -15,12 +15,19 @@ static NTP_OFFSET_MS: AtomicI64 = AtomicI64::new(0);
 
 const NTP_UNIX_EPOCH_DELTA: i64 = 2_208_988_800; // 1900 -> 1970 saniye
 
-pub const DEFAULT_SERVERS: &[&str] =
-    &["pool.ntp.org", "time.google.com", "time.cloudflare.com", "time.apple.com"];
+pub const DEFAULT_SERVERS: &[&str] = &[
+    "pool.ntp.org",
+    "time.google.com",
+    "time.cloudflare.com",
+    "time.apple.com",
+];
 
 /// Düzeltilmiş unix ms: sistem saati + NTP ofseti (senkron yoksa sistem saati).
 pub fn now_ms() -> u64 {
-    let sys = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+    let sys = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     (sys + NTP_OFFSET_MS.load(Ordering::Relaxed)) as u64
 }
 
@@ -85,7 +92,10 @@ pub fn ntp_offset_ms(server: &str, timeout: Duration) -> anyhow::Result<i64> {
 }
 
 fn unix_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
 }
 
 fn write_ntp_ts(out: &mut [u8], unix_ms: i64) {

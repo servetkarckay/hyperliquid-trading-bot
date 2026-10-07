@@ -3,9 +3,11 @@
 //! 1. `Storage` trait: trades / candles / ctx / funding kaydetme-okuma.
 //! 2. `MemoryStorage`: test ve düşük-konfig fallback.
 //! 3. `ClickHouseStorage` (CLICKHOUSE_URL): üretim arşivi — hl_trades /
+//!
 //! hl_candles / hl_funding / hl_ctx / hl_strategy_performance;
 //! JSONEachRow toplu yazım, ReplacingMergeTree dedup, resume imleci.
 //! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li).
+//!
 //! URL'ler boşsa sistem Memory ile ÇALIŞMAYA devam eder (indirimli mod —
 //! arşiv/backtest kaybı loglanır).
 use std::collections::HashMap;
@@ -17,8 +19,6 @@ use crate::aggregator::Candle;
 
 const INSERT_RETRIES: u32 = 2; // ilkinden sonra tek retry — sonsuz retry yasak
 const INSERT_RETRY_MS: u64 = 500;
-
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeRecord {
@@ -32,10 +32,20 @@ pub struct TradeRecord {
 #[async_trait]
 pub trait Storage: Send {
     async fn save_trades(&mut self, trades: &[TradeRecord]) -> Result<usize>;
-    async fn save_candles(&mut self, coin: &str, interval_secs: u64, candles: &[Candle]) -> Result<usize>;
-    async fn load_candles(&mut self, coin: &str, interval_secs: u64, limit: usize) -> Result<Vec<Candle>>;
+    async fn save_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        candles: &[Candle],
+    ) -> Result<usize>;
+    async fn load_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        limit: usize,
+    ) -> Result<Vec<Candle>>;
     async fn trade_count(&self) -> Result<u64>;
- /// Piyasa bağlamı snapshot'ları (funding/OI/mark serileri) — desteklemeyen backend no-op
+    /// Piyasa bağlamı snapshot'ları (funding/OI/mark serileri) — desteklemeyen backend no-op
     async fn save_ctx(&mut self, _ctxs: &[crate::market_ctx::CtxState]) -> Result<usize> {
         Ok(0)
     }
@@ -56,8 +66,16 @@ impl Storage for MemoryStorage {
         Ok(trades.len())
     }
 
-    async fn save_candles(&mut self, coin: &str, interval_secs: u64, candles: &[Candle]) -> Result<usize> {
-        let v = self.candles.entry((coin.to_string(), interval_secs)).or_default();
+    async fn save_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        candles: &[Candle],
+    ) -> Result<usize> {
+        let v = self
+            .candles
+            .entry((coin.to_string(), interval_secs))
+            .or_default();
         for c in candles {
             if let Some(last) = v.last_mut() {
                 if last.t == c.t {
@@ -70,8 +88,17 @@ impl Storage for MemoryStorage {
         Ok(candles.len())
     }
 
-    async fn load_candles(&mut self, coin: &str, interval_secs: u64, limit: usize) -> Result<Vec<Candle>> {
-        let v = self.candles.get(&(coin.to_string(), interval_secs)).cloned().unwrap_or_default();
+    async fn load_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        limit: usize,
+    ) -> Result<Vec<Candle>> {
+        let v = self
+            .candles
+            .get(&(coin.to_string(), interval_secs))
+            .cloned()
+            .unwrap_or_default();
         Ok(v.into_iter().rev().take(limit).rev().collect())
     }
 
@@ -98,14 +125,22 @@ impl ClickHouseStorage {
         if url.is_empty() {
             anyhow::bail!("CLICKHOUSE_URL tanımlı değil");
         }
-        Ok(Self { url, http: reqwest::Client::new() })
+        Ok(Self {
+            url,
+            http: reqwest::Client::new(),
+        })
     }
 
     /// ClickHouse HTTP çağrısı: 200 dışı durumlarda gövdeyi şhata taşı.
     /// (CH, INSERT hatasında 500 + hata metni döner — gövdeyi "başarı"
     /// gibi Ok etmek etkisizleştirmektir.)
     pub async fn exec(&self, sql: &str) -> Result<String> {
-        let resp = self.http.post(&self.url).body(sql.to_string()).send().await?;
+        let resp = self
+            .http
+            .post(&self.url)
+            .body(sql.to_string())
+            .send()
+            .await?;
         let status = resp.status();
         let body = resp.text().await?;
         if !status.is_success() {
@@ -116,7 +151,7 @@ impl ClickHouseStorage {
         Ok(body)
     }
 
- /// Tabloları oluştur (varsa no-op) — ClickHouse kullanımı için public.
+    /// Tabloları oluştur (varsa no-op) — ClickHouse kullanımı için public.
     pub async fn ensure_tables(&self) -> Result<()> {
         self.exec("CREATE TABLE IF NOT EXISTS hl_trades (coin String, px Float64, sz Float64, ts Int64, is_buy Bool) ENGINE = MergeTree ORDER BY (coin, ts)").await?;
         self.exec("CREATE TABLE IF NOT EXISTS hl_candles (coin String, interval UInt64, t Int64, o Float64, h Float64, l Float64, c Float64, v Float64, n UInt64) ENGINE = ReplacingMergeTree ORDER BY (coin, interval, t)").await?;
@@ -126,7 +161,7 @@ impl ClickHouseStorage {
         Ok(())
     }
 
- /// İmza veri ekleme — geçici hata için SINIRLI retry (3 deneme),
+    /// İmza veri ekleme — geçici hata için SINIRLI retry (3 deneme),
     /// son hata `Err` olarak üst katman taşınır (sessiz başarı YOK).
     pub async fn exec_insert(&self, sql: &str) -> Result<()> {
         let last_err = self.exec(sql).await.inspect_err(|e| {
@@ -153,8 +188,8 @@ impl ClickHouseStorage {
         }
     }
 
- /// canlı/backtest strateji performansı → hl_strategy_performance
- /// Eğitim sonrası: strateji başına birleşik IS/OOS satırı (tam alan).
+    /// canlı/backtest strateji performansı → hl_strategy_performance
+    /// Eğitim sonrası: strateji başına birleşik IS/OOS satırı (tam alan).
     pub async fn save_performance_row(&self, p: &StrategyPerformanceRow) -> Result<usize> {
         let row = serde_json::json!({
             "strategy": p.strategy, "interval": p.interval, "sample": p.sample,
@@ -187,13 +222,13 @@ impl ClickHouseStorage {
         });
         self.exec_insert(&format!(
             "INSERT INTO hl_strategy_performance FORMAT JSONEachRow\n{}",
-            row.to_string()
+            row
         ))
         .await?;
         Ok(1)
     }
 
- /// funding tablosuna kayıt (backtest Kelly katmanı)
+    /// funding tablosuna kayıt (backtest Kelly katmanı)
     pub async fn save_funding(
         &self,
         coin: &str,
@@ -219,7 +254,10 @@ impl ClickHouseStorage {
                     .filter(|x| x.is_finite());
                 let Some(rate) = rate else {
                     rejected += 1;
-                    tracing::debug!("[STORAGE] funding satırı reddedildi: rate geçersiz ({coin} @{})", e.time);
+                    tracing::debug!(
+                        "[STORAGE] funding satırı reddedildi: rate geçersiz ({coin} @{})",
+                        e.time
+                    );
                     return None;
                 };
                 kept += 1;
@@ -242,7 +280,11 @@ impl ClickHouseStorage {
         if rows.is_empty() {
             anyhow::bail!("[STORAGE] funding: geçerli satır yok ({coin}, {rejected} reddedildi)");
         }
-        self.exec_insert(&format!("INSERT INTO hl_funding FORMAT JSONEachRow\n{}", rows.join("\n"))).await?;
+        self.exec_insert(&format!(
+            "INSERT INTO hl_funding FORMAT JSONEachRow\n{}",
+            rows.join("\n")
+        ))
+        .await?;
         Ok(kept)
     }
 }
@@ -299,7 +341,7 @@ impl Storage for ClickHouseStorage {
         if trades.is_empty() {
             return Ok(0);
         }
-            // SAYI SÖZLEŞMESİ: px/sz finite olmayan trade reddedilir
+        // SAYI SÖZLEŞMESİ: px/sz finite olmayan trade reddedilir
         let rows: Vec<String> = trades
             .iter()
             .filter_map(|t| {
@@ -329,7 +371,12 @@ impl Storage for ClickHouseStorage {
         Ok(rows.len())
     }
 
-    async fn save_candles(&mut self, coin: &str, interval_secs: u64, candles: &[Candle]) -> Result<usize> {
+    async fn save_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        candles: &[Candle],
+    ) -> Result<usize> {
         if candles.is_empty() {
             return Ok(0);
         }
@@ -340,10 +387,15 @@ impl Storage for ClickHouseStorage {
         let rows: Vec<String> = candles
             .iter()
             .filter_map(|c| {
-                let ok =
-                    c.t > 0
-                    && c.o.is_finite() && c.h.is_finite() && c.l.is_finite() && c.c.is_finite() && c.v.is_finite()
-                    && c.h >= c.l && c.h >= c.o.max(c.c) && c.l <= c.o.min(c.c)
+                let ok = c.t > 0
+                    && c.o.is_finite()
+                    && c.h.is_finite()
+                    && c.l.is_finite()
+                    && c.c.is_finite()
+                    && c.v.is_finite()
+                    && c.h >= c.l
+                    && c.h >= c.o.max(c.c)
+                    && c.l <= c.o.min(c.c)
                     && c.h > 0.0; // gerçek mumda yüksek fiyat 0 olamaz
                 if !ok {
                     rejected += 1;
@@ -373,7 +425,12 @@ impl Storage for ClickHouseStorage {
         Ok(kept)
     }
 
-    async fn load_candles(&mut self, coin: &str, interval_secs: u64, limit: usize) -> Result<Vec<Candle>> {
+    async fn load_candles(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        limit: usize,
+    ) -> Result<Vec<Candle>> {
         let sql = format!(
             "SELECT t, o, h, l, c, v, n FROM hl_candles WHERE coin='{coin}' AND interval={interval_secs} ORDER BY t DESC LIMIT {limit} FORMAT JSONEachRow"
         );
@@ -381,30 +438,35 @@ impl Storage for ClickHouseStorage {
         let mut out = Vec::new();
         let mut rejected = 0usize;
         for line in body.lines() {
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             // SAYI SÖZLEŞMESİ: t yok / non-finite / h<l → satır reddedilir;
             // 0.0 mum ÜRETİLMEZ (sinyal zehirine karşı)
             let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
                 rejected += 1;
                 continue;
             };
-            let (Some(t), Some(o), Some(h), Some(l), Some(cc), Some(vv)) =
-                (
-                    v["t"].as_i64(),
-                    v["o"].as_f64(),
-                    v["h"].as_f64(),
-                    v["l"].as_f64(),
-                    v["c"].as_f64(),
-                    v["v"].as_f64(),
-                )
-            else {
+            let (Some(t), Some(o), Some(h), Some(l), Some(cc), Some(vv)) = (
+                v["t"].as_i64(),
+                v["o"].as_f64(),
+                v["h"].as_f64(),
+                v["l"].as_f64(),
+                v["c"].as_f64(),
+                v["v"].as_f64(),
+            ) else {
                 rejected += 1;
                 continue;
             };
-            if !o.is_finite() || !h.is_finite() || !l.is_finite() || !cc.is_finite() || !vv.is_finite()
+            if !o.is_finite()
+                || !h.is_finite()
+                || !l.is_finite()
+                || !cc.is_finite()
+                || !vv.is_finite()
                 || h < l
                 || t <= 0
-                || h <= 0.0 // gerçek mumda yüksek fiyat 0 olamaz (bozuk satır)
+                || h <= 0.0
+            // gerçek mumda yüksek fiyat 0 olamaz (bozuk satır)
             {
                 rejected += 1;
                 continue;
@@ -424,19 +486,23 @@ impl Storage for ClickHouseStorage {
             tracing::warn!("[STORAGE] load_candles: {rejected} bozuk satır reddedildi ({coin})");
         }
         if out.is_empty() && !body.trim().is_empty() {
-            anyhow::bail!("[STORAGE] load_candles: satırların TÜMÜ bozuk ({coin}) — sahte mum üretilmez");
+            anyhow::bail!(
+                "[STORAGE] load_candles: satırların TÜMÜ bozuk ({coin}) — sahte mum üretilmez"
+            );
         }
         out.reverse();
         Ok(out)
     }
 
     async fn trade_count(&self) -> Result<u64> {
- // TSV: düz sayı döner; parse edilemiyorsa SAHTE 0 döndürülmez
-        let r = self.exec("SELECT count() FROM hl_trades FORMAT TSV").await?;
+        // TSV: düz sayı döner; parse edilemiyorsa SAHTE 0 döndürülmez
+        let r = self
+            .exec("SELECT count() FROM hl_trades FORMAT TSV")
+            .await?;
         let trimmed = r.trim();
-        trimmed
-            .parse::<u64>()
-            .map_err(|e| anyhow::anyhow!("[STORAGE] trade_count parse edilemedi ('{trimmed}'): {e}"))
+        trimmed.parse::<u64>().map_err(|e| {
+            anyhow::anyhow!("[STORAGE] trade_count parse edilemedi ('{trimmed}'): {e}")
+        })
     }
 }
 
@@ -448,21 +514,18 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
- /// REDIS_URL .env'de tanımlıysa bağlanır, yoksa None.
+    /// REDIS_URL .env'de tanımlıysa bağlanır, yoksa None.
     pub async fn from_env() -> Result<Option<Self>> {
         let url = std::env::var("REDIS_URL").unwrap_or_default();
         if url.is_empty() {
             return Ok(None);
         }
-        let client = redis::Client::open(url)
-            ?;
-        let conn = redis::aio::ConnectionManager::new(client)
-            .await
-            ?;
+        let client = redis::Client::open(url)?;
+        let conn = redis::aio::ConnectionManager::new(client).await?;
         Ok(Some(Self { conn }))
     }
 
- /// Son mids haritasını JSON olarak yaz (TTL saniye)
+    /// Son mids haritasını JSON olarak yaz (TTL saniye)
     pub async fn set_mids(&mut self, mids: &HashMap<String, f64>, ttl: u64) -> Result<()> {
         let payload = serde_json::to_string(mids)?;
         redis::cmd("SETEX")
@@ -475,11 +538,14 @@ impl RedisCache {
     }
 
     pub async fn get_mids(&mut self) -> Result<Option<HashMap<String, f64>>> {
-        let v: Option<String> = redis::cmd("GET").arg("hl:mids").query_async(&mut self.conn).await?;
+        let v: Option<String> = redis::cmd("GET")
+            .arg("hl:mids")
+            .query_async(&mut self.conn)
+            .await?;
         Ok(v.and_then(|s| serde_json::from_str(&s).ok()))
     }
 
- /// Son ctx state'i coin başına yaz (TTL saniye)
+    /// Son ctx state'i coin başına yaz (TTL saniye)
     pub async fn set_ctx(&mut self, c: &crate::market_ctx::CtxState, ttl: u64) -> Result<()> {
         let payload = serde_json::to_string(c)?;
         redis::cmd("SETEX")
@@ -569,7 +635,7 @@ mod storage_tests {
                     captured.lock().unwrap().push(seg);
                     let resp = format!(
                         "HTTP/1.1 {status} T\r\nContent-Length: {}\r\n\r\n{}",
-                        body.as_bytes().len(),
+                        body.len(),
                         body
                     );
                     let _ = sock.write_all(resp.as_bytes()).await;
@@ -581,7 +647,10 @@ mod storage_tests {
     }
 
     fn ch(url: &str) -> ClickHouseStorage {
-        ClickHouseStorage { url: url.into(), http: reqwest::Client::new() }
+        ClickHouseStorage {
+            url: url.into(),
+            http: reqwest::Client::new(),
+        }
     }
 
     /// INSERT hata propagation: ClickHouse 500 dönerse exec_insert Err
@@ -602,7 +671,16 @@ mod storage_tests {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 1, "", captured.clone()).await;
         let mut st = ch(&url);
-        let c = Candle { t: 1000, o: 100.0, h: 101.0, l: 99.0, c: 100.5, v: 10.0, n: 1, closed: true };
+        let c = Candle {
+            t: 1000,
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.5,
+            v: 10.0,
+            n: 1,
+            closed: true,
+        };
         let r = st.save_candles("BTC", 3600, &[c]).await.unwrap();
         assert_eq!(r, 1);
         let body = captured.lock().unwrap()[0].clone();
@@ -616,8 +694,26 @@ mod storage_tests {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 1, "", captured.clone()).await;
         let mut st = ch(&url);
-        let c1 = Candle { t: 1000, o: 100.0, h: 101.0, l: 99.0, c: 100.5, v: 10.0, n: 1, closed: true };
-        let c2 = Candle { t: 2000, o: 100.0, h: 101.0, l: 99.0, c: f64::NAN, v: 10.0, n: 1, closed: true };
+        let c1 = Candle {
+            t: 1000,
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.5,
+            v: 10.0,
+            n: 1,
+            closed: true,
+        };
+        let c2 = Candle {
+            t: 2000,
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: f64::NAN,
+            v: 10.0,
+            n: 1,
+            closed: true,
+        };
         let r = st.save_candles("BTC", 3600, &[c1, c2]).await.unwrap();
         assert_eq!(r, 1, "bozuk satır düşer, valid kalır");
         let body = captured.lock().unwrap()[0].clone();
@@ -631,10 +727,22 @@ mod storage_tests {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 0, "", captured.clone()).await;
         let mut st = ch(&url);
-        let c = Candle { t: 1000, o: f64::NAN, h: 101.0, l: 99.0, c: 100.5, v: 10.0, n: 1, closed: true };
+        let c = Candle {
+            t: 1000,
+            o: f64::NAN,
+            h: 101.0,
+            l: 99.0,
+            c: 100.5,
+            v: 10.0,
+            n: 1,
+            closed: true,
+        };
         let r = st.save_candles("BTC", 3600, &[c]).await;
         assert!(r.is_err());
-        assert!(captured.lock().unwrap().is_empty(), "geçersiz toplu veri DB'ye gönderilmez");
+        assert!(
+            captured.lock().unwrap().is_empty(),
+            "geçersiz toplu veri DB'ye gönderilmez"
+        );
     }
 
     /// Bozuk funding satırı reddedilir; premium None satırda üretmez
@@ -643,19 +751,28 @@ mod storage_tests {
     async fn bozuk_funding_satiri_reddedilir() {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 1, "", captured.clone()).await;
-        let mut st = ch(&url);
+        let st = ch(&url);
         let bad = hyperliquid_api::types::FundingEntry {
-            coin: "BTC".into(), fundingRate: "abc".into(), premium: Some("0.1".into()), time: 1000,
+            coin: "BTC".into(),
+            fundingRate: "abc".into(),
+            premium: Some("0.1".into()),
+            time: 1000,
         };
         let good = hyperliquid_api::types::FundingEntry {
-            coin: "BTC".into(), fundingRate: "0.0001".into(), premium: None, time: 2000,
+            coin: "BTC".into(),
+            fundingRate: "0.0001".into(),
+            premium: None,
+            time: 2000,
         };
         let r = st.save_funding("BTC", &[bad, good]).await.unwrap();
         assert_eq!(r, 1, "1 valid satır");
         let body = captured.lock().unwrap()[0].clone();
         assert_eq!(body.lines().skip(1).count(), 1);
         assert!(body.contains("\"fundingRate\":0.0001"), "{body}");
-        assert!(!body.contains("\"premium\""), "None premium sahte değerle doldurulmaz: {body}");
+        assert!(
+            !body.contains("\"premium\""),
+            "None premium sahte değerle doldurulmaz: {body}"
+        );
     }
 
     /// ctx satırında NaN alan: satır reddedilir.
@@ -665,10 +782,20 @@ mod storage_tests {
         let url = spawn_mock(200, 1, "", captured.clone()).await;
         let mut st = ch(&url);
         let good = crate::market_ctx::CtxState {
-            coin: "BTC".into(), funding: 0.0001, open_interest: 1.0, mark_px: 100.0,
-            oracle_px: 99.0, premium: 0.0, day_ntl_vlm: 1.0, prev_day_px: 0.0, ts: 1000,
+            coin: "BTC".into(),
+            funding: 0.0001,
+            open_interest: 1.0,
+            mark_px: 100.0,
+            oracle_px: 99.0,
+            premium: 0.0,
+            day_ntl_vlm: 1.0,
+            prev_day_px: 0.0,
+            ts: 1000,
         };
-        let bad = crate::market_ctx::CtxState { open_interest: f64::NAN, ..good.clone() };
+        let bad = crate::market_ctx::CtxState {
+            open_interest: f64::NAN,
+            ..good.clone()
+        };
         let r = st.save_ctx(&[good, bad]).await.unwrap();
         assert_eq!(r, 1);
         assert_eq!(captured.lock().unwrap()[0].lines().skip(1).count(), 1);
@@ -698,7 +825,7 @@ mod storage_tests {
     async fn trade_count_parse_err() {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 1, "not-a-number\n", captured.clone()).await;
-        let mut st = ch(&url);
+        let st = ch(&url);
         let r = st.trade_count().await;
         assert!(r.is_err());
     }
@@ -707,7 +834,7 @@ mod storage_tests {
     async fn trade_count_parse_ok() {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let url = spawn_mock(200, 1, "42\n", captured.clone()).await;
-        let mut st = ch(&url);
+        let st = ch(&url);
         assert_eq!(st.trade_count().await.unwrap(), 42);
     }
 }

@@ -40,7 +40,9 @@ impl Strategy for SqueezeBreakout {
     fn evaluate(&self, input: &MarketInput) -> Signal {
         let c = closes(&input.candles);
         if c.len() < MIN_BARS {
-            return Signal::Skip { reason: format!("şema için >={MIN_BARS} mum gerekli") };
+            return Signal::Skip {
+                reason: format!("şema için >={MIN_BARS} mum gerekli"),
+            };
         }
         let bb = indicators::bollinger(&c, BB_N, BB_K);
         // BandWidth serisi: (u − l) / m
@@ -59,11 +61,17 @@ impl Strategy for SqueezeBreakout {
         // ── SQUEEZE: kırılımdan SQUEEZE_LAG bar önceki genişlik,
         // o noktadaki 125-periyot düşüğünün %3 buffer içinde mi
         let w_idx = width.len() - 1 - SQUEEZE_LAG;
-        let win_start = w_idx + 1 - SQUEEZE_LOOKBACK;
-        if win_start < 0 {
-            return Signal::Skip { reason: "sıkışma penceresi eksik".into() };
-        }
-        let win_start = win_start as usize;
+        // SIKIŞMA PENCERESİ: w_idx+1 < SQUEEZE_LOOKBACK ise pencere yok —
+        // checked_sub ile ölü koruma değil, GERÇEK Skip (usize
+        // aritmetiğinde `x < 0` her zaman false'tur: wrap/panic yolu).
+        let win_start = match (w_idx + 1).checked_sub(SQUEEZE_LOOKBACK) {
+            Some(v) => v,
+            None => {
+                return Signal::Skip {
+                    reason: "sıkışma penceresi eksik".into(),
+                }
+            }
+        };
         let window = &width[win_start..=w_idx];
         let min125 = window.iter().cloned().fold(f64::MAX, f64::min);
         let pre = width[w_idx];
@@ -72,15 +80,21 @@ impl Strategy for SqueezeBreakout {
 
         // ── TETİK: %b bant kırılımı (kırılım barı = SON bar)
         let Some(tuple) = bb.last().copied() else {
-            return Signal::Skip { reason: "BB serisi boş".into() };
+            return Signal::Skip {
+                reason: "BB serisi boş".into(),
+            };
         };
         let (Some(m), Some(u), Some(l)) = tuple else {
-            return Signal::Skip { reason: "BB hesaplanamaz".into() };
+            return Signal::Skip {
+                reason: "BB hesaplanamaz".into(),
+            };
         };
         let _ = m;
         let band = u - l;
-        if !(band > 0.0) || !band.is_finite() {
-            return Signal::Skip { reason: "BB aralığı yok".into() };
+        if band <= 0.0 || !band.is_finite() {
+            return Signal::Skip {
+                reason: "BB aralığı yok".into(),
+            };
         }
         let price = c[c.len() - 1];
         let b_pct = (price - l) / band;
@@ -89,7 +103,9 @@ impl Strategy for SqueezeBreakout {
 
         // ── VENUE GÜVENLİK KATMANI
         let Some(taker) = input.taker_ratio else {
-            return Signal::Skip { reason: "taker akışı yok — onay verilemez".into() };
+            return Signal::Skip {
+                reason: "taker akışı yok — onay verilemez".into(),
+            };
         };
         let taker_buy = taker > 0.55;
         let taker_sell = taker < 0.45;
@@ -112,7 +128,7 @@ impl Strategy for SqueezeBreakout {
                     ),
                 },
                 _ => Signal::Hold {
-                    note: format!("sıkışma+yukarı kırılım+taker onayı VAR ama OI teyidi YOK — sinyal onaysız"),
+                    note: "sıkışma+yukarı kırılım+taker onayı VAR ama OI teyidi YOK — sinyal onaysız".to_string(),
                 },
             };
         }
@@ -146,7 +162,10 @@ impl Strategy for SqueezeBreakout {
             }
         } else {
             Signal::Hold {
-                note: format!("sıkışma yok (BandWidth 125-düşüğün %{:.0}'i)", ratio * 100.0),
+                note: format!(
+                    "sıkışma yok (BandWidth 125-düşüğün %{:.0}'i)",
+                    ratio * 100.0
+                ),
             }
         }
     }
@@ -161,7 +180,13 @@ mod audit_tests {
     /// Kırılım barı (son): bant üstü/altı kapanış.
     fn squeeze_series(breakout_close: f64) -> Vec<data::Candle> {
         let mut c = H::oscillator(150, |i| (1.0 - 0.005 * i as f64).min(0.40), 100.0, 0.1);
-        H::set_last(&mut c, breakout_close, breakout_close + 0.1, breakout_close - 0.1, 200.0);
+        H::set_last(
+            &mut c,
+            breakout_close,
+            breakout_close + 0.1,
+            breakout_close - 0.1,
+            200.0,
+        );
         c
     }
 
@@ -174,7 +199,13 @@ mod audit_tests {
                 H::candle(i as i64 * 3_600_000, px, px + 0.1, px - 0.1, px, 100.0)
             })
             .collect();
-        H::set_last(&mut c, breakout_close, breakout_close + 0.1, breakout_close - 0.1, 200.0);
+        H::set_last(
+            &mut c,
+            breakout_close,
+            breakout_close + 0.1,
+            breakout_close - 0.1,
+            200.0,
+        );
         c
     }
 
@@ -186,6 +217,30 @@ mod audit_tests {
             oi_delta: Some(1.5),
             ..Default::default()
         }
+    }
+
+    /// SINIR KORUMASI: 150-mum şema önteği kısa geçmişi erken reddeder;
+    /// pencere hesabı (w_idx+1 − 125) checked_sub ile yazıldı — eski
+    /// `win_start < 0` koruması usize'ta her zaman false'tu (ölü kod,
+    /// clippy absurd_extreme_comparisons deny). Kontrat: <150 → Skip,
+    /// ≥150 → değerlendirme paniksiz.
+    #[test]
+    fn kisa_gcmis_onluk_skip_ve_sinir_paniksiz() {
+        for n in [125usize, 129, 149] {
+            let mut c = H::oscillator(n, |i| (1.0 - 0.005 * i as f64).min(0.40), 100.0, 0.1);
+            H::set_last(&mut c, 112.0, 112.1, 111.9, 200.0);
+            match SqueezeBreakout.evaluate(&onayli(c)) {
+                Signal::Skip { reason } => {
+                    assert!(reason.contains("150"), "{n}: {reason}")
+                }
+                other => panic!("{n} mumda Skip beklenirdi: {other:?}"),
+            }
+        }
+        // 150 mum → BB warmup sonrası width 131 → win_start=1 → pencere tam,
+        // değerlendirme sonuna kadar paniksiz (Skip/Long fark etmez).
+        let mut c = H::oscillator(150, |i| (1.0 - 0.005 * i as f64).min(0.40), 100.0, 0.1);
+        H::set_last(&mut c, 112.0, 112.1, 111.9, 200.0);
+        let _ = SqueezeBreakout.evaluate(&onayli(c));
     }
 
     /// A — sıkışma + üst bant üstü kapanış (%b>1) + taker alıcı + OI↑ → Long.
@@ -228,7 +283,9 @@ mod audit_tests {
         // sıkışma serisi + bant İÇİNDE kalan close (112 değil 100.6 → %b<1)
         let input = onayli(squeeze_series(100.6));
         match SqueezeBreakout.evaluate(&input) {
-            Signal::Hold { note } => assert!(note.contains("bekleniyor") || note.contains("%b"), "{note}"),
+            Signal::Hold { note } => {
+                assert!(note.contains("bekleniyor") || note.contains("%b"), "{note}")
+            }
             other => panic!("Hold beklenirdi: {other:?}"),
         }
     }
@@ -247,15 +304,36 @@ mod audit_tests {
     #[test]
     fn veri_yoksa_sahte_sinyal_uretmez() {
         let c = squeeze_series(112.0);
-        let yok_taker = MarketInput { coin: "T".into(), candles: c.clone(), taker_ratio: None, oi_delta: Some(1.5), ..Default::default() };
-        assert!(matches!(SqueezeBreakout.evaluate(&yok_taker), Signal::Skip { .. }), "taker yok → Skip");
-        let yok_oi = MarketInput { coin: "T".into(), candles: c.clone(), taker_ratio: Some(0.6), oi_delta: None, ..Default::default() };
+        let yok_taker = MarketInput {
+            coin: "T".into(),
+            candles: c.clone(),
+            taker_ratio: None,
+            oi_delta: Some(1.5),
+            ..Default::default()
+        };
+        assert!(
+            matches!(SqueezeBreakout.evaluate(&yok_taker), Signal::Skip { .. }),
+            "taker yok → Skip"
+        );
+        let yok_oi = MarketInput {
+            coin: "T".into(),
+            candles: c.clone(),
+            taker_ratio: Some(0.6),
+            oi_delta: None,
+            ..Default::default()
+        };
         match SqueezeBreakout.evaluate(&yok_oi) {
             Signal::Hold { note } => assert!(note.contains("OI teyidi YOK"), "{note}"),
             other => panic!("OI'sız kırılım sinyal ÜRETMEZ: {other:?}"),
         }
         // taker TERS yönde (yukarı kırılım ama satıcı): onaysız Hold
-        let ters_taker = MarketInput { coin: "T".into(), candles: c, taker_ratio: Some(0.4), oi_delta: Some(1.5), ..Default::default() };
+        let ters_taker = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            taker_ratio: Some(0.4),
+            oi_delta: Some(1.5),
+            ..Default::default()
+        };
         match SqueezeBreakout.evaluate(&ters_taker) {
             Signal::Hold { note } => assert!(note.contains("taker alıcı YOK"), "{note}"),
             other => panic!("ters taker onaysız Hold: {other:?}"),
@@ -269,11 +347,29 @@ mod audit_tests {
         let mut full = squeeze_series(112.0);
         full.extend(H::flat(50, 112.0));
         let a = full[..149].to_vec();
-        let ia = MarketInput { coin: "T".into(), candles: a.clone(), taker_ratio: Some(0.6), oi_delta: Some(1.5), ..Default::default() };
+        let ia = MarketInput {
+            coin: "T".into(),
+            candles: a.clone(),
+            taker_ratio: Some(0.6),
+            oi_delta: Some(1.5),
+            ..Default::default()
+        };
         let sa = SqueezeBreakout.evaluate(&ia);
-        assert!(!matches!(sa, Signal::Long { .. }), "kırılım barı görülmeden Long üretilmez: {sa:?}");
-        let it = MarketInput { coin: "T".into(), candles: full[..150].to_vec(), taker_ratio: Some(0.6), oi_delta: Some(1.5), ..Default::default() };
-        assert!(matches!(SqueezeBreakout.evaluate(&it), Signal::Long { .. }), "kırılım barında Long");
+        assert!(
+            !matches!(sa, Signal::Long { .. }),
+            "kırılım barı görülmeden Long üretilmez: {sa:?}"
+        );
+        let it = MarketInput {
+            coin: "T".into(),
+            candles: full[..150].to_vec(),
+            taker_ratio: Some(0.6),
+            oi_delta: Some(1.5),
+            ..Default::default()
+        };
+        assert!(
+            matches!(SqueezeBreakout.evaluate(&it), Signal::Long { .. }),
+            "kırılım barında Long"
+        );
         assert_eq!(sa, SqueezeBreakout.evaluate(&ia), "prefix karar sabit");
     }
 }

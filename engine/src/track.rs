@@ -2,25 +2,33 @@
 //!
 //! Görevler:
 //! 1. `StrategyTracker::record_outcome_r`: kapanan işlemin R-çarpanını
+//!
 //! GERÇEK fill verisinden pencereye (TRACK_WINDOW=100) yazar.
 //! 2. `effective_weights`: n<min_n → donmuş 1.0 (cold-start); min_n..full_n
+//!
 //! → dinamik Kelly formülü clamp [0.1,2.0]; n≥full_n → win<%35 → 0.
 //! 3. `PerformanceMetrics`: win_rate / pf / E[R] / avg±R / maxDD_R /
+//!
 //! ardışık kayıp / MFE/MAE — uydurma sayı yok (kanıt yoksa None).
 //! 4. Persistence: `save_state/load_state` (atomik tmp+rename; origin="live"
+//!
 //! doğrulaması — backtest çıkışı RED).
 //! 5. `Health`: hata taksonomisi (transient/kritik) + ExitsOnly kipi +
+//!
 //! kill-switch (karar-kritik seri).
 
+use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 /// TID dedup ring buffer . Son ~10k transaction ID saklanır; aynı tid →
 /// atla + [DEDUP] sayacı. Win/loss + R yalnız `user` kanalından gelir.
 /// O(1) için HashSet (membership) + VecDeque (eviction order) kombinasyonu.
 static TID_DEDUP: Lazy<Mutex<(HashSet<String>, VecDeque<String>)>> = Lazy::new(|| {
-    Mutex::new((HashSet::with_capacity(10_000), VecDeque::with_capacity(10_000)))
+    Mutex::new((
+        HashSet::with_capacity(10_000),
+        VecDeque::with_capacity(10_000),
+    ))
 });
 const TID_DEDUP_CAP: usize = 10_000;
 
@@ -98,13 +106,13 @@ pub const EXPLORE_MIN_TRADES: usize = 30;
 /// Keşif şeridindeki bir stratejinin canlı kanıt kararı.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExploreVerdict {
- /// istatistiksel olarak kanıtlandı → terfi
+    /// istatistiksel olarak kanıtlandı → terfi
     Promote,
- /// ne iyi ne kötü → tabanın biraz üstü
+    /// ne iyi ne kötü → tabanın biraz üstü
     Hold,
- /// kanıtlandı ki kötü → yarı taban
+    /// kanıtlandı ki kötü → yarı taban
     Demote,
- /// veri yetersiz → düz taban
+    /// veri yetersiz → düz taban
     Insufficient,
 }
 
@@ -151,18 +159,21 @@ impl Default for LearnPolicy {
 }
 
 impl LearnPolicy {
- /// Ağırlık değiştirilebilir mi? (2-3 rastgele işlem ağırlığı öldürmesin)
+    /// Ağırlık değiştirilebilir mi? (2-3 rastgele işlem ağırlığı öldürmesin)
     pub fn frozen(&self, n: usize) -> bool {
         n < self.min_n
     }
- /// Tam kurallar (win<%35 → 0) devreye girdi mi?
+    /// Tam kurallar (win<%35 → 0) devreye girdi mi?
     pub fn full(&self, n: usize) -> bool {
         n >= self.full_n
     }
 }
 
 fn env_usize(k: &str, d: usize) -> usize {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(k)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(d)
 }
 
 /// Keşif terfi/cezası sonrası ağırlık değişimi (log + audit için).
@@ -179,10 +190,10 @@ pub struct ExploreEvent {
 
 #[derive(Debug, Clone, Default)]
 pub struct StratStats {
- /// (ts_ms, win) — kronolojik; cap TRACK_WINDOW
+    /// (ts_ms, win) — kronolojik; cap TRACK_WINDOW
     pub outcomes: Vec<(u64, bool)>,
- /// işlem başına R-çarpanı (kâr/(başlangıç riski)); PF hesabı için.
- /// `outcomes` ile aynı uzunlukta.
+    /// işlem başına R-çarpanı (kâr/(başlangıç riski)); PF hesabı için.
+    /// `outcomes` ile aynı uzunlukta.
     pub rs: Vec<f64>,
 }
 
@@ -191,9 +202,13 @@ impl StratStats {
         self.record_r(ts, if win { 1.0 } else { -1.0 });
     }
 
- /// Gerçek R-çarpanıyla kayıt: `r` = net PnL / giriş riski (SL mesafesi).
+    /// Gerçek R-çarpanıyla kayıt: `r` = net PnL / giriş riski (SL mesafesi).
     pub fn record_r(&mut self, ts: u64, r: f64) {
-        let r = if r.is_finite() { r.clamp(-20.0, 20.0) } else { 0.0 };
+        let r = if r.is_finite() {
+            r.clamp(-20.0, 20.0)
+        } else {
+            0.0
+        };
         self.outcomes.push((ts, r > 0.0));
         self.rs.push(r);
         if self.outcomes.len() > TRACK_WINDOW {
@@ -202,17 +217,23 @@ impl StratStats {
         }
     }
 
- /// kâr faktörü: toplam kazanç R / toplam kayıp |R| (pencere doluysa).
+    /// kâr faktörü: toplam kazanç R / toplam kayıp |R| (pencere doluysa).
     pub fn profit_factor(&self) -> Option<f64> {
         if self.rs.is_empty() {
             return None;
         }
         let win: f64 = self.rs.iter().filter(|r| **r > 0.0).sum();
         let loss: f64 = self.rs.iter().filter(|r| **r < 0.0).sum::<f64>().abs();
-        Some(if loss > 0.0 { win / loss } else if win > 0.0 { 10.0 } else { 0.0 })
+        Some(if loss > 0.0 {
+            win / loss
+        } else if win > 0.0 {
+            10.0
+        } else {
+            0.0
+        })
     }
 
- /// Keşif kararı: kanıt yeterli mi, kanıt ne diyor?
+    /// Keşif kararı: kanıt yeterli mi, kanıt ne diyor?
     pub fn explore_verdict(&self) -> ExploreVerdict {
         if self.rs.len() < EXPLORE_MIN_TRADES {
             return ExploreVerdict::Insufficient;
@@ -228,7 +249,7 @@ impl StratStats {
         }
     }
 
- /// pencere win-oranı; min_trades altında None
+    /// pencere win-oranı; min_trades altında None
     pub fn win_rate(&self, min_trades: usize) -> Option<f64> {
         if self.outcomes.len() < min_trades {
             return None;
@@ -237,13 +258,12 @@ impl StratStats {
         Some(wins as f64 / self.outcomes.len() as f64)
     }
 
- /// binary Kelly (f*), pencere doluyken Some
+    /// binary Kelly (f*), pencere doluyken Some
     pub fn kelly(&self, b: f64, min_trades: usize) -> Option<f64> {
         let p = self.win_rate(min_trades)?;
         Some(p - (1.0 - p) / b)
     }
 }
-
 
 /// ── GERÇEK TRADE-LEVEL PORTFOLIO HISTORY (attribution'dan ayrı) ──────
 /// Kapanan pozisyon başına TAM OLARAK BİR outcome: (ts, r).
@@ -280,7 +300,12 @@ impl PortfolioHistory {
 
     /// ort kazanç R (r > 0)
     pub fn avg_win(&self) -> Option<f64> {
-        let wins: Vec<f64> = self.trades.iter().map(|(_, r)| *r).filter(|r| *r > 0.0).collect();
+        let wins: Vec<f64> = self
+            .trades
+            .iter()
+            .map(|(_, r)| *r)
+            .filter(|r| *r > 0.0)
+            .collect();
         if wins.is_empty() {
             return None;
         }
@@ -289,7 +314,12 @@ impl PortfolioHistory {
 
     /// ort kayıp R (r ≤ 0)
     pub fn avg_loss(&self) -> Option<f64> {
-        let losses: Vec<f64> = self.trades.iter().map(|(_, r)| *r).filter(|r| *r <= 0.0).collect();
+        let losses: Vec<f64> = self
+            .trades
+            .iter()
+            .map(|(_, r)| *r)
+            .filter(|r| *r <= 0.0)
+            .collect();
         if losses.is_empty() {
             return None;
         }
@@ -352,20 +382,25 @@ pub struct PerformanceMetrics {
 }
 
 impl PerformanceMetrics {
- /// R dizisinden (GERÇEK fill kayıtları) metrikler.
- ///
- /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
- /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
+    /// R dizisinden (GERÇEK fill kayıtları) metrikler.
+    ///
+    /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
+    /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
     pub fn from_rs(rs: &[f64], mfe_r: Option<f64>, mae_r: Option<f64>) -> Self {
         if rs.is_empty() {
-            return Self { trades: 0, mfe_r, mae_r, ..Default::default() };
+            return Self {
+                trades: 0,
+                mfe_r,
+                mae_r,
+                ..Default::default()
+            };
         }
         let wins: Vec<f64> = rs.iter().copied().filter(|r| *r > 0.0).collect();
         let losses: Vec<f64> = rs.iter().copied().filter(|r| *r < 0.0).collect();
         let win_sum: f64 = wins.iter().sum();
         let loss_sum: f64 = losses.iter().copied().map(|r| r.abs()).sum();
 
- // max drawdown: kümülatif R eğrisi
+        // max drawdown: kümülatif R eğrisi
         let mut cum = 0.0f64;
         let mut peak = 0.0f64;
         let mut mdd = 0.0f64;
@@ -374,7 +409,7 @@ impl PerformanceMetrics {
             peak = peak.max(cum);
             mdd = mdd.max(peak - cum);
         }
- // ardışık kayıp serisi
+        // ardışık kayıp serisi
         let mut streak = 0usize;
         let mut worst = 0usize;
         for r in rs {
@@ -388,10 +423,24 @@ impl PerformanceMetrics {
         Self {
             trades: rs.len(),
             win_rate: Some(wins.len() as f64 / rs.len() as f64),
-            profit_factor: Some(if loss_sum > 0.0 { win_sum / loss_sum } else if win_sum > 0.0 { 10.0 } else { 0.0 }),
+            profit_factor: Some(if loss_sum > 0.0 {
+                win_sum / loss_sum
+            } else if win_sum > 0.0 {
+                10.0
+            } else {
+                0.0
+            }),
             expectancy_r: Some(rs.iter().sum::<f64>() / rs.len() as f64),
-            avg_win_r: if wins.is_empty() { None } else { Some(win_sum / wins.len() as f64) },
-            avg_loss_r: if losses.is_empty() { None } else { Some(-loss_sum / losses.len() as f64) },
+            avg_win_r: if wins.is_empty() {
+                None
+            } else {
+                Some(win_sum / wins.len() as f64)
+            },
+            avg_loss_r: if losses.is_empty() {
+                None
+            } else {
+                Some(-loss_sum / losses.len() as f64)
+            },
             max_drawdown_r: Some(mdd),
             max_consecutive_losses: Some(worst),
             mfe_r,
@@ -399,9 +448,10 @@ impl PerformanceMetrics {
         }
     }
 
- /// Rapor satırı — iddia değil ölçüm.
+    /// Rapor satırı — iddia değil ölçüm.
     pub fn line(&self) -> String {
-        let f = |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
+        let f =
+            |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
         format!(
             "trades={} win_rate={} pf={} E[R]={} avg_win_R={} avg_loss_R={} maxDD_R={} ardışık_kayıp={} MFE_R={} MAE_R={}",
             self.trades,
@@ -422,7 +472,7 @@ impl StrategyTracker {
         self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
     }
 
- /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).
+    /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).
     pub fn record_outcome_r(&mut self, strategy_names: Vec<String>, ts: u64, r: f64) {
         // STRATEJİ ATTRIBUTION — değişmedi: her voter kendi stats'ına
         // aynı gerçek kapanışı alır (strategy-performance kaynağı).
@@ -444,40 +494,43 @@ impl StrategyTracker {
         self.portfolio.n()
     }
 
-
- /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
- ///
- /// `effective_weights`'in `pol.frozen(n)` kararıyla **aynı** girdiyi
- /// verir; canlı ağırlık snapshot'ının hangi stratejilerde korunacağı
- /// (tracker kanıtı varsa tracker kazanır) buradan belirlenir.
+    /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
+    ///
+    /// `effective_weights`'in `pol.frozen(n)` kararıyla **aynı** girdiyi
+    /// verir; canlı ağırlık snapshot'ının hangi stratejilerde korunacağı
+    /// (tracker kanıtı varsa tracker kazanır) buradan belirlenir.
     pub fn evidence_n(&self, name: &str) -> usize {
         self.stats.get(name).map(|x| x.rs.len()).unwrap_or(0)
     }
 
- /// ETKİLİ AĞIRLIK — **nötr cold-start + canlı öğrenme** .
- ///
- /// `names` = registry'deki TÜM stratejiler (18). Ağırlık dosyası yoksa da
- /// bu listeyi kullanırız → her strateji 1.0 ile başlar.
- ///
- /// | n | ağırlık |
- /// |---|---|
- /// | `< min_n` | **1.0 sabit** (kanıt yetersiz → öldürme yok) |
- /// | `min_n ≤ n < full_n` | dinamik formül, clamp `[0.1, 2.0]` |
- /// | `n ≥ full_n` | tam kurallar: `win < %35` → **0** |
- ///
- /// Dönen `ExploreEvent` listesi yalnızca **değişen** kararları içerir
- /// (log/audit). `explorers` = veri açlığı olan stratejiler
- /// (`n < full_n`) — bkz. .
+    /// ETKİLİ AĞIRLIK — **nötr cold-start + canlı öğrenme** .
+    ///
+    /// `names` = registry'deki TÜM stratejiler (18). Ağırlık dosyası yoksa da
+    /// bu listeyi kullanırız → her strateji 1.0 ile başlar.
+    ///
+    /// | n | ağırlık |
+    /// |---|---|
+    /// | `< min_n` | **1.0 sabit** (kanıt yetersiz → öldürme yok) |
+    /// | `min_n ≤ n < full_n` | dinamik formül, clamp `[0.1, 2.0]` |
+    /// | `n ≥ full_n` | tam kurallar: `win < %35` → **0** |
+    ///
+    /// Dönen `ExploreEvent` listesi yalnızca **değişen** kararları içerir
+    /// (log/audit). `explorers` = veri açlığı olan stratejiler
+    /// (`n < full_n`) — bkz. .
     pub fn effective_weights(
         &self,
         names: &[String],
         pol: &LearnPolicy,
-    ) -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>) {
+    ) -> (
+        HashMap<String, f64>,
+        std::collections::HashSet<String>,
+        Vec<ExploreEvent>,
+    ) {
         let mut out: HashMap<String, f64> = HashMap::new();
         let mut explorers: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut events: Vec<ExploreEvent> = Vec::new();
         let mut all: Vec<String> = names.to_vec();
- // diskten yüklenmiş ama listede olmayan strateji varsa onu da izle
+        // diskten yüklenmiş ama listede olmayan strateji varsa onu da izle
         for k in self.stats.keys() {
             if !all.contains(k) {
                 all.push(k.clone());
@@ -487,11 +540,23 @@ impl StrategyTracker {
 
         for name in all {
             let n = self.stats.get(&name).map(|x| x.rs.len()).unwrap_or(0);
-            let wr = self.stats.get(&name).and_then(|x| x.win_rate(0)).unwrap_or(0.0);
-            let pf = self.stats.get(&name).and_then(|x| x.profit_factor()).unwrap_or(0.0);
-            let sum_r: f64 = self.stats.get(&name).map(|x| x.rs.iter().sum()).unwrap_or(0.0);
+            let wr = self
+                .stats
+                .get(&name)
+                .and_then(|x| x.win_rate(0))
+                .unwrap_or(0.0);
+            let pf = self
+                .stats
+                .get(&name)
+                .and_then(|x| x.profit_factor())
+                .unwrap_or(0.0);
+            let sum_r: f64 = self
+                .stats
+                .get(&name)
+                .map(|x| x.rs.iter().sum())
+                .unwrap_or(0.0);
 
- // nötr cold-start: kanıt yok → 1.0
+            // nötr cold-start: kanıt yok → 1.0
             if pol.frozen(n) {
                 out.insert(name.clone(), COLD_START_WEIGHT);
                 if n < pol.full_n {
@@ -500,28 +565,28 @@ impl StrategyTracker {
                 continue;
             }
 
- // f* = p − (1−p)/b, b = 1.8 varsayılan pay
+            // f* = p − (1−p)/b, b = 1.8 varsayılan pay
             let f = self
                 .stats
                 .get(&name)
                 .and_then(|x| x.kelly(DEFAULT_PAYOFF, pol.min_n))
                 .unwrap_or(0.0);
- // nötr=1.0 çevresinde normalize: f* oranı 1.0'a göre
+            // nötr=1.0 çevresinde normalize: f* oranı 1.0'a göre
             let to = if pol.full(n) && wr < 0.35 {
- // tam kural: kanıt var ve berbat → SUSTUR
+                // tam kural: kanıt var ve berbat → SUSTUR
                 0.0
             } else if f <= 0.0 {
                 WEIGHT_CLAMP_LO
             } else {
- // f* ∈ (0, ~1]; 1.0'a bölerek nötre göre ölçekliyoruz.
- // f*=0.5 → w=0.5×KELLY_SCALE...
+                // f* ∈ (0, ~1]; 1.0'a bölerek nötre göre ölçekliyoruz.
+                // f*=0.5 → w=0.5×KELLY_SCALE...
                 (1.0 + f).clamp(WEIGHT_CLAMP_LO, WEIGHT_CLAMP_HI)
             };
             let to = if pol.full(n) && wr < 0.35 { 0.0 } else { to };
             if n < pol.full_n {
                 explorers.insert(name.clone());
             }
- // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
+            // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
             if (to - COLD_START_WEIGHT).abs() > 1e-9 {
                 events.push(ExploreEvent {
                     strategy: name.clone(),
@@ -545,14 +610,14 @@ impl StrategyTracker {
         (out, explorers, events)
     }
 
- /// **KEŞİF KUYRUĞU**: veri açlığı olan stratejiler.
- ///
- /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
- /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
- /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
- ///
- /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş
- /// normal tracker akışında yürür (§ kuralı).
+    /// **KEŞİF KUYRUĞU**: veri açlığı olan stratejiler.
+    ///
+    /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
+    /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
+    /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
+    ///
+    /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş
+    /// normal tracker akışında yürür (§ kuralı).
     pub fn explore_queue(&self, names: &[String], pol: &LearnPolicy) -> Vec<String> {
         let mut q: Vec<(usize, String)> = Vec::new();
         for name in names {
@@ -565,14 +630,18 @@ impl StrategyTracker {
         q.into_iter().map(|(_, n)| n).collect()
     }
 
- /// I — stratejinin **ölçülebilir metrikleri** (gerçek fill R penceresi).
- /// Kanıt yok → `trades=0` ve `None`'lar (uydurma sayı yok).
+    /// I — stratejinin **ölçülebilir metrikleri** (gerçek fill R penceresi).
+    /// Kanıt yok → `trades=0` ve `None`'lar (uydurma sayı yok).
     pub fn metrics(&self, name: &str) -> PerformanceMetrics {
-        let rs: Vec<f64> = self.stats.get(name).map(|x| x.rs.clone()).unwrap_or_default();
+        let rs: Vec<f64> = self
+            .stats
+            .get(name)
+            .map(|x| x.rs.clone())
+            .unwrap_or_default();
         PerformanceMetrics::from_rs(&rs, None, None)
     }
 
- /// I — portföy geneli (tüm stratejilerin birleşik R penceresi).
+    /// I — portföy geneli (tüm stratejilerin birleşik R penceresi).
     pub fn portfolio_metrics(&self) -> PerformanceMetrics {
         let mut all: Vec<(u64, f64)> = Vec::new();
         for st in self.stats.values() {
@@ -586,11 +655,11 @@ impl StrategyTracker {
         PerformanceMetrics::from_rs(&rs, None, None)
     }
 
- /// **PORTFÖY win-rate + k/z oranı** — tracker'daki TÜM canlı kanıttan.
- ///
- /// Kelly sizing'in sabit %45 yerine GERÇEK veri kullanabilmesi için
- /// (`RiskKelly` → `MarketInput::portfolio_*`). Kanıt yoksa `None`:
- /// sabit varsayım DÖNDÜRMEZ — çağıran (strateji) `Skip` üretir.
+    /// **PORTFÖY win-rate + k/z oranı** — tracker'daki TÜM canlı kanıttan.
+    ///
+    /// Kelly sizing'in sabit %45 yerine GERÇEK veri kullanabilmesi için
+    /// (`RiskKelly` → `MarketInput::portfolio_*`). Kanıt yoksa `None`:
+    /// sabit varsayım DÖNDÜRMEZ — çağıran (strateji) `Skip` üretir.
     /// PORTFÖY İSTATİSTİĞİ — GERÇEK trade-level kayıtlarından
     /// (attribution toplaması DEĞİL): (win_rate, wl_ratio). Kelly
     /// kaplaması bu ikisini kullanır.
@@ -621,11 +690,11 @@ impl StrategyTracker {
             ex.map(|x| format!("{x:+.3}")).unwrap_or("-".into()),
         )
     }
- /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
- ///
- /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).
- /// Kuyruk + `signaled` kesişiminden **tek** strateji seçilir → aynı döngüde
- /// iki farklı keşifçiye sıra gelmez (kabul kriteri).
+    /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
+    ///
+    /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).
+    /// Kuyruk + `signaled` kesişiminden **tek** strateji seçilir → aynı döngüde
+    /// iki farklı keşifçiye sıra gelmez (kabul kriteri).
     pub fn next_explorer(
         &self,
         names: &[String],
@@ -641,7 +710,7 @@ impl StrategyTracker {
         Some(act[cursor % act.len()].clone())
     }
 
- /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
+    /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
     pub fn ensemble_weights(&self) -> HashMap<String, f64> {
         let mut raw: HashMap<String, f64> = HashMap::new();
         for (name, s) in &self.stats {
@@ -659,7 +728,7 @@ impl StrategyTracker {
         self.stats.len()
     }
 
- /// Özet: (n, win_rate, profit_factor, ΣR)
+    /// Özet: (n, win_rate, profit_factor, ΣR)
     pub fn summary(&self, name: &str) -> (usize, f64, f64, f64) {
         match self.stats.get(name) {
             None => (0, 0.0, 0.0, 0.0),
@@ -672,23 +741,23 @@ impl StrategyTracker {
         }
     }
 
- // ── PERSISTENCE ─────────────────────────────────────────────────────
- //
- // Öğrenme **canlı**dır: restart'ta n/win/PF/ΣR korunmazsa sistem her
- // seferinde "15 strateji × w=1.0" cold-start'a döner ve testnet'te
- // günlerce süren kanıt toplama boşa gider. Durum diske yazılır ve
- // restart'ta birebir yüklenir.
- //
- // `entry_attr` (pozisyon başına, R hesabının girdisi) RAM'de kalır —
- // restart kabul edilebilir: sadece o pozisyonun kapanışında R kaydı
- // düşer, sistem kendini tutmaya devam eder.
+    // ── PERSISTENCE ─────────────────────────────────────────────────────
+    //
+    // Öğrenme **canlı**dır: restart'ta n/win/PF/ΣR korunmazsa sistem her
+    // seferinde "15 strateji × w=1.0" cold-start'a döner ve testnet'te
+    // günlerce süren kanıt toplama boşa gider. Durum diske yazılır ve
+    // restart'ta birebir yüklenir.
+    //
+    // `entry_attr` (pozisyon başına, R hesabının girdisi) RAM'de kalır —
+    // restart kabul edilebilir: sadece o pozisyonun kapanışında R kaydı
+    // düşer, sistem kendini tutmaya devam eder.
 
- /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
- /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
- /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
- /// restart'ta birebir yüklenir — sentetik ±1R YOK. schema_version = 2.
- /// Sparse JSON güvenliği: entry'ler önce toplanır, sonra join(",") —
- /// indeks tabanlı virgül YOK (aynı yazım biçimi korunur).
+    /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
+    /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
+    /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
+    /// restart'ta birebir yüklenir — sentetik ±1R YOK. schema_version = 2.
+    /// Sparse JSON güvenliği: entry'ler önce toplanır, sonra join(",") —
+    /// indeks tabanlı virgül YOK (aynı yazım biçimi korunur).
     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
         use std::fmt::Write as _;
         let mut names: Vec<&String> = self.stats.keys().collect();
@@ -703,7 +772,7 @@ impl StrategyTracker {
             let pf = st.profit_factor().unwrap_or(0.0);
             let sr: f64 = st.rs.iter().sum();
             let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
- // R history array: [[ts, r], ...]
+            // R history array: [[ts, r], ...]
             let mut r_hist = String::new();
             for (idx, (ts, _win)) in st.outcomes.iter().enumerate() {
                 let r = st.rs[idx];
@@ -738,18 +807,18 @@ impl StrategyTracker {
         if let Some(par) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(par);
         }
- // ATOMİK YAZIM: yarım yazılmış dosya = tüm öğrenme kaybı. tmp + rename.
+        // ATOMİK YAZIM: yarım yazılmış dosya = tüm öğrenme kaybı. tmp + rename.
         let tmp = format!("{path}.tmp");
         std::fs::write(&tmp, s.as_bytes())?;
         std::fs::rename(&tmp, path)?;
         Ok(())
     }
 
- /// Diskten yükle. Provenans kontrolü (schema v2):
- /// `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
- /// `schema_version != 2` → WARN + **reddet** (v1 sentetik R içerir, v2 gerekli)
- /// yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
- /// **Gerçek R history** (`r_hist`) ZORUNLU — sentetik ±1R fallback YOK.
+    /// Diskten yükle. Provenans kontrolü (schema v2):
+    /// `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
+    /// `schema_version != 2` → WARN + **reddet** (v1 sentetik R içerir, v2 gerekli)
+    /// yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
+    /// **Gerçek R history** (`r_hist`) ZORUNLU — sentetik ±1R fallback YOK.
     pub fn load_state(&mut self, path: &str) -> bool {
         let Ok(txt) = std::fs::read_to_string(path) else {
             return false;
@@ -758,13 +827,18 @@ impl StrategyTracker {
             tracing::warn!("[LEARN] {path} bozuk JSON — nötr cold-start");
             return false;
         };
- // Provenans kapısı
+        // Provenans kapısı
         let origin = v.get("origin").and_then(|x| x.as_str()).unwrap_or("");
         if origin != "live" {
-            tracing::warn!("[LEARN] {path} origin='{origin}' != 'live' — REDDEDİLDİ, nötr cold-start");
+            tracing::warn!(
+                "[LEARN] {path} origin='{origin}' != 'live' — REDDEDİLDİ, nötr cold-start"
+            );
             return false;
         }
-        let schema = v.get("schema_version").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+        let schema = v
+            .get("schema_version")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0) as u32;
         if schema != 2 {
             tracing::warn!("[LEARN] {path} schema_version={schema} != 2 (v1 sentetik R içerir) — REDDEDİLDİ, nötr cold-start");
             return false;
@@ -775,7 +849,7 @@ impl StrategyTracker {
         };
         let mut loaded = 0usize;
         for (name, e) in map {
- // r_hist ZORUNLU — yoksa bu strateji atlanır (sentetik R YAZMA)
+            // r_hist ZORUNLU — yoksa bu strateji atlanır (sentetik R YAZMA)
             let r_hist = e.get("r_hist").and_then(|x| x.as_array());
             let st = self.stats.entry(name.clone()).or_default();
             if let Some(hist) = r_hist {
@@ -791,7 +865,7 @@ impl StrategyTracker {
                 loaded += 1;
                 continue;
             }
- // r_hist YOK → bu strateji YÜKLENMEZ (sentetik R yazmak, R hiç yazmamaktan kötüdür)
+            // r_hist YOK → bu strateji YÜKLENMEZ (sentetik R yazmak, R hiç yazmamaktan kötüdür)
             tracing::warn!("[LEARN] {name}: r_hist eksik — strateji ATLANIYOR (sentetik R YOK)");
         }
         // GERÇEK portfolio trade history — RESTART DUPLICATE YASAĞI:
@@ -865,10 +939,7 @@ pub fn weights_json(weights: &HashMap<String, f64>) -> String {
 }
 
 /// **[LEARN] tablosu**: strateji | w | n | win% | PF | ΣR.
-pub fn learn_table(
-    tracker: &StrategyTracker,
-    weights: &HashMap<String, f64>,
-) -> String {
+pub fn learn_table(tracker: &StrategyTracker, weights: &HashMap<String, f64>) -> String {
     let mut names: Vec<&String> = weights.keys().collect();
     names.sort();
     let mut lines = Vec::with_capacity(names.len());
@@ -880,8 +951,16 @@ pub fn learn_table(
             k,
             w,
             n,
-            if n > 0 { format!("{:.0}%", wr * 100.0) } else { "-".into() },
-            if n > 0 { format!("{:.2}", pf) } else { "-".into() },
+            if n > 0 {
+                format!("{:.0}%", wr * 100.0)
+            } else {
+                "-".into()
+            },
+            if n > 0 {
+                format!("{:.2}", pf)
+            } else {
+                "-".into()
+            },
             sr
         ));
     }
@@ -898,7 +977,7 @@ mod tests {
     fn pol(min_n: usize, full_n: usize) -> LearnPolicy {
         LearnPolicy { min_n, full_n }
     }
- /// n işlem kaydet: `wr` oranında kazanç (R=+1.5), kalan kayıp (R=-1.0)
+    /// n işlem kaydet: `wr` oranında kazanç (R=+1.5), kalan kayıp (R=-1.0)
     fn feed(t: &mut StrategyTracker, name: &str, n: usize, wins: usize) {
         for i in 0..n {
             let r = if i < wins { 1.5 } else { -1.0 };
@@ -906,7 +985,7 @@ mod tests {
         }
     }
 
- // ── KABUL KRİTERİ (a): dosya yok → hepsi 1.0 ─────────────────────────
+    // ── KABUL KRİTERİ (a): dosya yok → hepsi 1.0 ─────────────────────────
     #[test]
     fn dosya_yoksa_hepsi_netir_bir() {
         let t = StrategyTracker::default();
@@ -920,19 +999,21 @@ mod tests {
         assert!(ev.is_empty(), "kanıt yokken karar değişimi olmaz");
     }
 
- // ── KABUL KRİTERİ (b): n=5, win=0 → ağırlık HÂLÂ 1.0 ────────────────
+    // ── KABUL KRİTERİ (b): n=5, win=0 → ağırlık HÂLÂ 1.0 ────────────────
     #[test]
     fn bes_islem_sifir_kazanc_agirligi_olmez() {
         let mut t = StrategyTracker::default();
         feed(&mut t, "Elliott", 5, 0);
         let nm = names(&["Elliott"]);
         let (w, _, ev) = t.effective_weights(&nm, &pol(10, 30));
-        assert_eq!(w["Elliott"], COLD_START_WEIGHT,
-            "5 işlemde %0 kazanç ağırlığı öldürmemeli (min_n=10)");
+        assert_eq!(
+            w["Elliott"], COLD_START_WEIGHT,
+            "5 işlemde %0 kazanç ağırlığı öldürmemeli (min_n=10)"
+        );
         assert!(ev.is_empty());
     }
 
- // ── KABUL KRİTERİ (c): n=30, win<%35 → 0 ──────────────────────────────
+    // ── KABUL KRİTERİ (c): n=30, win<%35 → 0 ──────────────────────────────
     #[test]
     fn otuz_islem_dusuk_kazanc_susturur() {
         let mut t = StrategyTracker::default();
@@ -951,64 +1032,79 @@ mod tests {
         feed(&mut t, "Elliott", 30, 24); // %80 win → f* = 0.8-0.2/1.8 = 0.689
         let nm = names(&["Elliott"]);
         let (w, ex, _) = t.effective_weights(&nm, &pol(10, 30));
-        assert!(w["Elliott"] > COLD_START_WEIGHT, "iyi strateji büyümeli: {}", w["Elliott"]);
+        assert!(
+            w["Elliott"] > COLD_START_WEIGHT,
+            "iyi strateji büyümeli: {}",
+            w["Elliott"]
+        );
         assert!(w["Elliott"] <= WEIGHT_CLAMP_HI);
         assert!(!ex.contains("Elliott"));
     }
 
     #[test]
     fn on_islem_arasi_dinamik_clamp_araliginda() {
- // 12 işlem %50 win → dinamik formül devrede ama clamp [0.1, 2.0]
+        // 12 işlem %50 win → dinamik formül devrede ama clamp [0.1, 2.0]
         let mut t = StrategyTracker::default();
         feed(&mut t, "Kesit", 12, 6);
         let nm = names(&["Kesit"]);
         let (w, ex, _) = t.effective_weights(&nm, &pol(10, 30));
         let v = w["Kesit"];
-        assert!(v >= WEIGHT_CLAMP_LO && v <= WEIGHT_CLAMP_HI, "clamp dışı: {v}");
-        assert!((v - COLD_START_WEIGHT).abs() > 1e-9, "n=12 ile ağırlık dinamiktir");
+        assert!(
+            (WEIGHT_CLAMP_LO..=WEIGHT_CLAMP_HI).contains(&v),
+            "clamp dışı: {v}"
+        );
+        assert!(
+            (v - COLD_START_WEIGHT).abs() > 1e-9,
+            "n=12 ile ağırlık dinamiktir"
+        );
         assert!(ex.contains("Kesit"), "n=12 < full_n=30 → kuyrukta");
     }
 
     #[test]
     fn clamp_ust_tavanini_asmaz() {
- // %100 kazanç: f* = 1.0 → 1.0+1.0 = 2.0 = tavan
+        // %100 kazanç: f* = 1.0 → 1.0+1.0 = 2.0 = tavan
         let mut t = StrategyTracker::default();
         feed(&mut t, "Kesit", 40, 40);
         let nm = names(&["Kesit"]);
         let (w, _, _) = t.effective_weights(&nm, &pol(10, 30));
-        assert!((w["Kesit"] - WEIGHT_CLAMP_HI).abs() < 1e-9, "{}", w["Kesit"]);
+        assert!(
+            (w["Kesit"] - WEIGHT_CLAMP_HI).abs() < 1e-9,
+            "{}",
+            w["Kesit"]
+        );
     }
 
- // ── KEŞİF KUYRUĞU ─────────────────────────────────────────────
+    // ── KEŞİF KUYRUĞU ─────────────────────────────────────────────
     #[test]
     fn kuyruk_veri_acligi_olana_girer_full_n_disi_da_hazir_bekler() {
         let mut t = StrategyTracker::default();
         feed(&mut t, "A", 30, 24); // full
-        feed(&mut t, "B", 12, 6);  // n<full
+        feed(&mut t, "B", 12, 6); // n<full
         let nm = names(&["A", "B", "C"]); // C: n=0
         let q = t.explore_queue(&nm, &pol(10, 30));
         assert!(!q.contains(&"A".to_string()), "n≥30 kuyrukta görünmemeli");
         assert!(q.contains(&"B".to_string()));
         assert!(q.contains(&"C".to_string()));
- // en az veri gören önce
+        // en az veri gören önce
         assert_eq!(q[0], "C", "n=0 en aç → başta");
         assert_eq!(q[1], "B");
     }
 
     #[test]
     fn ayni_dongude_iki_kesifciye_sira_gelmez() {
-        let mut t = StrategyTracker::default();
+        let t = StrategyTracker::default();
         let nm = names(&["A", "B", "C"]);
         let pol = pol(10, 30);
         let sig: std::collections::HashSet<String> = names(&["A", "B", "C"]).into_iter().collect();
-        let picks: Vec<Option<String>> =
-            (0..6).map(|c| t.next_explorer(&nm, &pol, &sig, c)).collect();
+        let picks: Vec<Option<String>> = (0..6)
+            .map(|c| t.next_explorer(&nm, &pol, &sig, c))
+            .collect();
         for p in picks.iter() {
             assert!(p.is_some(), "sinyal üreten var → seçim yapılmalı");
         }
- // her seçim TEK strateji (Option<String>)
-        assert!(picks.iter().all(|p| matches!(p, Some(_))));
- // round-robin ilerliyor
+        // her seçim TEK strateji (Option<String>)
+        assert!(picks.iter().all(|p| p.is_some()));
+        // round-robin ilerliyor
         assert_ne!(picks[0], picks[1]);
     }
 
@@ -1019,7 +1115,7 @@ mod tests {
         let pol = pol(10, 30);
         let sig: std::collections::HashSet<String> = names(&["A"]).into_iter().collect();
         assert_eq!(t.next_explorer(&nm, &pol, &sig, 0), Some("A".to_string()));
- // kuyrukta 3 strateji ama sinyal 0 → seçim yok
+        // kuyrukta 3 strateji ama sinyal 0 → seçim yok
         let empty: std::collections::HashSet<String> = Default::default();
         assert_eq!(t.next_explorer(&nm, &pol, &empty, 0), None);
     }
@@ -1031,11 +1127,14 @@ mod tests {
         let nm = names(&["A"]);
         let pol = pol(10, 30);
         let sig: std::collections::HashSet<String> = names(&["A"]).into_iter().collect();
-        assert_eq!(t.next_explorer(&nm, &pol, &sig, 0), None,
-            "n≥full_n olan bypass ALMAMALI");
+        assert_eq!(
+            t.next_explorer(&nm, &pol, &sig, 0),
+            None,
+            "n≥full_n olan bypass ALMAMALI"
+        );
     }
 
- // ── PERSISTENCE ( #4) ────────────────────────────────────────────
+    // ── PERSISTENCE ( #4) ────────────────────────────────────────────
     #[test]
     fn track_state_yaz_ok_roundtrip() {
         let dir = std::env::temp_dir().join("hl_learn_test");
@@ -1049,11 +1148,14 @@ mod tests {
         let (w0, _, _) = t.effective_weights(&names(&["Elliott", "Kesit"]), &pol(10, 30));
         t.save_state(path.to_str().unwrap()).expect("yazma");
 
- // GERÇEK YENİ NESNE: sadece dosyadan okunuyor
+        // GERÇEK YENİ NESNE: sadece dosyadan okunuyor
         let mut t2 = StrategyTracker::default();
         assert!(t2.load_state(path.to_str().unwrap()), "yüklenmeli");
         let (w1, _, _) = t2.effective_weights(&names(&["Elliott", "Kesit"]), &pol(10, 30));
-        assert_eq!(w0, w1, "restart sonrası ağırlıklar DEĞİŞMEMELİ (cold-start olmamalı)");
+        assert_eq!(
+            w0, w1,
+            "restart sonrası ağırlıklar DEĞİŞMEMELİ (cold-start olmamalı)"
+        );
         assert_eq!(t2.summary("Elliott").0, 30);
         assert_eq!(t2.summary("Kesit").0, 12);
         let _ = std::fs::remove_file(&path);
@@ -1079,18 +1181,22 @@ mod tests {
         assert_eq!(v["weights"]["Wyckoff"], 0.83);
     }
 
- // ── PROVENANS KAPISI ────────────────────────────────────────────
+    // ── PROVENANS KAPISI ────────────────────────────────────────────
     #[test]
     fn track_state_origin_degilse_reddedilir() {
         let dir = std::env::temp_dir().join("hl_learn_test_prov");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
- // backtestten gelmiş gibi origin="backtest" yaz
-        let bad = r#"{"origin":"backtest","schema_version":2,"strategies":{"A":{"r_hist":[[1,0.5]]}}}"#;
+        // backtestten gelmiş gibi origin="backtest" yaz
+        let bad =
+            r#"{"origin":"backtest","schema_version":2,"strategies":{"A":{"r_hist":[[1,0.5]]}}}"#;
         std::fs::write(&path, bad).unwrap();
         let mut t = StrategyTracker::default();
-        assert!(!t.load_state(path.to_str().unwrap()), "origin != live → reddedilmeli");
+        assert!(
+            !t.load_state(path.to_str().unwrap()),
+            "origin != live → reddedilmeli"
+        );
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
         assert_eq!(w["A"], COLD_START_WEIGHT, "cold-start'a düşmeli");
         let _ = std::fs::remove_file(&path);
@@ -1102,11 +1208,14 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
- // origin=live ama schema_version=1 (v1 sentetik R)
+        // origin=live ama schema_version=1 (v1 sentetik R)
         let bad = r#"{"origin":"live","schema_version":1,"strategies":{"A":{"r_hist":[[1,0.5]]}}}"#;
         std::fs::write(&path, bad).unwrap();
         let mut t = StrategyTracker::default();
-        assert!(!t.load_state(path.to_str().unwrap()), "schema_version != 2 → reddedilmeli");
+        assert!(
+            !t.load_state(path.to_str().unwrap()),
+            "schema_version != 2 → reddedilmeli"
+        );
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
         assert_eq!(w["A"], COLD_START_WEIGHT);
         let _ = std::fs::remove_file(&path);
@@ -1118,13 +1227,19 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
- // schema v2 + r_hist with n=15 (>= min_n=10, not frozen)
+        // schema v2 + r_hist with n=15 (>= min_n=10, not frozen)
         let good = r#"{"origin":"live","schema_version":2,"strategies":{"A":{"r_hist":[[1,0.5],[2,-1.0],[3,1.2],[4,0.8],[5,-0.5],[6,1.1],[7,0.9],[8,-1.2],[9,0.7],[10,1.3],[11,0.6],[12,-0.8],[13,1.0],[14,0.4],[15,-0.3]]}}}"#;
         std::fs::write(&path, good).unwrap();
         let mut t = StrategyTracker::default();
-        assert!(t.load_state(path.to_str().unwrap()), "doğru provenance → yüklenmeli");
+        assert!(
+            t.load_state(path.to_str().unwrap()),
+            "doğru provenance → yüklenmeli"
+        );
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
-        assert_ne!(w["A"], COLD_START_WEIGHT, "öğrenilmiş ağırlık gelmeli (n>=10, frozen değil)");
+        assert_ne!(
+            w["A"], COLD_START_WEIGHT,
+            "öğrenilmiş ağırlık gelmeli (n>=10, frozen değil)"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1134,11 +1249,14 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
- // r_hist yok → strateji atlanmalı
+        // r_hist yok → strateji atlanmalı
         let bad = r#"{"origin":"live","schema_version":2,"strategies":{"A":{"n":10,"win":0.5,"pf":1.0}}}"#;
         std::fs::write(&path, bad).unwrap();
         let mut t = StrategyTracker::default();
-        assert!(!t.load_state(path.to_str().unwrap()), "r_hist eksik → false");
+        assert!(
+            !t.load_state(path.to_str().unwrap()),
+            "r_hist eksik → false"
+        );
         let (w, _, _) = t.effective_weights(&names(&["A"]), &pol(10, 30));
         assert_eq!(w["A"], COLD_START_WEIGHT, "cold-start'a düşmeli");
         let _ = std::fs::remove_file(&path);
@@ -1146,26 +1264,26 @@ mod tests {
 
     #[test]
     fn track_state_sparse_json_roundtrip() {
- // A boş (n=0 → rs boş), B dolu (n=30) → sparse JSON yazıp okuma
+        // A boş (n=0 → rs boş), B dolu (n=30) → sparse JSON yazıp okuma
         let dir = std::env::temp_dir().join("hl_learn_test_sparse");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("track_state.json");
         let _ = std::fs::remove_file(&path);
 
         let mut t = StrategyTracker::default();
-        feed(&mut t, "A", 0, 0);   // n=0 → rs boş (save'da atlanır)
+        feed(&mut t, "A", 0, 0); // n=0 → rs boş (save'da atlanır)
         feed(&mut t, "B", 30, 24); // n=30 → rs dolu
         let (w0, _, _) = t.effective_weights(&names(&["A", "B"]), &pol(10, 30));
         t.save_state(path.to_str().unwrap()).expect("yazma");
 
- // JSON doğruluk kontrolü: trailing comma YOK, sparse entry'ler doğru
+        // JSON doğruluk kontrolü: trailing comma YOK, sparse entry'ler doğru
         let txt = std::fs::read_to_string(&path).unwrap();
         assert!(!txt.contains(",}"), "trailing comma YOK");
         assert!(!txt.contains(", ,"), "boş entry virgül YOK");
         assert!(txt.contains("\"B\""), "B yazılmış");
         assert!(!txt.contains("\"A\""), "A (boş) YAZILMAMIŞ");
 
- // Gerçek yeni nesne: sadece dosyadan okunuyor
+        // Gerçek yeni nesne: sadece dosyadan okunuyor
         let mut t2 = StrategyTracker::default();
         assert!(t2.load_state(path.to_str().unwrap()), "yüklenmeli");
         let (w1, _, _) = t2.effective_weights(&names(&["A", "B"]), &pol(10, 30));
@@ -1176,11 +1294,11 @@ mod tests {
 
     #[test]
     fn tid_seen_aynı_tid_ikinci_kez_atlanır() {
- // ring buffer çalışıyor
+        // ring buffer çalışıyor
         for i in 0..5 {
             assert!(!tid_seen(&format!("tid_{i}")), "ilk kez {i} → false");
         }
- // aynı tid tekrar
+        // aynı tid tekrar
         assert!(tid_seen("tid_0"), "ikinci kez → true (atlandı)");
         assert!(tid_seen("tid_4"), "ikinci kez → true");
     }
@@ -1268,9 +1386,9 @@ mod tests {
 /// Hata sınıfı — kill-switch'in neyi sayacağı.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrClass {
- /// karar-kritik / durum bilinmiyor → sayılır
+    /// karar-kritik / durum bilinmiyor → sayılır
     Critical,
- /// geçici, kendi kendini toparlar → sayılmaz
+    /// geçici, kendi kendini toparlar → sayılmaz
     Transient,
 }
 
@@ -1282,7 +1400,7 @@ pub enum ErrClass {
 /// `Critical` (fail-safe sınıflama).
 pub fn classify(err: &str) -> ErrClass {
     let e = err.to_ascii_lowercase();
- // ── SAYILMAYANLAR (önce bakılır — daha spesifik) ──
+    // ── SAYILMAYANLAR (önce bakılır — daha spesifik) ──
     const TRANSIENT: &[&str] = &[
         "reconnect",
         "websocket",
@@ -1302,7 +1420,7 @@ pub fn classify(err: &str) -> ErrClass {
     if TRANSIENT.iter().any(|t| e.contains(t)) {
         return ErrClass::Transient;
     }
- // ── SAYILANLAR (karar-kritik) ──
+    // ── SAYILANLAR (karar-kritik) ──
     const CRITICAL: &[&str] = &[
         "clearinghousestate",
         "clearinghouse_state",
@@ -1317,19 +1435,19 @@ pub fn classify(err: &str) -> ErrClass {
     if CRITICAL.iter().any(|t| e.contains(t)) {
         return ErrClass::Critical;
     }
- // EMİN OLUNAMAZ → Critical (fail-safe: say)
+    // EMİN OLUNAMAZ → Critical (fail-safe: say)
     ErrClass::Critical
 }
 
 /// Kill-switch / StateMaintenance durumu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
- /// normal
+    /// normal
     #[default]
     Normal,
- /// yalnız çıkışlara izin ver (giriş emri yok) — WS/REST kararsız
+    /// yalnız çıkışlara izin ver (giriş emri yok) — WS/REST kararsız
     ExitsOnly,
- /// düzleştirildi, duraklatıldı
+    /// düzleştirildi, duraklatıldı
     Halted,
 }
 
@@ -1338,7 +1456,7 @@ pub enum Mode {
 pub struct Health {
     mode: Mode,
     crit_streak: usize,
- /// WS reconnect zaman damgaları (fırtına tespiti)
+    /// WS reconnect zaman damgaları (fırtına tespiti)
     ws_reconnects: Vec<u64>,
     pub critical_threshold: usize,
 }
@@ -1348,7 +1466,10 @@ pub const WS_STORM_COUNT: usize = 10;
 
 impl Health {
     pub fn new(critical_threshold: usize) -> Self {
-        Self { critical_threshold, ..Default::default() }
+        Self {
+            critical_threshold,
+            ..Default::default()
+        }
     }
 
     pub fn mode(&self) -> Mode {
@@ -1358,14 +1479,15 @@ impl Health {
         self.crit_streak
     }
 
- /// WS reconnect bildir. Fırtına (5 dk'da >10) → **kill DEĞİL**, `ExitsOnly`.
+    /// WS reconnect bildir. Fırtına (5 dk'da >10) → **kill DEĞİL**, `ExitsOnly`.
     pub fn on_ws_reconnect(&mut self) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         self.ws_reconnects.push(now);
-        self.ws_reconnects.retain(|t| now.saturating_sub(*t) < WS_STORM_WINDOW_MS);
+        self.ws_reconnects
+            .retain(|t| now.saturating_sub(*t) < WS_STORM_WINDOW_MS);
         if self.ws_reconnects.len() > WS_STORM_COUNT && self.mode == Mode::Normal {
             self.mode = Mode::ExitsOnly;
             return true;
@@ -1377,12 +1499,12 @@ impl Health {
         self.ws_reconnects.len()
     }
 
- /// Döngü hatası. `true` dönerse → flatten + halt.
+    /// Döngü hatası. `true` dönerse → flatten + halt.
     pub fn on_error(&mut self, err: &str) -> bool {
         match classify(err) {
             ErrClass::Transient => {
- // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
- // döngülerde sıfırlanır (aşağıda).
+                // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
+                // döngülerde sıfırlanır (aşağıda).
                 false
             }
             ErrClass::Critical => {
@@ -1399,13 +1521,13 @@ impl Health {
 
     pub fn on_cycle_ok(&mut self) {
         self.crit_streak = 0;
- // WS fırtınası geçtiyse normale dön (reconnect'ler durulunca)
+        // WS fırtınası geçtiyse normale dön (reconnect'ler durulunca)
         if self.mode == Mode::ExitsOnly && self.ws_reconnects.len() <= WS_STORM_COUNT {
             self.mode = Mode::Normal;
         }
     }
 
- /// Giriş emri serbest mi?
+    /// Giriş emri serbest mi?
     pub fn entries_allowed(&self) -> bool {
         self.mode == Mode::Normal
     }
@@ -1416,23 +1538,22 @@ impl Health {
     }
 }
 
-
 #[cfg(test)]
 mod health_tests {
     use super::*;
 
     #[test]
     fn ws_hata_firtinasi_botu_oldurmaz_exits_only_gecer() {
- // KABUL KRİTERİ: WS fırtınası (5 dk'da >10 reconnect) → kill DEĞİL.
+        // KABUL KRİTERİ: WS fırtınası (5 dk'da >10 reconnect) → kill DEĞİL.
         let mut h = Health::new(5);
         for _ in 0..15 {
             h.on_ws_reconnect();
         }
         assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına → ExitsOnly");
         assert!(!h.entries_allowed(), "giriş kapalı");
- // 15 reconnect KESİLME sayısına rağmen Halted DEĞİL
+        // 15 reconnect KESİLME sayısına rağmen Halted DEĞİL
         assert_ne!(h.mode(), Mode::Halted);
- // hiç flatten tetiklenmedi: on_error çağrılmadı
+        // hiç flatten tetiklenmedi: on_error çağrılmadı
         assert_eq!(h.crit_streak(), 0);
     }
 
@@ -1466,7 +1587,10 @@ mod health_tests {
             assert!(!h.on_error("clearinghouseState parse edilemedi (null)"));
         }
         assert_eq!(h.mode(), Mode::Normal, "4 hata < eşik 5");
-        assert!(h.on_error("clearinghouseState parse edilemedi (null)"), "5. hatada kill");
+        assert!(
+            h.on_error("clearinghouseState parse edilemedi (null)"),
+            "5. hatada kill"
+        );
         assert_eq!(h.mode(), Mode::Halted);
     }
 
@@ -1478,7 +1602,7 @@ mod health_tests {
         }
         h.on_cycle_ok();
         assert_eq!(h.crit_streak(), 0);
- // 4 hata daha yetmez (eşiğe ulaşmadı)
+        // 4 hata daha yetmez (eşiğe ulaşmadı)
         for _ in 0..4 {
             assert!(!h.on_error("clearinghouseState parse edilemedi"));
         }
@@ -1487,16 +1611,16 @@ mod health_tests {
 
     #[test]
     fn emin_olunamayan_hata_kritik_sayilir() {
- // "bilinmeyen durum" = karar-kritik. Güvenli yön varsayılanı.
+        // "bilinmeyen durum" = karar-kritik. Güvenli yön varsayılanı.
         assert_eq!(classify("harika bir hata"), ErrClass::Critical);
         assert_eq!(classify("bilinmeyen bir sey oldu"), ErrClass::Critical);
     }
 
     #[test]
     fn emin_olunamayan_hata_daha_spesifik_geceni_yener() {
- // 502 hem "transient" listesinde hem "parse" değil → Transient kazanır
+        // 502 hem "transient" listesinde hem "parse" değil → Transient kazanır
         assert_eq!(classify("502 Bad Gateway"), ErrClass::Transient);
- // timeout transient olmalı — "stop kurulamadı" da öyle
+        // timeout transient olmalı — "stop kurulamadı" da öyle
         assert_eq!(classify("stop kurulamadı"), ErrClass::Transient);
     }
 
@@ -1523,7 +1647,12 @@ mod portfolio_tests {
     fn portfolio_n1_attribution_n4() {
         let mut t = StrategyTracker::default();
         t.record_outcome_r(
-            vec!["Wyckoff".into(), "Dow".into(), "Turtle".into(), "Kesit".into()],
+            vec![
+                "Wyckoff".into(),
+                "Dow".into(),
+                "Turtle".into(),
+                "Kesit".into(),
+            ],
             1000,
             2.0,
         );
@@ -1536,7 +1665,10 @@ mod portfolio_tests {
         // portfolio istatistiği: TEK kayıttan — ama wl tanımsızdır
         // (kayıp yok → k/z hesaplanamaz → stats None; Kelly de None
         // alır = kanonik: tek kazançtan k/z çıkarılmaz)
-        assert!(t.portfolio_stats().is_none(), "1-trade all-win: k/z tanımsız");
+        assert!(
+            t.portfolio_stats().is_none(),
+            "1-trade all-win: k/z tanımsız"
+        );
         assert_eq!(t.portfolio.win_rate(), Some(1.0));
     }
 
@@ -1562,9 +1694,17 @@ mod portfolio_tests {
     fn kelly_gercek_portfolio_sample() {
         let mut t = StrategyTracker::default();
         t.record_portfolio_outcome(1000, 1.0);
-        t.record_outcome_r(vec!["W".into(), "D".into(), "T".into(), "K".into()], 1000, 1.0);
+        t.record_outcome_r(
+            vec!["W".into(), "D".into(), "T".into(), "K".into()],
+            1000,
+            1.0,
+        );
         t.record_portfolio_outcome(2000, -0.5);
-        t.record_outcome_r(vec!["W".into(), "D".into(), "T".into(), "K".into()], 2000, -0.5);
+        t.record_outcome_r(
+            vec!["W".into(), "D".into(), "T".into(), "K".into()],
+            2000,
+            -0.5,
+        );
         let (wr, wl) = t.portfolio_stats().unwrap();
         assert_eq!(wr, 0.5);
         assert_eq!(wl, 2.0, "attribution toplaması DEĞİL — trade-level ort");

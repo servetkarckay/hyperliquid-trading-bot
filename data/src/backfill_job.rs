@@ -17,9 +17,9 @@ pub const MAX_BARS_PER_REQUEST: usize = 5000;
 pub struct PumpConfig {
     pub coins: Vec<String>,
     pub interval_secs: u64,
- /// kaç gün geçmiş
+    /// kaç gün geçmiş
     pub days: u64,
- /// istekler arası uyku ms
+    /// istekler arası uyku ms
     pub request_pause_ms: u64,
 }
 
@@ -37,8 +37,14 @@ impl Default for PumpConfig {
 /// Candle mimari: interval sn → HL interval adı
 pub fn interval_name(secs: u64) -> Result<&'static str> {
     Ok(match secs {
-        60 => "1m", 300 => "5m", 900 => "15m", 1800 => "30m",
-        3600 => "1h", 7200 => "2h", 14_400 => "4h", 86_400 => "1d",
+        60 => "1m",
+        300 => "5m",
+        900 => "15m",
+        1800 => "30m",
+        3600 => "1h",
+        7200 => "2h",
+        14_400 => "4h",
+        86_400 => "1d",
         o => anyhow::bail!("bilinmeyen interval: {o}s"),
     })
 }
@@ -46,12 +52,22 @@ pub fn interval_name(secs: u64) -> Result<&'static str> {
 /// Candle yazma soyutlaması (CH/parquet/Memory eklenebilir)
 #[async_trait]
 pub trait CandleSink: Send {
-    async fn write(&mut self, coin: &str, interval_secs: u64, candles: &[hyperliquid_api::types::Candle]) -> Result<usize>;
+    async fn write(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        candles: &[hyperliquid_api::types::Candle],
+    ) -> Result<usize>;
 }
 
 #[async_trait]
 impl CandleSink for ClickHouseStorage {
-    async fn write(&mut self, coin: &str, interval_secs: u64, candles: &[hyperliquid_api::types::Candle]) -> Result<usize> {
+    async fn write(
+        &mut self,
+        coin: &str,
+        interval_secs: u64,
+        candles: &[hyperliquid_api::types::Candle],
+    ) -> Result<usize> {
         let rows: Vec<String> = candles
             .iter()
             .map(|c| {
@@ -84,7 +100,16 @@ pub async fn pump_candles(
 ) -> Result<usize> {
     let end = hyperliquid_api::now_ms() as i64;
     let start = end - (days as i64 * 86_400_000);
-    pump_candles_from(info, coin, interval_secs, start, end, request_pause_ms, sink).await
+    pump_candles_from(
+        info,
+        coin,
+        interval_secs,
+        start,
+        end,
+        request_pause_ms,
+        sink,
+    )
+    .await
 }
 
 /// Verilen ms aralığını pompalar (resume: CH'daki son t'den itibaren)
@@ -104,7 +129,7 @@ pub async fn pump_candles_from(
     let mut cursor = start;
     while cursor < end {
         let req_end = (cursor + step).min(end);
- // 429 KIYAMET KORUMASI: hız sınırı → bekle + TEKRAR (ниче kayıp yok)
+        // 429 KIYAMET KORUMASI: hız sınırı → bekle + TEKRAR (ниче kayıp yok)
         match info.candle_snapshot(coin, iv_name, cursor, req_end).await {
             Ok(c) if !c.is_empty() => {
                 sink.write(coin, interval_secs, &c).await?;
@@ -131,13 +156,25 @@ pub async fn pump_candles_from(
 }
 
 /// Kompozit iş: coins × interval → ClickHouse + funding geçmişi
-pub async fn run_pump(info: &hyperliquid_api::Info, ch: &ClickHouseStorage, cfg: PumpConfig) -> Result<String> {
+pub async fn run_pump(
+    info: &hyperliquid_api::Info,
+    ch: &ClickHouseStorage,
+    cfg: PumpConfig,
+) -> Result<String> {
     ch.ensure_tables().await?;
     let mut sink = ClickHouseStorage::from_env()?;
     let mut report = String::new();
 
     for coin in &cfg.coins {
-        let n = pump_candles(info, coin, cfg.interval_secs, cfg.days, cfg.request_pause_ms, &mut sink).await;
+        let n = pump_candles(
+            info,
+            coin,
+            cfg.interval_secs,
+            cfg.days,
+            cfg.request_pause_ms,
+            &mut sink,
+        )
+        .await;
         report += &match n {
             Ok(k) => format!("{coin}: {k} mum\n"),
             Err(e) => format!("{coin}: HATA {e}\n"),
@@ -172,7 +209,7 @@ pub async fn pump_funding(
 }
 
 impl ClickHouseStorage {
- /// coin+interval için depolanmış en son mum zamanı (resume noktası)
+    /// coin+interval için depolanmış en son mum zamanı (resume noktası)
     pub async fn last_candle_ms(&self, coin: &str, interval_secs: u64) -> Option<i64> {
         let sql = format!(
             "SELECT max(t) FROM hl_candles WHERE coin='{coin}' AND interval={interval_secs} FORMAT TSV"
@@ -198,7 +235,7 @@ pub async fn pump_candles_resumable(
     sink: &mut dyn CandleSink,
 ) -> Result<(usize, bool)> {
     let interval_ms = interval_secs as i64 * 1000;
- // yeni pencere başlangıcı: depolanmış son t'den sonraki mum
+    // yeni pencere başlangıcı: depolanmış son t'den sonraki mum
     let fresh_from = ch
         .last_candle_ms(coin, interval_secs)
         .await
@@ -210,6 +247,15 @@ pub async fn pump_candles_resumable(
         _ => window_start,
     };
     let resumed = fresh_from.is_some();
-    let n = pump_candles_from(info, coin, interval_secs, start, now, request_pause_ms, sink).await?;
+    let n = pump_candles_from(
+        info,
+        coin,
+        interval_secs,
+        start,
+        now,
+        request_pause_ms,
+        sink,
+    )
+    .await?;
     Ok((n, resumed))
 }

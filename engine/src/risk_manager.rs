@@ -19,21 +19,21 @@ use crate::executor::Position;
 
 #[derive(Debug, Clone)]
 pub struct RiskConfig {
- /// Tek coin maksimum pozisyon değeri (USD)
+    /// Tek coin maksimum pozisyon değeri (USD)
     pub max_position_notional_usd: f64,
- /// Toplam maruziyet üst sınırı (USD)
+    /// Toplam maruziyet üst sınırı (USD)
     pub max_total_notional_usd: f64,
- /// Hesap kaldıraç üst sınırı
+    /// Hesap kaldıraç üst sınırı
     pub max_leverage: f64,
- /// Hesap equity'si bunun altına inerse yeni emir yok
+    /// Hesap equity'si bunun altına inerse yeni emir yok
     pub min_account_equity_usd: f64,
- /// Hyperliquid min emri ~$10; altındaki emir API'de reddedilir (girdi önce ele)
+    /// Hyperliquid min emri ~$10; altındaki emir API'de reddedilir (girdi önce ele)
     pub min_order_notional_usd: f64,
- /// pozisyon başına asgari sermaye → dinamik pozisyon sayısı = equity / bu
+    /// pozisyon başına asgari sermaye → dinamik pozisyon sayısı = equity / bu
     pub equity_per_position_usd: f64,
- /// Peak equity'den bu kadar düşüş -> trading durdur
+    /// Peak equity'den bu kadar düşüş -> trading durdur
     pub max_drawdown_pct: f64,
- /// Coin başına açık emir sayısı üst sınırı
+    /// Coin başına açık emir sayısı üst sınırı
     pub max_open_orders_per_coin: usize,
 }
 
@@ -81,14 +81,19 @@ pub struct RiskManager {
 
 impl RiskManager {
     pub fn new(cfg: RiskConfig) -> Self {
-        Self { cfg, peak_equity: 0.0, current_equity: 0.0, halted: None }
+        Self {
+            cfg,
+            peak_equity: 0.0,
+            current_equity: 0.0,
+            halted: None,
+        }
     }
 
     pub fn config(&self) -> &RiskConfig {
         &self.cfg
     }
 
- /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma
+    /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma
     pub fn update_equity(&mut self, equity: f64) {
         self.current_equity = equity;
         if equity > self.peak_equity {
@@ -97,7 +102,10 @@ impl RiskManager {
         if self.peak_equity > 0.0 {
             let dd = self.drawdown_pct(equity);
             if dd >= self.cfg.max_drawdown_pct && self.halted.is_none() {
-                let msg = format!("drawdown %{dd:.2} (peak={:.2}, now={equity:.2})", self.peak_equity);
+                let msg = format!(
+                    "drawdown %{dd:.2} (peak={:.2}, now={equity:.2})",
+                    self.peak_equity
+                );
                 tracing::error!("{msg} — TRADING DURDURULDU");
                 self.halted = Some(msg);
             }
@@ -119,10 +127,10 @@ impl RiskManager {
         self.halted.as_deref()
     }
 
- /// **Kalıcı risk hafızası** — restart drawdown hafızasını SİFIRLAMAZ:
- /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.
- /// (Bu hafızayı kaybetmek, "100→80'de halt, restart'ta 80 yeni peak" tipi
- /// resetlenmiş risk koruması demektir.)
+    /// **Kalıcı risk hafızası** — restart drawdown hafızasını SİFIRLAMAZ:
+    /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.
+    /// (Bu hafızayı kaybetmek, "100→80'de halt, restart'ta 80 yeni peak" tipi
+    /// resetlenmiş risk koruması demektir.)
     pub fn save_state(&self, path: &str) -> anyhow::Result<()> {
         use serde::{Deserialize, Serialize};
         #[derive(Serialize, Deserialize)]
@@ -153,7 +161,9 @@ impl RiskManager {
             current_equity: f64,
             halted: Option<String>,
         }
-        let Ok(txt) = std::fs::read_to_string(path) else { return false };
+        let Ok(txt) = std::fs::read_to_string(path) else {
+            return false;
+        };
         let Ok(p) = serde_json::from_str::<Persisted>(&txt) else {
             tracing::error!("risk hafızası BOZUK ({path}) — sıfırdan başlatıldı (uyarı: drawdown hafızası sıfır)");
             return false;
@@ -167,15 +177,15 @@ impl RiskManager {
         true
     }
 
- /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
+    /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
     pub fn resume(&mut self) {
         self.peak_equity = self.current_equity;
         self.halted = None;
     }
 
- /// SABİT pozisyon sayısı yerine bakiyeye göre dinamik üst sınır:
- /// `min(cfg_max, floor(equity / equity_per_position))`.
- /// $111 bakiyeyle 5 pozisyon açmak 5×$10'luk zorunlu minimuma takılırdı.
+    /// SABİT pozisyon sayısı yerine bakiyeye göre dinamik üst sınır:
+    /// `min(cfg_max, floor(equity / equity_per_position))`.
+    /// $111 bakiyeyle 5 pozisyon açmak 5×$10'luk zorunlu minimuma takılırdı.
     pub fn max_positions(&self, equity: f64, cfg_max: usize) -> usize {
         let by_equity = (equity / self.cfg.equity_per_position_usd.max(1.0)).floor();
         (by_equity as usize).min(cfg_max)
@@ -185,7 +195,7 @@ impl RiskManager {
         positions.values().map(|p| p.position_value.abs()).sum()
     }
 
- /// Emir öncesi kontrol. Ok: emir gönderilebilir.
+    /// Emir öncesi kontrol. Ok: emir gönderilebilir.
     pub fn pre_trade(
         &self,
         equity: f64,
@@ -201,7 +211,7 @@ impl RiskManager {
         if equity < self.cfg.min_account_equity_usd {
             return Err(RiskViolation::EquityFloor(equity));
         }
- // MIN NOTIONAL: borsa $10 altını reddeder — emir hiç üretilmemeli
+        // MIN NOTIONAL: borsa $10 altını reddeder — emir hiç üretilmemeli
         if order_notional_usd < self.cfg.min_order_notional_usd {
             return Err(RiskViolation::TooSmall(order_notional_usd));
         }
@@ -215,11 +225,17 @@ impl RiskManager {
             .unwrap_or(0.0);
         let projected = current + order_notional_usd;
         if projected > self.cfg.max_position_notional_usd {
-            return Err(RiskViolation::PositionLimit(projected, self.cfg.max_position_notional_usd));
+            return Err(RiskViolation::PositionLimit(
+                projected,
+                self.cfg.max_position_notional_usd,
+            ));
         }
         let total = Self::total_exposure(positions) + order_notional_usd;
         if total > self.cfg.max_total_notional_usd {
-            return Err(RiskViolation::TotalExposure(total, self.cfg.max_total_notional_usd));
+            return Err(RiskViolation::TotalExposure(
+                total,
+                self.cfg.max_total_notional_usd,
+            ));
         }
         if leverage > self.cfg.max_leverage {
             return Err(RiskViolation::Leverage(leverage, self.cfg.max_leverage));
@@ -238,41 +254,48 @@ impl RiskManager {
 mod tests {
     use super::*;
 
- // ── MİN NOTİONAL + DİNAMİK POZİSYON SAYISI ─────────────────────────────
+    // ── MİN NOTİONAL + DİNAMİK POZİSYON SAYISI ─────────────────────────────
     #[test]
     fn min_notional_alti_emir_reddedilir() {
         let r = RiskManager::new(RiskConfig::default());
         let pos = HashMap::new();
- // $8 tahsis → borsa reddeder; emir ÜRETİLMEMELİ
+        // $8 tahsis → borsa reddeder; emir ÜRETİLMEMELİ
         let e = r.pre_trade(1000.0, &pos, "BTC", 8.0, 1.0, 0);
         assert!(matches!(e, Err(RiskViolation::TooSmall(v)) if v == 8.0));
- // $10 üzeri geçer
+        // $10 üzeri geçer
         assert!(r.pre_trade(1000.0, &pos, "BTC", 25.0, 1.0, 0).is_ok());
     }
 
     #[test]
     fn pozisyon_sayisi_bakiyeye_gore_dinamik_kisalir() {
         let r = RiskManager::new(RiskConfig::default());
- // $111 bakiye: 111/15 = 7 → min(5, 7) = 5
+        // $111 bakiye: 111/15 = 7 → min(5, 7) = 5
         assert_eq!(r.max_positions(111.0, 5), 5);
- // $50 bakiye: 50/15 = 3 → 3 pozisyon (her biri en az ~$16)
+        // $50 bakiye: 50/15 = 3 → 3 pozisyon (her biri en az ~$16)
         assert_eq!(r.max_positions(50.0, 5), 3);
- // $30 bakiye: 2 pozisyon
+        // $30 bakiye: 2 pozisyon
         assert_eq!(r.max_positions(30.0, 5), 2);
- // $15 bakiye: 1 pozisyon (sabit 5'in altına iner)
+        // $15 bakiye: 1 pozisyon (sabit 5'in altına iner)
         assert_eq!(r.max_positions(15.0, 5), 1);
- // $10 bakiye: 0 → hiç pozisyon açılmaz ($10 min notional'ın altı)
+        // $10 bakiye: 0 → hiç pozisyon açılmaz ($10 min notional'ın altı)
         assert_eq!(r.max_positions(10.0, 5), 0);
     }
 
     #[test]
     fn dinamik_pozisyon_sayisi_asla_configi_gecmez() {
         let r = RiskManager::new(RiskConfig::default());
-        assert_eq!(r.max_positions(1_000_000.0, 5), 5, "devasa bakiye bile 5'yi geçmemeli");
-        assert_eq!(r.max_positions(0.0, 5), 0, "sıfır bakiyede pozisyon açılmaz");
+        assert_eq!(
+            r.max_positions(1_000_000.0, 5),
+            5,
+            "devasa bakiye bile 5'yi geçmemeli"
+        );
+        assert_eq!(
+            r.max_positions(0.0, 5),
+            0,
+            "sıfır bakiyede pozisyon açılmaz"
+        );
     }
 }
-
 
 #[cfg(test)]
 mod persistence_tests {
@@ -297,9 +320,12 @@ mod persistence_tests {
         // RESTART: yeni RiskManager → yükle
         let mut r2 = RiskManager::new(RiskConfig::default());
         assert!(r2.load_state(path), "yüklenmeli");
-        assert_eq!(r2.halt_reason().is_some(), true, "halted kalıcı");
+        assert!(r2.halt_reason().is_some(), "halted kalıcı");
         // drawdown hafızası: peak hâlâ 100 → 85'te hâlâ halt bölgesi
-        assert!((r2.drawdown_pct(85.0) - 15.0).abs() < 1e-9, "peak=100 korunmalı (80 yeni peak SANILMAZ)");
+        assert!(
+            (r2.drawdown_pct(85.0) - 15.0).abs() < 1e-9,
+            "peak=100 korunmalı (80 yeni peak SANILMAZ)"
+        );
         // resume ile peak mevcut equity'ye çekilir
         r2.update_equity(85.0);
         r2.resume();

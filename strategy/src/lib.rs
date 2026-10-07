@@ -2,34 +2,39 @@
 //!
 //! Sözleşme:
 //! 1. `Strategy::evaluate(&MarketInput) -> Signal` — SAFTIR: pozisyon
+//!
 //! açamaz, ağ erişemez; panik motorca izole edilir (Skip).
 //! 2. `Signal`: Long/Short { strength ∈ [0,1] } / Hold / Exit (kapanış
+//!
 //! önerisi — engine exit kanalına gider) / Skip (veri yok — SAHTE
 //! sinyal üretilmez; `unwrap_or(0.5)` fallback'leri yasak).
 //! 3. `Strategy::status(input)`: ACTIVE / AUXILIARY (yönsüz yardımcı:
+//!
 //! Kelly/MM) — HL'de girdisi yapısal olarak olmayan strateji
 //! (IV feed, temel veri, parent-order) registry'de YER ALMAZ;
 //! sessiz ölü strateji raporlanmak zorundadır.
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
+//!
 //! (funding/OI/taker/imbalance/universe_returns).
 //! 5. `registry`: 15 strateji; `strat_test_helpers` yalnız-test
+//!
 //! deterministik mum üreteci.
-pub mod wyckoff;
+pub mod classic_indicators;
 pub mod cross_sectional_momentum;
-pub mod order_flow_imbalance;
-pub mod market_making;
-pub mod garch_regime;
+pub mod dow_theory;
+pub mod elliott_wave;
+pub mod ensemble;
 pub mod funding_carry;
+pub mod garch_regime;
+pub mod market_making;
 pub mod open_interest;
+pub mod order_flow_imbalance;
+pub mod overreaction;
 pub mod regime_detection;
 pub mod risk_kelly;
-pub mod dow_theory;
-pub mod overreaction;
-pub mod ensemble;
-pub mod classic_indicators;
-pub mod elliott_wave;
-pub mod turtle_system;
 pub mod squeeze_breakout;
+pub mod turtle_system;
+pub mod wyckoff;
 
 use data::market_ctx::CtxState;
 use data::Candle;
@@ -37,34 +42,34 @@ use data::Candle;
 /// Strateji girdisi: tüm hesaplamalar bu snapshot üzerinden yapılır.
 pub struct MarketInput {
     pub coin: String,
- /// 1h mumlar, kronolojik sıra (eski→yeni)
+    /// 1h mumlar, kronolojik sıra (eski→yeni)
     pub candles: Vec<Candle>,
- /// canlı bağlam (funding/OI/mark) — data::MarketCtx'ten
+    /// canlı bağlam (funding/OI/mark) — data::MarketCtx'ten
     pub ctx: Option<CtxState>,
- /// OI değişimi (son iki ölçüm)
+    /// OI değişimi (son iki ölçüm)
     pub oi_delta: Option<f64>,
- /// taker buy oranı (0..1)
+    /// taker buy oranı (0..1)
     pub taker_ratio: Option<f64>,
- /// üst N seviye defter dengesi [-1,1]
+    /// üst N seviye defter dengesi [-1,1]
     pub book_imbalance: Option<f64>,
     pub best_bid: Option<f64>,
     pub best_ask: Option<f64>,
- /// evren geneli 1g getiriler: `mark_px / prev_day_px − 1` (`engine_loop.rs`,
- /// `activeAssetCtx`) — kesit sıralaması ve `crisis_mode`. **7g değil.**
+    /// evren geneli 1g getiriler: `mark_px / prev_day_px − 1` (`engine_loop.rs`,
+    /// `activeAssetCtx`) — kesit sıralaması ve `crisis_mode`. **7g değil.**
     pub universe_returns: Vec<(String, f64)>,
- /// harici IV (Deribit) — opsiyonel yol
+    /// harici IV (Deribit) — opsiyonel yol
     pub iv: Option<f64>,
- /// hesap equity (sizing)
+    /// hesap equity (sizing)
     pub equity: f64,
- /// mevcut envanter (USD, +long / -short) — / 
+    /// mevcut envanter (USD, +long / -short) — /
     pub inventory_usd: f64,
- /// yürütülecek parent emir büyüklüğü (USD) — 
+    /// yürütülecek parent emir büyüklüğü (USD) —
     pub order_size_usd: f64,
- /// **PORTFÖY win-rate** — tracker'ın TOPLAM canlı kanıtından (engine
- /// doldurur). `None` = kanıt yok. Kelly sizing bunun dışındaki hiçbir
- /// kaynaktan win-rate ALMAZ (sabit %45 yasağı).
+    /// **PORTFÖY win-rate** — tracker'ın TOPLAM canlı kanıtından (engine
+    /// doldurur). `None` = kanıt yok. Kelly sizing bunun dışındaki hiçbir
+    /// kaynaktan win-rate ALMAZ (sabit %45 yasağı).
     pub portfolio_win_rate: Option<f64>,
- /// **PORTFÖY k/z oranı** (ortalama kâr R / ortalama zarar |R|) — `None` = kanıt yok.
+    /// **PORTFÖY k/z oranı** (ortalama kâr R / ortalama zarar |R|) — `None` = kanıt yok.
     pub portfolio_wl_ratio: Option<f64>,
 }
 
@@ -93,40 +98,52 @@ impl Default for MarketInput {
 /// Strateji çıktısı. strength ∈ [-1,1] (kayıt dışı güç, sizing risk katmanında).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Signal {
-    Long { strength: f64, note: String },
-    Short { strength: f64, note: String },
-    Hold { note: String },
- /// Kapanış/değişim önerisi (örn. sıralama kayması, kapanan kırılım)
-    Exit { note: String },
- /// Harici veri / yeterli veri yok — SAHTE sinyal üretilmez
-    Skip { reason: String },
+    Long {
+        strength: f64,
+        note: String,
+    },
+    Short {
+        strength: f64,
+        note: String,
+    },
+    Hold {
+        note: String,
+    },
+    /// Kapanış/değişim önerisi (örn. sıralama kayması, kapanan kırılım)
+    Exit {
+        note: String,
+    },
+    /// Harici veri / yeterli veri yok — SAHTE sinyal üretilmez
+    Skip {
+        reason: String,
+    },
 }
 
 pub trait Strategy: Send + Sync {
     fn name(&self) -> &'static str;
- /// Hangi dokümanı uyguladığı
+    /// Hangi dokümanı uyguladığı
     fn evaluate(&self, input: &MarketInput) -> Signal;
 
- /// **ÇIKIŞ NİYETİ** — pozisyon-farkında çıkış kuralı.
- ///
- /// "Strateji kuralları TEK YERDE" prensibi: çıkış kuralı stratejinin
- /// KENDİSİNDE yaşar (durum dahil — önceki döngü bandı gibi); motor
- /// pozisyon state'ini verir ve niyeti YÖNLENDİRİR (`ExitNow`), kuralı
- /// BİLMEZ. Varsayılan: yok (çoğu strateji çıkış kuralı tanımlamaz).
- ///
- /// `ctx.position = None` (Flat) → niyet sorulmaz → emir üretilmez.
+    /// **ÇIKIŞ NİYETİ** — pozisyon-farkında çıkış kuralı.
+    ///
+    /// "Strateji kuralları TEK YERDE" prensibi: çıkış kuralı stratejinin
+    /// KENDİSİNDE yaşar (durum dahil — önceki döngü bandı gibi); motor
+    /// pozisyon state'ini verir ve niyeti YÖNLENDİRİR (`ExitNow`), kuralı
+    /// BİLMEZ. Varsayılan: yok (çoğu strateji çıkış kuralı tanımlamaz).
+    ///
+    /// `ctx.position = None` (Flat) → niyet sorulmaz → emir üretilmez.
     fn exit_intent(&self, ctx: &ExitCtx) -> Option<ExitIntent> {
         let _ = ctx;
         None
     }
 
- /// Sistem raporu için durum (sistem raporu `ACTIVE / AUXILIARY /
- /// DATA-MISSING` ayrımı yapabilmeli).
- ///
- /// Varsayılan: girdisi tam gelen yönlü strateji (`ACTIVE`).
- /// Geçersiz kılanlar (kendisini en iyi bilen stratejinin kendisidir):
- /// `Kelly Sizing`, `Market Making` → `AUXILIARY`
- /// (yön üretmez, gerçek parayla giriş sinyali DEĞİL).
+    /// Sistem raporu için durum (sistem raporu `ACTIVE / AUXILIARY /
+    /// DATA-MISSING` ayrımı yapabilmeli).
+    ///
+    /// Varsayılan: girdisi tam gelen yönlü strateji (`ACTIVE`).
+    /// Geçersiz kılanlar (kendisini en iyi bilen stratejinin kendisidir):
+    /// `Kelly Sizing`, `Market Making` → `AUXILIARY`
+    /// (yön üretmez, gerçek parayla giriş sinyali DEĞİL).
     fn status(&self, input: &MarketInput) -> StratStatus {
         let _ = input;
         StratStatus::Active
@@ -189,10 +206,21 @@ pub struct ExitIntent {
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
     vec![
-        "Wyckoff", "Cross-Sectional Momentum", "Order Flow Imbalance", "Market Making",
-        "GARCH", "Funding Carry", "Open Interest",
-        "Regime Detection", "Kelly Sizing", "Dow Theory", "Overreaction", "Classic Indicators",
-        "Elliott", "Turtle", "Squeeze Breakout",
+        "Wyckoff",
+        "Cross-Sectional Momentum",
+        "Order Flow Imbalance",
+        "Market Making",
+        "GARCH",
+        "Funding Carry",
+        "Open Interest",
+        "Regime Detection",
+        "Kelly Sizing",
+        "Dow Theory",
+        "Overreaction",
+        "Classic Indicators",
+        "Elliott",
+        "Turtle",
+        "Squeeze Breakout",
     ]
 }
 
@@ -208,13 +236,11 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(regime_detection::RegimeDetection),
         Box::new(risk_kelly::RiskKelly),
         Box::new(dow_theory::DowTheory),
-        
         Box::new(overreaction::Overreaction),
         Box::new(classic_indicators::ClassicIndicators),
         Box::new(elliott_wave::ElliottWave),
         Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
-        
     ]
 }
 
@@ -284,5 +310,3 @@ pub const STRATEGY_COUNT: usize = 15;
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]
 pub mod strat_test_helpers;
-
-

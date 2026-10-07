@@ -2,10 +2,13 @@
 //!
 //! Görevler:
 //! 1. Evreni abonelik listelerine böler (shard başına ~160 kanal) ve
+//!
 //! her shard için ayrı WS bağlantısı açar.
 //! 2. Ham WS kanallarını (trades / l2Book / activeAssetCtx / orderUpdates /
+//!
 //! userEvents) `StreamEvent`'e çevirir (`translate`).
 //! 3. `IngestorConfig`: shard_count, min_day_volume_usd (düşük hacimli
+//!
 //! coin filtresi), l2book_top_n, ctx_enabled.
 //! evren DIŞARIDAN verilir (`with_universe`) — sessiz kırpma yok;
 //! abonelik listesi `TradingUniverse`'den üretilir.
@@ -21,13 +24,13 @@ use hyperliquid_api::{Config, Info, WsClient};
 
 #[derive(Debug, Clone)]
 pub struct IngestorConfig {
- /// WS bağlantı sayısı (coinler buna bölünür)
+    /// WS bağlantı sayısı (coinler buna bölünür)
     pub shard_count: usize,
- /// Günlük hacmi bunun altındaki coinler atlanır (USD); 0 = tümü
+    /// Günlük hacmi bunun altındaki coinler atlanır (USD); 0 = tümü
     pub min_day_volume_usd: f64,
- /// l2Book aboneliği açılacak coin sayısı (günlük hacme göre ilk N); 0 = kapalı
+    /// l2Book aboneliği açılacak coin sayısı (günlük hacme göre ilk N); 0 = kapalı
     pub l2book_top_n: usize,
- /// activeAssetCtx aboneliği: canlı funding/OI/mark/oracle (tüm aktif coinler)
+    /// activeAssetCtx aboneliği: canlı funding/OI/mark/oracle (tüm aktif coinler)
     pub ctx_enabled: bool,
     pub include_trades: bool,
     pub include_all_mids: bool,
@@ -72,11 +75,35 @@ impl Universe {
 /// Tek tek abonelik yerine birleşik akış event'leri
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    Trade { coin: String, px: f64, sz: f64, ts: i64, is_buy: bool },
-    Book { coin: String, bids: Vec<(f64, f64)>, asks: Vec<(f64, f64)>, ts: i64 },
-    Mids { mids: HashMap<String, f64>, ts: i64 },
- /// WS activeAssetCtx: canlı piyasa bağlamı (funding, OI, mark/oracle...)
-    Ctx { coin: String, funding: f64, open_interest: f64, mark_px: f64, oracle_px: f64, premium: Option<f64>, day_ntl_vlm: Option<f64>, prev_day_px: Option<f64>, ts: i64 },
+    Trade {
+        coin: String,
+        px: f64,
+        sz: f64,
+        ts: i64,
+        is_buy: bool,
+    },
+    Book {
+        coin: String,
+        bids: Vec<(f64, f64)>,
+        asks: Vec<(f64, f64)>,
+        ts: i64,
+    },
+    Mids {
+        mids: HashMap<String, f64>,
+        ts: i64,
+    },
+    /// WS activeAssetCtx: canlı piyasa bağlamı (funding, OI, mark/oracle...)
+    Ctx {
+        coin: String,
+        funding: f64,
+        open_interest: f64,
+        mark_px: f64,
+        oracle_px: f64,
+        premium: Option<f64>,
+        day_ntl_vlm: Option<f64>,
+        prev_day_px: Option<f64>,
+        ts: i64,
+    },
 }
 
 /// WS/REST sayı alanları: string veya number gelebilir.
@@ -105,7 +132,11 @@ pub async fn load_universe(info: &Info, cfg: &IngestorConfig) -> Result<Universe
             Some(c) => match c.dayNtlVlm.parse::<f64>() {
                 Ok(v) if v.is_finite() => v,
                 _ => {
-                    tracing::warn!("[UNIVERSE] {}: dayNtlVlm bozuk ('{}') — coin düşürüldü", m.name, c.dayNtlVlm);
+                    tracing::warn!(
+                        "[UNIVERSE] {}: dayNtlVlm bozuk ('{}') — coin düşürüldü",
+                        m.name,
+                        c.dayNtlVlm
+                    );
                     0.0
                 }
             },
@@ -124,53 +155,58 @@ pub async fn load_universe(info: &Info, cfg: &IngestorConfig) -> Result<Universe
             day_volume_usd: vol,
         });
     }
- // burada KIRPMA YAPILMAZ. Evren bir kez `TradingUniverse::build`
- // içinde çözülür; ingestor `max_coins` ile kendi TOP-N'ini seçerse
- // engine listesiyle AYRIŞIR (ayni sayi, farkli set).
+    // burada KIRPMA YAPILMAZ. Evren bir kez `TradingUniverse::build`
+    // içinde çözülür; ingestor `max_coins` ile kendi TOP-N'ini seçerse
+    // engine listesiyle AYRIŞIR (ayni sayi, farkli set).
     coins.sort_by(|a, b| b.day_volume_usd.total_cmp(&a.day_volume_usd));
     Ok(Universe { coins })
 }
 
 pub struct Ingestor {
     pub cfg: IngestorConfig,
- /// evren tek kaynaktan gelir (`TradingUniverse`), `Universe` DEĞİL.
+    /// evren tek kaynaktan gelir (`TradingUniverse`), `Universe` DEĞİL.
     pub universe: TradingUniverse,
 }
 
 impl Ingestor {
- /// evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
- /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
+    /// evren DIŞARIDAN verilir — ingestor kendi evrenini KENDISI
+    /// seçmez. `Ingestor::new` yerine `Ingestor::with_universe` kullanılır.
     pub async fn with_universe(
         _cfg: Config,
         icfg: IngestorConfig,
         universe: TradingUniverse,
     ) -> Result<Self> {
- // Katman doğrulaması: engine listesi ile abonelik listesi birebir aynı
- // olmalı. Uyuşmazlıkta burada hata verir -> bot başlamaz.
+        // Katman doğrulaması: engine listesi ile abonelik listesi birebir aynı
+        // olmalı. Uyuşmazlıkta burada hata verir -> bot başlamaz.
         universe.verify_layers(&icfg)?;
         tracing::info!(
             "evren: {} coin (min hacim ${:.0}, l2book ilk {})",
-            universe.len(), icfg.min_day_volume_usd, icfg.l2book_top_n
+            universe.len(),
+            icfg.min_day_volume_usd,
+            icfg.l2book_top_n
         );
-        Ok(Self { cfg: icfg, universe })
+        Ok(Self {
+            cfg: icfg,
+            universe,
+        })
     }
 
- /// Shard'lı WS bağlantılarını başlatır; birleşik StreamEvent akışı döner.
- /// Her shard kopunca kendi kendine yeniden bağlanır (WsClient.run);
- /// ham WsEvent'ler tek noktada StreamEvent'e çevrilir.
+    /// Shard'lı WS bağlantılarını başlatır; birleşik StreamEvent akışı döner.
+    /// Her shard kopunca kendi kendine yeniden bağlanır (WsClient.run);
+    /// ham WsEvent'ler tek noktada StreamEvent'e çevrilir.
     pub fn start(&self, api_cfg: Config) -> mpsc::Receiver<StreamEvent> {
         let (tx_out, rx) = mpsc::channel(8192);
         let (tx_raw, mut rx_raw) = mpsc::channel(8192);
         let shards = self.cfg.shard_count.max(1);
- // abonelik listesi TEK KAYNAKTAN (`TradingUniverse`) üretilir.
+        // abonelik listesi TEK KAYNAKTAN (`TradingUniverse`) üretilir.
         let all_subs = self.universe.subscription_list(&self.cfg);
         let mut per_shard: Vec<Vec<Value>> = vec![Vec::new(); shards];
         for v in all_subs {
             match v["type"].as_str() {
- // allMids coin-bağımsız: ilk shard'a konur
+                // allMids coin-bağımsız: ilk shard'a konur
                 Some("allMids") => per_shard[0].push(v),
                 _ => {
- // coin'e göre shard dağıtımı — evren sırasından türetilir
+                    // coin'e göre shard dağıtımı — evren sırasından türetilir
                     let i = self
                         .universe
                         .names()
@@ -181,8 +217,7 @@ impl Ingestor {
                 }
             }
         }
-        for shard in 0..shards {
-            let subs = std::mem::take(&mut per_shard[shard]);
+        for (shard, subs) in per_shard.into_iter().enumerate() {
             let tx_raw = tx_raw.clone();
             let cfg = api_cfg.clone();
             tracing::info!("shard {shard}: {} abonelik", subs.len());
@@ -194,16 +229,18 @@ impl Ingestor {
                     let ws = WsClient::new(cfg.clone());
                     match ws.run(subs.clone(), tx_raw.clone()).await {
                         Ok(()) => tracing::warn!("shard {shard} döndü — yeniden başlatılıyor"),
-                        Err(e) => tracing::error!("shard {shard} ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor"),
+                        Err(e) => tracing::error!(
+                            "shard {shard} ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor"
+                        ),
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             });
         }
- // tx_raw'un son kopyasını bırak -> tüm shardlar bittiğinde pump da biter
+        // tx_raw'un son kopyasını bırak -> tüm shardlar bittiğinde pump da biter
         drop(tx_raw);
 
- // Pump: WsEvent -> StreamEvent (trades dizisi tek tek iletilir)
+        // Pump: WsEvent -> StreamEvent (trades dizisi tek tek iletilir)
         tokio::spawn(async move {
             while let Some(ev) = rx_raw.recv().await {
                 for se in Self::translate(&ev) {
@@ -216,8 +253,8 @@ impl Ingestor {
         rx
     }
 
- /// Ham WsEvent -> birleşik StreamEvent'ler (trades dizisi -> her tick ayrı).
- /// Boş vec: ilgisiz/bozuk mesaj.
+    /// Ham WsEvent -> birleşik StreamEvent'ler (trades dizisi -> her tick ayrı).
+    /// Boş vec: ilgisiz/bozuk mesaj.
     pub fn translate(ev: &hyperliquid_api::websocket::WsEvent) -> Vec<StreamEvent> {
         match ev.channel.as_str() {
             "trades" => ev
@@ -239,16 +276,18 @@ impl Ingestor {
                 .unwrap_or_default(),
             "l2Book" => {
                 let parse = |lv: &Value| -> Vec<(f64, f64)> {
-                    lv.as_array().map(|a| {
-                        a.iter()
-                            .filter_map(|l| {
-                                Some((
-                                    l["px"].as_str()?.parse().ok()?,
-                                    l["sz"].as_str()?.parse().ok()?,
-                                ))
-                            })
-                            .collect()
-                    }).unwrap_or_default()
+                    lv.as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|l| {
+                                    Some((
+                                        l["px"].as_str()?.parse().ok()?,
+                                        l["sz"].as_str()?.parse().ok()?,
+                                    ))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
                 };
                 match ev.data["levels"].as_array() {
                     Some(levels) if levels.len() == 2 => vec![StreamEvent::Book {
@@ -262,7 +301,10 @@ impl Ingestor {
             }
             "allMids" => match ev.data["mids"].as_object() {
                 Some(m) => vec![StreamEvent::Mids {
-                    mids: m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.parse().ok()?))).collect(),
+                    mids: m
+                        .iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.parse().ok()?)))
+                        .collect(),
                     ts: hyperliquid_api::now_ms() as i64,
                 }],
                 None => vec![],
@@ -307,7 +349,6 @@ impl Ingestor {
     }
 }
 
-
 #[cfg(test)]
 mod num_sozlesme_testleri {
     use super::*;
@@ -318,11 +359,10 @@ mod num_sozlesme_testleri {
     #[test]
     fn shard_supervisor_dongusu_mevcut() {
         let src = include_str!("ingestor.rs");
-        assert!(
-            src.contains("shard {shard} ÖLDÜ"),
-            "shard ölüm logu yok"
-        );
-        let bas = src.find("// SUPERVISOR: shard kalıcı ölüm").expect("shard supervisor bloğu yok");
+        assert!(src.contains("shard {shard} ÖLDÜ"), "shard ölüm logu yok");
+        let bas = src
+            .find("// SUPERVISOR: shard kalıcı ölüm")
+            .expect("shard supervisor bloğu yok");
         let blok = &src[bas..];
         assert!(
             blok.contains("loop {"),
@@ -333,7 +373,6 @@ mod num_sozlesme_testleri {
             "shard supervisor yeniden başlatma beklemesi yok"
         );
     }
-
 
     /// SAYI SÖZLEŞMESİ: eksik/geçersiz/finite-olmayan → None; sahte 0.0 YOK.
     #[test]
@@ -380,7 +419,16 @@ mod num_sozlesme_testleri {
         let out = Ingestor::translate(&ev);
         assert_eq!(out.len(), 1);
         match &out[0] {
-            StreamEvent::Ctx { funding, open_interest, mark_px, oracle_px, premium, day_ntl_vlm, prev_day_px, .. } => {
+            StreamEvent::Ctx {
+                funding,
+                open_interest,
+                mark_px,
+                oracle_px,
+                premium,
+                day_ntl_vlm,
+                prev_day_px,
+                ..
+            } => {
                 assert_eq!(*funding, 0.0001);
                 assert_eq!(*open_interest, 123.4);
                 assert_eq!(*mark_px, 65000.5);
@@ -423,7 +471,12 @@ mod num_sozlesme_testleri {
         };
         let out = Ingestor::translate(&ev);
         match &out[0] {
-            StreamEvent::Ctx { premium, day_ntl_vlm, prev_day_px, .. } => {
+            StreamEvent::Ctx {
+                premium,
+                day_ntl_vlm,
+                prev_day_px,
+                ..
+            } => {
                 assert_eq!(*premium, None);
                 assert_eq!(*day_ntl_vlm, None);
                 assert_eq!(*prev_day_px, None);

@@ -40,7 +40,7 @@
 //! Deterministik pencere taraması (son N bar): aynı seri -> aynı sinyal;
 //! gizli durum yok, restart/replay idempotent. Eksik veri -> Skip
 //! (panik yok, sahte değer yok).
-use crate::{closes, volumes, MarketInput, Signal, Strategy, ExitCtx, ExitIntent};
+use crate::{closes, volumes, ExitCtx, ExitIntent, MarketInput, Signal, Strategy};
 
 pub struct Wyckoff;
 
@@ -53,7 +53,6 @@ const CLIMAX_VOL_DECAY: f64 = 0.9; // test hacmi klimakstan azalan
 const TEST_VOL_DECAY: f64 = 0.8; // test-onayı hacmi springden azalan
 const CLOSE_OFF_PIVOT: f64 = 0.4; // klimaks kapanışı bar ucundan uzaklık
 const RANGE_MIN_SPREADS: f64 = 1.2; // anlamlı aralık yüksekliği
-const SPRING_BREAK_SPREADS: f64 = 0.1; // spring min ihlal derinliği
 const BREAK_INVALID_SPREADS: f64 = 0.5; // fiyatla kapanış = yapı iptali
 const NEAR_SUPPORT_SPREADS: f64 = 0.25; // test yakınlığı
 const SOS_SPREAD_MULT: f64 = 1.3; // SOS bar genişliği
@@ -128,9 +127,15 @@ impl Wyckoff {
             // AR: klimakstan sonra en yüksek tepki (SC) / en alçak düzeltme (BC)
             let mut ar_lvl = if low_pivot { f64::MIN } else { f64::MAX };
             let mut ar_idx = usize::MAX;
-            for j in (i + 1)..((i + 1 + AR_LOOKAHEAD).min(tail.len())) {
-                let cand = if low_pivot { tail[j].h } else { tail[j].l };
-                let better = if low_pivot { cand > ar_lvl } else { cand < ar_lvl };
+            let ar_end = (i + 1 + AR_LOOKAHEAD).min(tail.len());
+            for (off, cand_c) in tail[(i + 1)..ar_end].iter().enumerate() {
+                let j = (i + 1) + off;
+                let cand = if low_pivot { cand_c.h } else { cand_c.l };
+                let better = if low_pivot {
+                    cand > ar_lvl
+                } else {
+                    cand < ar_lvl
+                };
                 if better {
                     ar_lvl = cand;
                     ar_idx = j;
@@ -139,12 +144,20 @@ impl Wyckoff {
             if ar_idx == usize::MAX {
                 continue;
             }
-            let range_h = if low_pivot { ar_lvl - extreme } else { extreme - ar_lvl };
+            let range_h = if low_pivot {
+                ar_lvl - extreme
+            } else {
+                extreme - ar_lvl
+            };
             if range_h < RANGE_MIN_SPREADS * avg_spread {
                 continue;
             }
             return Some(RangeInfo {
-                climax: Climax { tail_idx: i, level: extreme, vol: c.v },
+                climax: Climax {
+                    tail_idx: i,
+                    level: extreme,
+                    vol: c.v,
+                },
                 ar_level: ar_lvl,
                 ar_idx,
             });
@@ -162,8 +175,8 @@ impl Wyckoff {
         let mut ev = AccumEvents::default();
         let support = r.climax.level;
         let resistance = r.ar_level;
-        for j in (r.ar_idx + 1)..tail.len() {
-            let b = &tail[j];
+        for (off, b) in tail[(r.ar_idx + 1)..].iter().enumerate() {
+            let j = (r.ar_idx + 1) + off;
             // spring: sınır ihlali + FİYATLA geri kapanış (bir kez)
             if ev.spring.is_none() && b.l < support && b.c > support {
                 ev.spring = Some((j, b.l, b.v));
@@ -213,8 +226,8 @@ impl Wyckoff {
         let mut ev = DistriEvents::default();
         let resistance = r.climax.level;
         let support = r.ar_level;
-        for j in (r.ar_idx + 1)..tail.len() {
-            let b = &tail[j];
+        for (off, b) in tail[(r.ar_idx + 1)..].iter().enumerate() {
+            let j = (r.ar_idx + 1) + off;
             // UT: üst sınır ihlali + fiyatla içtarafa kapanış (bir kez)
             if ev.ut.is_none() && b.h > resistance && b.c < resistance {
                 ev.ut = Some((j, b.h, b.v));
@@ -245,7 +258,7 @@ impl Wyckoff {
 
     /// Effort/Result divergence ölçümü: son 3 bar yüksek hacim + dar sonuç.
     fn divergence(tail: &[crate::Candle], vols: &[f64], v_avg: f64, avg_spread: f64) -> bool {
-        let w = tail.len().min(3).max(1);
+        let w = tail.len().clamp(1, 3);
         let v3 = vols[vols.len() - w..].iter().sum::<f64>() / w as f64;
         let progress = tail[tail.len() - w..]
             .iter()
@@ -262,7 +275,9 @@ impl Wyckoff {
         match sig {
             Signal::Long { strength, note } => Signal::Long {
                 strength: strength * DIVERGENCE_DAMP,
-                note: format!("{note}; EFFORT/RESULT divergence (yüksek hacim dar sonuç) — güven 0.6x"),
+                note: format!(
+                    "{note}; EFFORT/RESULT divergence (yüksek hacim dar sonuç) — güven 0.6x"
+                ),
             },
             Signal::Short { strength, note } => Signal::Short {
                 strength: strength * DIVERGENCE_DAMP,
@@ -306,10 +321,15 @@ impl Strategy for Wyckoff {
         let vol_head = volumes(&input.candles);
         let v_avg = vol_head[n - 20..].iter().sum::<f64>() / 20.0;
         let vol_tail = &vol_head[n - WINDOW..];
-        let avg_spread =
-            input.candles[n - 20..].iter().map(|x| x.h - x.l).sum::<f64>() / 20.0;
+        let avg_spread = input.candles[n - 20..]
+            .iter()
+            .map(|x| x.h - x.l)
+            .sum::<f64>()
+            / 20.0;
         if !(v_avg.is_finite() && v_avg > 0.0) || !(avg_spread.is_finite() && avg_spread > 0.0) {
-            return Signal::Skip { reason: "hacim/spread hesaplanamaz".into() };
+            return Signal::Skip {
+                reason: "hacim/spread hesaplanamaz".into(),
+            };
         }
         let tail = &input.candles[n - WINDOW..];
         let last = &input.candles[n - 1];
@@ -326,8 +346,11 @@ impl Strategy for Wyckoff {
                 "şematik olay yok (geçerli klimaks+AR bulunamadı)",
             );
         }
-        let latest_of =
-            |r: &Option<RangeInfo>| r.as_ref().map(|x| x.climax.tail_idx.max(x.ar_idx)).unwrap_or(0);
+        let latest_of = |r: &Option<RangeInfo>| {
+            r.as_ref()
+                .map(|x| x.climax.tail_idx.max(x.ar_idx))
+                .unwrap_or(0)
+        };
         let use_bull = match (&bull, &bear) {
             (Some(_), Some(_)) => latest_of(&bull) >= latest_of(&bear),
             (Some(_), None) => true,
@@ -437,7 +460,8 @@ impl Strategy for Wyckoff {
             return Self::damper(
                 Signal::Short {
                     strength: 0.78,
-                    note: "LPSY: UT doğrulandı (daha alçak teppe + azalan hacim); faz D markdown".into(),
+                    note: "LPSY: UT doğrulandı (daha alçak teppe + azalan hacim); faz D markdown"
+                        .into(),
                 },
                 divergent,
             );
@@ -474,14 +498,21 @@ impl Strategy for Wyckoff {
         let vols = volumes(candles);
         let n = candles.len();
         let v_avg20 = vols[n - 20..].iter().sum::<f64>() / 20.0;
-        let avg_spread20 =
-            candles[n - 20..].iter().map(|x| x.h - x.l).sum::<f64>() / 20.0;
-        if !(v_avg20.is_finite() && v_avg20 > 0.0) || !(avg_spread20.is_finite() && avg_spread20 > 0.0) {
+        let avg_spread20 = candles[n - 20..].iter().map(|x| x.h - x.l).sum::<f64>() / 20.0;
+        if !(v_avg20.is_finite() && v_avg20 > 0.0)
+            || !(avg_spread20.is_finite() && avg_spread20 > 0.0)
+        {
             return None;
         }
         let last = &candles[n - 1];
-        let range_h = candles[n - 20..].iter().map(|x| x.h).fold(f64::MIN, f64::max);
-        let range_l = candles[n - 20..].iter().map(|x| x.l).fold(f64::MAX, f64::min);
+        let range_h = candles[n - 20..]
+            .iter()
+            .map(|x| x.h)
+            .fold(f64::MIN, f64::max);
+        let range_l = candles[n - 20..]
+            .iter()
+            .map(|x| x.l)
+            .fold(f64::MAX, f64::min);
         let span = (range_h - range_l).max(1e-12);
         let spread = (last.h - last.l).max(1e-12);
         let in_range = (last.c - range_l) / span;
@@ -514,20 +545,22 @@ mod wyckoff_professional_tests {
     use crate::Candle;
 
     /// Anlık mum üretici: (o,h,l,c,v) dizisi → artan t'li seriler
-
     /// Birikim dizilimi üretir (SC+AR) ve son barı taketover ile değiştirir
     fn accumulation_base() -> Vec<Candle> {
         let mut c = H::flat(92, 100.0); // tablo: v=100, spread 0.2
-        c.extend(H::rows(92, &[
-            // SC idx92 (tail idx 0): klimaks + düşük üstünden kapanış
-            (100.0, 98.0, 95.0, 97.5, 400.0),
-            // AR idx93 (tail idx 1): tepki → direnç 96.9
-            (97.5, 96.9, 96.2, 96.5, 120.0),
-            (96.5, 96.8, 95.8, 96.2, 90.0),
-            // ST x2 (azalan hacim)
-            (96.0, 96.1, 95.02, 95.9, 150.0),
-            (96.0, 96.0, 95.01, 95.8, 140.0),
-        ]));
+        c.extend(H::rows(
+            92,
+            &[
+                // SC idx92 (tail idx 0): klimaks + düşük üstünden kapanış
+                (100.0, 98.0, 95.0, 97.5, 400.0),
+                // AR idx93 (tail idx 1): tepki → direnç 96.9
+                (97.5, 96.9, 96.2, 96.5, 120.0),
+                (96.5, 96.8, 95.8, 96.2, 90.0),
+                // ST x2 (azalan hacim)
+                (96.0, 96.1, 95.02, 95.9, 150.0),
+                (96.0, 96.0, 95.01, 95.8, 140.0),
+            ],
+        ));
         // idx97..: nötr bölge (aralık içi)
         let mut c2 = c.clone();
         c2.extend(H::flat(32, 96.4));
@@ -536,7 +569,11 @@ mod wyckoff_professional_tests {
 
     #[test]
     fn skip_yetersiz_mum() {
-        let input = MarketInput { coin: "T".into(), candles: H::flat(100, 100.0), ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: H::flat(100, 100.0),
+            ..Default::default()
+        };
         assert!(matches!(Wyckoff.evaluate(&input), Signal::Skip { .. }));
     }
 
@@ -548,10 +585,17 @@ mod wyckoff_professional_tests {
         // spring bar: 94.97 < 95 destek, c=95.5 > destek
         c.extend(H::rows(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)]));
         c.extend(H::flat(n + 1 - 130, 96.4)); // c2 dengesi: toplamı 130 yap
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
-                assert!(strength > 0.6 && strength <= 0.85, "spring gücü: {strength}");
+                assert!(
+                    strength > 0.6 && strength <= 0.85,
+                    "spring gücü: {strength}"
+                );
                 assert!(note.contains("Spring"), "{note}");
                 assert!(note.contains("ST×2"), "{note}");
             }
@@ -564,8 +608,12 @@ mod wyckoff_professional_tests {
     fn test_spring_onayli_gucune_hucum() {
         let mut c = accumulation_base();
         c.extend(H::rows(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)])); // spring
-        c.extend(H::rows(125, &[(95.6, 95.8, 95.2, 96.1, 140.0)]));  // test-onay
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        c.extend(H::rows(125, &[(95.6, 95.8, 95.2, 96.1, 140.0)])); // test-onay
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert_eq!(strength, 0.78);
@@ -581,7 +629,11 @@ mod wyckoff_professional_tests {
         let mut c = accumulation_base();
         c.extend(H::rows(127, &[(96.9, 97.5, 96.9, 97.2, 260.0)]));
         c.extend(H::flat(2, 96.4));
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert_eq!(strength, 0.80);
@@ -598,7 +650,11 @@ mod wyckoff_professional_tests {
     fn fiyati_kirilis_giris_uretmez() {
         let mut c = accumulation_base();
         c.extend(H::rows(129, &[(94.9, 95.0, 94.3, 94.4, 110.0)]));
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("İPTAL"), "{note}"),
             other => panic!("Hold beklenirdi: {other:?}"),
@@ -607,12 +663,15 @@ mod wyckoff_professional_tests {
 
     fn distribution_base() -> Vec<Candle> {
         let mut c = H::flat(92, 100.0);
-        c.extend(H::rows(92, &[
-            // BC idx92 (tail 0): klimaks + zirvenin altından kapanış
-            (100.0, 105.0, 101.0, 102.5, 420.0),
-            // AR-down idx93 (tail 1): destek 101.4
-            (102.5, 103.8, 101.4, 102.1, 110.0),
-        ]));
+        c.extend(H::rows(
+            92,
+            &[
+                // BC idx92 (tail 0): klimaks + zirvenin altından kapanış
+                (100.0, 105.0, 101.0, 102.5, 420.0),
+                // AR-down idx93 (tail 1): destek 101.4
+                (102.5, 103.8, 101.4, 102.1, 110.0),
+            ],
+        ));
         c.extend(H::flat(36, 104.0)); // idx94..129 (üst bölge)
         c
     }
@@ -623,9 +682,13 @@ mod wyckoff_professional_tests {
         let mut c = distribution_base();
         // idx127 flat alanında son barı UT yap
         let last_i = c.len() - 1;
-        let (o, t) = (c[last_i].o, c[last_i].t);
+        let (_o, t) = (c[last_i].o, c[last_i].t);
         c[last_i] = H::candle(t, 104.5, 105.4, 104.2, 104.9, 220.0);
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Short { strength, note } => {
                 assert_eq!(strength, 0.65);
@@ -645,7 +708,11 @@ mod wyckoff_professional_tests {
         let (lo, lt) = (c[n - 1].o, c[n - 1].t);
         c[n - 1] = H::candle(lt, 105.0, 105.2, 104.8, 105.0, 140.0); // LPSY
         let _ = (to, lo);
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Short { strength, note } => {
                 assert_eq!(strength, 0.78);
@@ -660,7 +727,11 @@ mod wyckoff_professional_tests {
     fn sow_short() {
         let mut c = distribution_base();
         c.extend(H::rows(129, &[(101.6, 101.5, 100.6, 101.0, 260.0)]));
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Short { strength, note } => {
                 assert_eq!(strength, 0.80);
@@ -674,19 +745,31 @@ mod wyckoff_professional_tests {
     #[test]
     fn divergence_uyarisi_ekler() {
         let mut c = H::flat(92, 100.0);
-        c.extend(H::rows(92, &[
-            (100.0, 98.0, 95.0, 97.5, 400.0),  // SC
-            (97.5, 96.9, 96.2, 96.5, 120.0),   // AR → 96.9
-            (96.5, 96.8, 95.8, 96.2, 90.0),
-        ]));
+        c.extend(H::rows(
+            92,
+            &[
+                (100.0, 98.0, 95.0, 97.5, 400.0), // SC
+                (97.5, 96.9, 96.2, 96.5, 120.0),  // AR → 96.9
+                (96.5, 96.8, 95.8, 96.2, 90.0),
+            ],
+        ));
         c.extend(H::flat(32, 96.4));
-        c.pop(); c.pop(); c.pop();
-        c.extend(H::rows(127, &[
-            (96.0, 96.1, 95.98, 96.02, 210.0), // yüksek hacim, dar sonuç
-            (96.0, 96.1, 95.98, 96.02, 210.0),
-            (96.0, 96.1, 95.98, 96.02, 210.0),
-        ]));
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        c.pop();
+        c.pop();
+        c.pop();
+        c.extend(H::rows(
+            127,
+            &[
+                (96.0, 96.1, 95.98, 96.02, 210.0), // yüksek hacim, dar sonuç
+                (96.0, 96.1, 95.98, 96.02, 210.0),
+                (96.0, 96.1, 95.98, 96.02, 210.0),
+            ],
+        ));
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("divergence"), "{note}"),
             other => panic!("Hold beklenirdi: {other:?}"),
@@ -697,16 +780,23 @@ mod wyckoff_professional_tests {
     #[test]
     fn divergence_signal_0_6x() {
         let mut c = H::flat(92, 100.0);
-        c.extend(H::rows(92, &[
-            (100.0, 98.0, 95.0, 97.5, 400.0),
-            (97.5, 96.9, 96.2, 96.5, 120.0),
-            (96.5, 96.8, 95.8, 96.2, 90.0),
-            (96.0, 96.1, 95.02, 95.9, 150.0),
-            (96.0, 96.0, 95.01, 95.8, 140.0),
-        ]));
+        c.extend(H::rows(
+            92,
+            &[
+                (100.0, 98.0, 95.0, 97.5, 400.0),
+                (97.5, 96.9, 96.2, 96.5, 120.0),
+                (96.5, 96.8, 95.8, 96.2, 90.0),
+                (96.0, 96.1, 95.02, 95.9, 150.0),
+                (96.0, 96.0, 95.01, 95.8, 140.0),
+            ],
+        ));
         c.extend(H::flat(32, 96.4)); // pos97..128
         c.extend(H::rows(129, &[(95.6, 95.6, 94.97, 95.56, 500.0)])); // spring + dar sonuç
-        let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let input = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!(strength <= 0.46, "0.6x zayıflamalı: {strength}");
@@ -725,18 +815,32 @@ mod wyckoff_professional_tests {
             coin: "T".into(),
             candles: c.clone(),
             universe_returns: vec![],
-            position: Some(crate::ExitPositionInfo { is_long: true, size: 1.0, entry_px: 100.0 }),
+            position: Some(crate::ExitPositionInfo {
+                is_long: true,
+                size: 1.0,
+                entry_px: 100.0,
+            }),
         };
-        assert!(Wyckoff.exit_intent(&ctx).is_some(), "dağıtım uyarısı beklenirdi");
+        assert!(
+            Wyckoff.exit_intent(&ctx).is_some(),
+            "dağıtım uyarısı beklenirdi"
+        );
         // short aynı mumla → uyarı YOK (teppe bonusu)
         let ctx2 = ExitCtx {
             coin: "T".into(),
             candles: c.clone(),
             universe_returns: vec![],
-            position: Some(crate::ExitPositionInfo { is_long: false, size: 1.0, entry_px: 100.0 }),
+            position: Some(crate::ExitPositionInfo {
+                is_long: false,
+                size: 1.0,
+                entry_px: 100.0,
+            }),
         };
         // teppe region'da short için "birikim uyarısı" koşulu at_bottom gerekmez
-        assert!(Wyckoff.exit_intent(&ctx2).is_none(), "teppeda short exit olmamalı");
+        assert!(
+            Wyckoff.exit_intent(&ctx2).is_none(),
+            "teppeda short exit olmamalı"
+        );
     }
 
     /// exit_intent (short): dip + klimaks + dar bar → birikim uyarısı.
@@ -748,7 +852,11 @@ mod wyckoff_professional_tests {
             coin: "T".into(),
             candles: c,
             universe_returns: vec![],
-            position: Some(crate::ExitPositionInfo { is_long: false, size: 1.0, entry_px: 100.0 }),
+            position: Some(crate::ExitPositionInfo {
+                is_long: false,
+                size: 1.0,
+                entry_px: 100.0,
+            }),
         };
         assert!(Wyckoff.exit_intent(&ctx).is_some());
     }
@@ -757,8 +865,16 @@ mod wyckoff_professional_tests {
     #[test]
     fn ayni_seri_ayni_sinyal() {
         let c = accumulation_base();
-        let i1 = MarketInput { coin: "T".into(), candles: c.clone(), ..Default::default() };
-        let i2 = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
+        let i1 = MarketInput {
+            coin: "T".into(),
+            candles: c.clone(),
+            ..Default::default()
+        };
+        let i2 = MarketInput {
+            coin: "T".into(),
+            candles: c,
+            ..Default::default()
+        };
         assert_eq!(Wyckoff.evaluate(&i1), Wyckoff.evaluate(&i2));
     }
 }

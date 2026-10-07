@@ -27,9 +27,9 @@ pub enum Side {
 #[derive(Debug, Clone)]
 pub struct LocalBook {
     pub coin: String,
- /// fiyat azalan
+    /// fiyat azalan
     pub bids: Vec<LevelF>,
- /// fiyat artan
+    /// fiyat artan
     pub asks: Vec<LevelF>,
     pub server_time: i64,
     updated_at: Instant,
@@ -46,21 +46,43 @@ impl LocalBook {
         }
     }
 
- /// REST snapshot ile ilk senkron (sonra WS sürer)
+    /// REST snapshot ile ilk senkron (sonra WS sürer)
     pub async fn sync_from_rest(&mut self, info: &Info) -> Result<()> {
         let book = info.l2_book(&self.coin).await?;
-        self.bids = book.levels.first().cloned().unwrap_or_default().into_iter()
-            .filter_map(|l| Some(LevelF { px: l.px.parse().ok()?, sz: l.sz.parse().ok()?, n: l.n.unwrap_or(0) }))
+        self.bids = book
+            .levels
+            .first()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|l| {
+                Some(LevelF {
+                    px: l.px.parse().ok()?,
+                    sz: l.sz.parse().ok()?,
+                    n: l.n.unwrap_or(0),
+                })
+            })
             .collect();
-        self.asks = book.levels.get(1).cloned().unwrap_or_default().into_iter()
-            .filter_map(|l| Some(LevelF { px: l.px.parse().ok()?, sz: l.sz.parse().ok()?, n: l.n.unwrap_or(0) }))
+        self.asks = book
+            .levels
+            .get(1)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|l| {
+                Some(LevelF {
+                    px: l.px.parse().ok()?,
+                    sz: l.sz.parse().ok()?,
+                    n: l.n.unwrap_or(0),
+                })
+            })
             .collect();
         self.server_time = book.time;
         self.updated_at = Instant::now();
         Ok(())
     }
 
- /// WS `l2Book` event verisini uygula. Coin uyuşmazsa false döner.
+    /// WS `l2Book` event verisini uygula. Coin uyuşmazsa false döner.
     pub fn apply_ws(&mut self, data: &Value) -> bool {
         if data["coin"].as_str() != Some(self.coin.as_str()) {
             return false;
@@ -95,7 +117,7 @@ impl LocalBook {
         self.asks = parse(&levels[1]);
         self.server_time = time;
         self.updated_at = Instant::now();
- // koruma: bozuk snapshot (sadece tek taraf) kabul etme
+        // koruma: bozuk snapshot (sadece tek taraf) kabul etme
         if self.bids.is_empty() || self.asks.is_empty() {
             tracing::warn!(coin = %coin, "bos/tarafsiz book snapshot'u reddedildi");
         }
@@ -118,7 +140,7 @@ impl LocalBook {
         Some((a - b) / ((a + b) / 2.0) * 10_000.0)
     }
 
- /// Üst `depth` seviyedeki hacim dengesi: (bid-ask)/(bid+ask) ∈ [-1, 1]
+    /// Üst `depth` seviyedeki hacim dengesi: (bid-ask)/(bid+ask) ∈ [-1, 1]
     pub fn imbalance(&self, depth: usize) -> Option<f64> {
         let sum = |lv: &[LevelF]| -> f64 { lv.iter().take(depth).map(|l| l.sz).sum() };
         let (b, a) = (sum(&self.bids), sum(&self.asks));
@@ -128,8 +150,8 @@ impl LocalBook {
         Some((b - a) / (b + a))
     }
 
- /// Verilen miktarda doldurmanın VWAP'ı ve gerçekten doldurulan miktar.
- /// side=Bid -> asks'ten alır, side=Ask -> bids'e (satış) vurur.
+    /// Verilen miktarda doldurmanın VWAP'ı ve gerçekten doldurulan miktar.
+    /// side=Bid -> asks'ten alır, side=Ask -> bids'e (satış) vurur.
     pub fn vwap_fill(&self, side: Side, qty: f64) -> Option<(f64, f64)> {
         let lv = match side {
             Side::Bid => &self.asks,
@@ -153,25 +175,27 @@ impl LocalBook {
         Some((cost / filled, filled))
     }
 
- /// Mid'den ±bps bandın içindeki toplam hacim
+    /// Mid'den ±bps bandın içindeki toplam hacim
     pub fn depth_within_bps(&self, side: Side, bps: f64) -> Option<f64> {
         let mid = self.mid()?;
         let (lv, dir) = match side {
             Side::Bid => (&self.bids, -1.0),
             Side::Ask => (&self.asks, 1.0),
         };
-        Some(lv.iter()
-            .take_while(|l| (l.px - mid) * dir / mid * 10_000.0 <= bps)
-            .map(|l| l.sz)
-            .sum())
+        Some(
+            lv.iter()
+                .take_while(|l| (l.px - mid) * dir / mid * 10_000.0 <= bps)
+                .map(|l| l.sz)
+                .sum(),
+        )
     }
 
- /// Son güncelleme `max_age`'ten eski mi (WS kopması tespiti)
+    /// Son güncelleme `max_age`'ten eski mi (WS kopması tespiti)
     pub fn is_stale(&self, max_age: Duration) -> bool {
         self.updated_at.elapsed() > max_age
     }
 
- /// Kitap sağlamlık kontrolü: bid < ask ve sıralama doğru mu
+    /// Kitap sağlamlık kontrolü: bid < ask ve sıralama doğru mu
     pub fn is_sane(&self) -> Result<()> {
         let (b, a) = (self.best_bid(), self.best_ask());
         match (b, a) {
