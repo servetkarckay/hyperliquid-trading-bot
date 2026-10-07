@@ -18,7 +18,7 @@ pub mod wyckoff;
 pub mod kesit_momentum;
 pub mod lob_emir_akisi;
 pub mod market_making;
-pub mod volatilite_zaman_serisi;
+pub mod garch_regime;
 pub mod carry_funding_basis;
 pub mod oi_likidasyon;
 pub mod rejim_tespiti;
@@ -190,7 +190,7 @@ pub struct ExitIntent {
 pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
-        "Volatilite Zaman Serisi", "Carry", "OI Likidasyon",
+        "GARCH", "Carry", "OI Likidasyon",
         "Rejim Tespiti", "Kelly Sizing", "Dow", "Davranışsal", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
     ]
@@ -202,7 +202,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(kesit_momentum::KesitMomentum::default()),
         Box::new(lob_emir_akisi::LobEmirAkisi),
         Box::new(market_making::MarketMaking),
-        Box::new(volatilite_zaman_serisi::VolatiliteZamanSerisi),
+        Box::new(garch_regime::GarchRegime),
         Box::new(carry_funding_basis::CarryFundingBasis),
         Box::new(oi_likidasyon::OiLikidasyon),
         Box::new(rejim_tespiti::RejimTespiti),
@@ -236,7 +236,7 @@ pub enum InfoCluster {
     CrossSectional,
     /// funding/basis taşıma: Carry
     Carry,
-    /// vol modelleri: Volatilite Zaman Serisi (sıkışma+momentum kompoziti)
+    /// vol modelleri: GARCH (koşullu volatilite rejimi)
     Volatility,
     /// OI/likidasyon kadransı
     Liquidation,
@@ -250,7 +250,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "Kelly Sizing" => InfoCluster::Sizing,
         "Kesit Momentum" => InfoCluster::CrossSectional,
         "LOB Emir Akışı" | "Market Making" => InfoCluster::OrderFlow,
-        "Volatilite Zaman Serisi" => InfoCluster::Volatility,
+        "GARCH" => InfoCluster::Volatility,
         "Carry" => InfoCluster::Carry,
         "OI Likidasyon" => InfoCluster::Liquidation,
         "Davranışsal" => InfoCluster::MeanReversion,

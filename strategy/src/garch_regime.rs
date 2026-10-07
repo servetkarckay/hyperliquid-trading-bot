@@ -9,11 +9,11 @@
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
-pub struct VolatiliteZamanSerisi;
+pub struct GarchRegime;
 
-impl Strategy for VolatiliteZamanSerisi {
+impl Strategy for GarchRegime {
     fn name(&self) -> &'static str {
-        "Volatilite Zaman Serisi"
+        "GARCH"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -78,7 +78,7 @@ mod audit_tests {
  // son bar momentum yukarı
         H::set_last(&mut c, 101.0, 101.2, 100.8, 100.0);
         let input = MarketInput { coin: "T".into(), candles: c.clone(), ..Default::default() };
-        match VolatiliteZamanSerisi.evaluate(&input) {
+        match GarchRegime.evaluate(&input) {
             Signal::Long { strength, .. } => assert!(strength > 0.0 && strength <= 0.7),
             other => panic!("sıkışma+momentum↑ → Long: {other:?}"),
         }
@@ -86,7 +86,7 @@ mod audit_tests {
         let mut c2 = c;
         H::set_last(&mut c2, 99.0, 99.2, 98.8, 100.0);
         let input2 = MarketInput { coin: "T".into(), candles: c2, ..Default::default() };
-        match VolatiliteZamanSerisi.evaluate(&input2) {
+        match GarchRegime.evaluate(&input2) {
             Signal::Short { strength, .. } => assert!(strength > 0.0 && strength <= 0.7),
             other => panic!("sıkışma+momentum↓ → Short: {other:?}"),
         }
@@ -96,6 +96,6 @@ mod audit_tests {
     #[test]
     fn volzaman_veri_yoksa_skip() {
         let input = MarketInput { coin: "T".into(), candles: H::flat(100, 100.0), ..Default::default() };
-        assert!(matches!(VolatiliteZamanSerisi.evaluate(&input), Signal::Skip { .. }));
+        assert!(matches!(GarchRegime.evaluate(&input), Signal::Skip { .. }));
     }
 }

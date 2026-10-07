@@ -175,7 +175,7 @@ Trend (Wyckoff, Dow, Turtle, Squeeze Breakout, Elliott, Klasik, Rejim)
 MeanReversion (Davranışsal)
 OrderFlow (LOB, Market Making)
 CrossSectional (Kesit Momentum)
-Carry · Volatility (sıkışma+momentum kompoziti) · Liquidation (OI) · Sizing (Kelly)
+Carry · Volatility (GARCH koşullu volatilite rejimi) · Liquidation (OI) · Sizing (Kelly)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
@@ -525,8 +525,9 @@ engine 170 · data 19 · api 5 · strategy 72
 - **Market Making** AUXILIARY'dir: yönlü sinyal üretmez (raporda
   görünür; sahte alpha kanıtı üretmez).
 - **Kelly Sizing** portföy-düzey öneridir; tahsise etkisi yoktur.
-- **Volatilite Zaman Serisi** saf GARCH değil; vol sıkışması + momentum
-  kompozitidir.
+- **GARCH** kanonik Bollerslev(1986) GARCH(1,1) ölçümü + momentum
+  kaplaması (yön kanıtı kaplamadır — notta açıkça işaretli; istasyonarlık
+  kısıtı α+β<1 yüklüdür).
 - **Backtest motoru yoktur**: ağırlıklar yalnız canlı kanıttan gelir;
   backtest formatı yalnız reddedilmek üzere tanımlıdır.
 - CI fmt/clippy koşmaz; kalite kapısı test + release build'dir.
