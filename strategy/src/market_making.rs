@@ -1,9 +1,23 @@
-//! MARKET MAKING — Avellaneda-Stoikov rezervasyon fiyatı (AUXILIARY).
+//! MARKET MAKING — Avellaneda & Stoikov (2008) rezervasyon fiyatı +
+//! optimal quote'lar (AUXILIARY).
 //!
-//! Görev: quote planı — rezervasyon fiyatı `r = mid − q·γ·σ²·T`,
-//! yarım spread + envanter skew'i (bps). Çıktı **Hold** — yönlü giriş
+//! KANONİK KAYNAK: Avellaneda & Stoikov, "High-frequency trading in a
+//! limit order book", Quantitative Finance (2008):
+//! 1. **Rezervasyon (indifference) fiyatı**: r = s − q·γ·σ²·(T−t)
+//!    — uzun envanter (q>0) → r mid'in ALTINDA (eldekinin satışla
+//!    azaltılma isteği); kısa (q<0) → r üstte. (makale §2.3)
+//! 2. **Optimal yarı-spread**: δ = γσ²(T−t)/2 + (1/γ)·ln(1 + γ/κ)
+//!    — κ: dolum yoğunluk sönümü (arrival-rate decay; makale §3.1'deki
+//!    λ(δ) = A·e^(−κδ) intensity'in kapalı-form çözümü).
+//! 3. **Optimal quote'lar**: bid = r − δ, ask = r + δ (r etrafında
+//!    simetrik, rezervasyona kaymış).
+//!
+//! BU MODÜLÜN KONTRATI (bilinçli sınır): çıktı **Hold** — yönlü giriş
 //! sinyali üretmez; gerçek parayla quote KONULMAZ (MM emir yolu motor
-//! IOC'yle çelişir — bilinen sınır). σ≤0 / defter yok → Skip.
+//! IOC'yle çelişir; ALO taşıyıcısı gerektirir — bilinçli sınır).
+//! Quote planı notta raporlanır. σ≤0 / defter yok → Skip.
+//! γ = 0.1 (risk iştahı), κ = 1.5, T = 1 bar, q = envanter/$10k
+//! (kalibrasyon; makale q pay bazlıdır).
 use crate::{closes, MarketInput, Signal, StratStatus, Strategy};
 use math::indicators;
 
@@ -39,10 +53,13 @@ impl Strategy for MarketMaking {
             + (1.0 + gamma / kappa).ln() / gamma;
         let skew_bps = (reservation - mid) / mid * 10_000.0;
 
+        // KANONİK İKİNCİ ADIM: optimal quote'lar rezervasyon etrafında
+        // simetrik yarı-spread ile: bid = r − δ, ask = r + δ (makale §3.1)
+        let quote_bid = reservation - half_spread;
+        let quote_ask = reservation + half_spread;
         Signal::Hold {
             note: format!(
-                "quote: bid={:.2} ask={:.2} | r={:.2} (skor {skew_bps:+.1}bps) half_spread={:.2} — ALO quote'lar r etrafında",
-                bid, ask, reservation, half_spread
+                "quote: borsa bid={bid:.2} ask={ask:.2} | r={reservation:.2} (skor {skew_bps:+.1}bps) δ={half_spread:.2} → optimal bid={quote_bid:.2} ask={quote_ask:.2} (ALO; konulmaz — bilinçli sınır)"
             ),
         }
     }
