@@ -1,19 +1,33 @@
-//! DAVRANIŞSAL FİNANS — aşırı tepki (overreaction) geri alımı.
+//! OVERREACTION — aşırı tepki tersine-dönüşü (davranışsal finans).
 //!
-//! 1. 6-bar getiri, 100-bar log-return RMS ile σ-normalize (z-score
-//!    BENZERİ — gerçek std sapma hesabı değil) + hacim
-//! 2× spike'ı tetik koşulu; tetik yok → Hold.
-//! 2. Panik satışı → kontra Long; euphoria → kontra Short; güç
-//! (|σ|/4).min(0.8).
-//! 3. <100 mum → Skip; bölenler max(1e-9) korumalı (panik yok).
+//! KANONİK KAYNAK: De Bondt & Thaler (1985) "Does the Stock Market
+//! Overreact?" — Journal of Finance. İki hipotez (makale birebir):
+//! 1. **Aşırı fiyat hareketleri, ters yönde hareketler takip eder.**
+//! 2. **Başlangıç hareketi ne kadar aşırıysa, düzeltme o kadar büyük
+//!    olur.** → güç ölçeklemesi |σ| ile doğru orantılıdır (kod: |σ|/4,
+//!    cap 0.8 — kalibrasyon).
+//!
+//! UFUK NOTU (bilinçli): kanonik orijinal 36 AYLIK oluşum dönemidir
+//! (loser/winner portföyleri; dönüş 5 yıla dek). Bu modül kısa ufuk
+//! uygulamasıdır — Lehmann (1990) haftalık tersine-dönüş ruhu: 6-bar
+//! ekstrem getiri + hacim teyidi. Ufuk kısa; hipotezler aynı.
+//!
+//! TETİK (kalibrasyon): 6-bar getiri, 100-bar log-return RMS ile
+//! normalize (z-benzeri; gerçek std hesabı değil) — |σ| > 2 VE hacim
+//! 2× spike (panik/euphoria hacmi teyit katmanı). Tetik yok → Hold.
+//!
+//! YÖN: panik satışı → kontra Long; euphoria → kontra Short
+//! (hipotez 1'in simetrik uygulaması).
+//!
+//! <100 mum → Skip; bölenler 1e-9 korumalı; deterministik; panik yok.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
-pub struct DavranissalFinans;
+pub struct Overreaction;
 
-impl Strategy for DavranissalFinans {
+impl Strategy for Overreaction {
     fn name(&self) -> &'static str {
-        "Davranışsal"
+        "Overreaction"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -67,7 +81,7 @@ mod audit_tests {
             H::set(&mut c, 108 + i, px, px + 0.2, px - 0.5, 400.0);
         }
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
-        match DavranissalFinans.evaluate(&input) {
+        match Overreaction.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!(strength > 0.0 && strength <= 0.8);
                 assert!(note.contains("aşırı tepki"), "{note}");
@@ -85,7 +99,7 @@ mod audit_tests {
             H::set(&mut c, 108 + i, px, px + 0.5, px - 0.2, 400.0);
         }
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
-        match DavranissalFinans.evaluate(&input) {
+        match Overreaction.evaluate(&input) {
             Signal::Short { strength, note } => {
                 assert!(strength > 0.0 && strength <= 0.8);
                 assert!(note.contains("euphoria"), "{note}");
@@ -99,7 +113,7 @@ mod audit_tests {
     fn davranissal_normal_dongu_hold() {
         let candles = H::flat(120, 100.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
-        match DavranissalFinans.evaluate(&input) {
+        match Overreaction.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("anormal hareket yok"), "{note}"),
             other => panic!("Hold beklenirdi: {other:?}"),
         }
