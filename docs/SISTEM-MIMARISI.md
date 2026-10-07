@@ -171,9 +171,9 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 kaynaktır — 8 bilgi kümesi:
 
 ```text
-Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Rejim)
+Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Regime Detection)
 MeanReversion (Davranışsal)
-OrderFlow (LOB, Market Making)
+OrderFlow (Order Flow Imbalance, Market Making)
 CrossSectional (Kesit Momentum)
 Carry (Funding Carry — perp bacağı) · Volatility (GARCH koşullu volatilite rejimi) · Open Interest (Price×OI matrisi) · Sizing (Kelly)
 ```

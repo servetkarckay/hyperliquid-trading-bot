@@ -1,16 +1,30 @@
-//! LOB EMİR AKIŞI — defter dengesi + taker akışı ÇİFT teyidi.
+//! ORDER FLOW IMBALANCE (OFI) — defter dengesi + taker akışı çift teyidi.
 //!
-//! 1. Girdi: book_imbalance (5 seviye) + taker_ratio (300 sn pencere) +
-//! ≥30 mum; herhangi biri yok → Skip (SAHTE sinyal yok).
-//! 2. Long: imb>+0.15 VE taker>%55 VE momentum −%1 üstü; Short ayna.
-//! 3. Tek onay yeterli DEĞİL — çift onay kuralı (nötr → Hold).
+//! KANONİK KAYNAK: Cont, Kukanov & Stoikov (2014) "The Price Impact of
+//! Order Book Events" — Order Flow Imbalance (OFI) kısa vadeli fiyat
+//! değişimini doğrusal açıklar (R²≈%65; Decay hızlı — mikroyapı
+//! sinyali). Çok-seviye entegrasyon: Xu et al. (2022) — üst seviyelerin
+//! birleşimi best-level OFI'dan daha açıklayıcı.
+//!
+//! BU MODÜLÜN ÖLÇÜMÜ: book_imbalance = 5-seviye toplam
+//! (bid−ask)/(bid+ask) ∈ [−1,1] — çok-seviye entegre OFI'nin derinlik
+//! ağırlıklı yaklaşımı (Xu et al. ruhu; tick-bazlı kanonik e_n formülü
+//! DEĞİL — L2 snapshot kontratının sınırları).
+//!
+//! UFUK NOTU (bilinçli): OFI mikroyapı sinyalidir (saniye-dakika;
+//! hızlı söner). Motor 300-sn döngü kontratında churn'ü önlemek için
+//! 12-bar momentum KAPLAMASI eklenmiştir (teori değil, motor-ufuk
+//! uyumu) + taker_ratio (CVD-spirit) çift onayı.
+//!
+//! EŞİKLER (kalibrasyon): imb ±0.15, taker %55/%45, momentum −%1.
+//! Veri yoksa → Skip (sahte sinyal yok); tek onay → Hold.
 use crate::{closes, MarketInput, Signal, Strategy};
 
-pub struct LobEmirAkisi;
+pub struct OrderFlowImbalance;
 
-impl Strategy for LobEmirAkisi {
+impl Strategy for OrderFlowImbalance {
     fn name(&self) -> &'static str {
-        "LOB Emir Akışı"
+        "Order Flow Imbalance"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -60,7 +74,7 @@ mod audit_tests {
             taker_ratio: Some(0.7),
             ..Default::default()
         };
-        match LobEmirAkisi.evaluate(&input) {
+        match OrderFlowImbalance.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!(strength > 0.0 && strength <= 0.8);
                 assert!(note.contains("alış baskısı"), "{note}");
@@ -79,7 +93,7 @@ mod audit_tests {
             taker_ratio: Some(0.3),
             ..Default::default()
         };
-        assert!(matches!(LobEmirAkisi.evaluate(&input), Signal::Short { strength, .. } if strength > 0.0));
+        assert!(matches!(OrderFlowImbalance.evaluate(&input), Signal::Short { strength, .. } if strength > 0.0));
     }
 
  /// C — ASİMETRİ ONAY YASAĞI: tek onay yeterli değil (imb pozitif ama
@@ -87,17 +101,17 @@ mod audit_tests {
     #[test]
     fn lob_tek_onay_yeterli_degil() {
         let imb_only = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: Some(0.5), taker_ratio: Some(0.5), ..Default::default() };
-        assert!(matches!(LobEmirAkisi.evaluate(&imb_only), Signal::Hold { .. }), "imb tek başına Long ÜRETMEZ");
+        assert!(matches!(OrderFlowImbalance.evaluate(&imb_only), Signal::Hold { .. }), "imb tek başına Long ÜRETMEZ");
         let taker_only = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: Some(0.0), taker_ratio: Some(0.9), ..Default::default() };
-        assert!(matches!(LobEmirAkisi.evaluate(&taker_only), Signal::Hold { .. }), "taker tek başına Long ÜRETMEZ");
+        assert!(matches!(OrderFlowImbalance.evaluate(&taker_only), Signal::Hold { .. }), "taker tek başına Long ÜRETMEZ");
     }
 
  /// D — defter/taker yoksa Skip.
     #[test]
     fn lob_veri_yoksa_skip() {
         let i1 = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: None, taker_ratio: Some(0.7), ..Default::default() };
-        assert!(matches!(LobEmirAkisi.evaluate(&i1), Signal::Skip { .. }));
+        assert!(matches!(OrderFlowImbalance.evaluate(&i1), Signal::Skip { .. }));
         let i2 = MarketInput { coin: "T".into(), candles: candles(30), book_imbalance: Some(0.4), taker_ratio: None, ..Default::default() };
-        assert!(matches!(LobEmirAkisi.evaluate(&i2), Signal::Skip { .. }));
+        assert!(matches!(OrderFlowImbalance.evaluate(&i2), Signal::Skip { .. }));
     }
 }

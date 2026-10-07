@@ -953,7 +953,7 @@ mod cluster_tests {
         // 3 oy — AYNI küme (Trend): Wyckoff, Dow, Turtle
         let ayni = am.allocate(vec![mk("BTC", vec!["Wyckoff", "Dow", "Turtle"])], &|_, _| 0.0, 300.0);
         // 3 oy — AYRI kümeler: Wyckoff (Trend), LOB (OrderFlow), Carry
-        let ayri = am.allocate(vec![mk("BTC", vec!["Wyckoff", "LOB Emir Akışı", "Carry"])], &|_, _| 0.0, 300.0);
+        let ayri = am.allocate(vec![mk("BTC", vec!["Wyckoff", "Order Flow Imbalance", "Carry"])], &|_, _| 0.0, 300.0);
         assert_eq!(ayni[0].votes, 3);
         assert_eq!(ayri[0].votes, 3);
         // AYRI küme daha YÜKSEK conviction (bağımsız kanıt daha değerli):

@@ -16,7 +16,7 @@
 //! deterministik mum üreteci.
 pub mod wyckoff;
 pub mod kesit_momentum;
-pub mod lob_emir_akisi;
+pub mod order_flow_imbalance;
 pub mod market_making;
 pub mod garch_regime;
 pub mod funding_carry;
@@ -189,7 +189,7 @@ pub struct ExitIntent {
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
     vec![
-        "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
+        "Wyckoff", "Kesit Momentum", "Order Flow Imbalance", "Market Making",
         "GARCH", "Funding Carry", "Open Interest",
         "Regime Detection", "Kelly Sizing", "Dow Theory", "Davranışsal", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
@@ -200,7 +200,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(wyckoff::Wyckoff),
         Box::new(kesit_momentum::KesitMomentum::default()),
-        Box::new(lob_emir_akisi::LobEmirAkisi),
+        Box::new(order_flow_imbalance::OrderFlowImbalance),
         Box::new(market_making::MarketMaking),
         Box::new(garch_regime::GarchRegime),
         Box::new(funding_carry::FundingCarry),
@@ -230,7 +230,7 @@ pub enum InfoCluster {
     Trend,
     /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,
-    /// defter/akış: LOB, Market Making
+    /// defter/akış: Order Flow Imbalance, Market Making
     OrderFlow,
     /// evren geneli göreli güç: Kesit Momentum
     CrossSectional,
@@ -249,7 +249,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
         "Kelly Sizing" => InfoCluster::Sizing,
         "Kesit Momentum" => InfoCluster::CrossSectional,
-        "LOB Emir Akışı" | "Market Making" => InfoCluster::OrderFlow,
+        "Order Flow Imbalance" | "Market Making" => InfoCluster::OrderFlow,
         "GARCH" => InfoCluster::Volatility,
         "Funding Carry" => InfoCluster::Carry,
         "Open Interest" => InfoCluster::Liquidation,
