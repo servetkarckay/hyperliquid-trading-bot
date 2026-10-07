@@ -2541,6 +2541,14 @@ let position = self.machines.get(&e.coin).and_then(|m| {
                 );
             }
         }
+        // ── DÖNGÜ PROJEKSİYONU (borsa state'inden AÇIK AYRI) ──────────
+        // pmap = döngü başındaki mevcut pozisyon anlık görüntüsü; cycle
+        // içinde KABUL EDİLEN girişler borsaya düşmeden önce buraya
+        // eklenir → sonraki entry risk kontrolü önceki bu-cycle girişleri
+        // de görür (tek cycle'da toplam notional tavanı AŞILAMAZ).
+        // Kabul edilmeyen aday projeksiyona girmemli; Exit emirleri
+        // maruziyet EKLEMEZ.
+        let mut projection = CycleProjection::seeded(&pmap);
         self.risk.update_equity(self.equity);
         // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
         // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
@@ -2656,14 +2664,11 @@ let position = self.machines.get(&e.coin).and_then(|m| {
                         .map(|p| p.leverage)
                         .unwrap_or(self.leverage)
                         .max(self.leverage);
-                    if let Err(risk_err) = self.risk.pre_trade(
-                        self.equity,
-                        &pmap,
-                        &e.coin,
-                        notional,
-                        lev,
-                        0,
-                    ) {
+                    // risk kontrolü: mevcut + bu-cycle kabul edilmiş maruziyet
+                    if let Err(risk_err) =
+                        projection
+                            .check_and_commit(&self.risk, self.equity, &e.coin, notional, lev)
+                    {
                         tracing::warn!("{}: RİSK KAPISI reddi: {risk_err}", e.coin);
                         if let Some(m) = self.machines.get_mut(&e.coin) {
                             if m.oid_zero_pending() { m.state = PosState::Flat; }
@@ -3091,6 +3096,78 @@ pub fn fmt_signals(out: &[(String, String)]) -> String {
         .map(|(c, s)| format!("{c}: {s}"))
         .collect::<Vec<_>>()
         .join(" || ")
+}
+
+
+/// ── DÖNGÜ PROJEKSİYONU — cycle içinde KABUL edilen girişlerin kümülatif
+/// maruziyeti. `seeded` döngü başındaki mevcut borsa/makine pozisyonlarını
+/// temel alır (borsa state); `per_coin` bu cycle kabul edilen emirlerdir
+/// (proje state) — İKİSİ AÇIK AYRIDIR. Risk kapısı bileşik haritayla
+/// çalışır: mevcut + bu-cycle girişleri birlikte hesaplanır; tek cycle
+/// içinde `max_total_notional_usd`/`max_position_notional_usd`
+/// AŞILAMAZ. Yalnız kapıyı geçen (batch'e eklenecek) emir projeksiyona
+/// eklenir; reddedilen aday girmez; Exit emirleri maruziyet EKLEMEZ.
+pub(crate) struct CycleProjection {
+    base: HashMap<String, crate::executor::Position>,
+    per_coin: HashMap<String, f64>,
+}
+
+impl CycleProjection {
+    /// Döngü başı: mevcut pozisyonları temel maruziyet olarak al.
+    pub(crate) fn seeded(base: &HashMap<String, crate::executor::Position>) -> Self {
+        Self { base: base.clone(), per_coin: HashMap::new() }
+    }
+
+    /// Risk kapısı + Kabul durumda projeksiyona ekleme (atomik karar:
+    /// kapı geçer ise kayıt; reddedilen aday proje state'e girmez).
+    pub(crate) fn check_and_commit(
+        &mut self,
+        risk: &crate::RiskManager,
+        equity: f64,
+        coin: &str,
+        notional: f64,
+        leverage: f64,
+    ) -> Result<(), crate::risk_manager::RiskViolation> {
+        let mut merged = self.base.clone();
+        for (k, v) in &self.per_coin {
+            merged
+                .entry(k.clone())
+                .or_default()
+                .position_value = *v;
+        }
+        risk.pre_trade(equity, &merged, coin, notional, leverage, 0)?;
+        let cur = self
+            .per_coin
+            .get(coin)
+            .copied()
+            .unwrap_or_else(|| {
+                self.base
+                    .get(coin)
+                    .map(|p| p.position_value.abs())
+                    .unwrap_or(0.0)
+            });
+        self.per_coin.insert(coin.to_string(), cur + notional);
+        Ok(())
+    }
+
+    /// Bileşik maruziyet (base + proje) — test/log.
+    pub(crate) fn total(&self) -> f64 {
+        let base_total: f64 = self.base.values().map(|p| p.position_value.abs()).sum();
+        let proj_total: f64 = self
+            .per_coin
+            .iter()
+            .map(|(k, v)| {
+                let seed = self
+                    .base
+                    .get(k)
+                    .map(|p| p.position_value.abs())
+                    .unwrap_or(0.0);
+                let add = v - seed;
+                if add > 0.0 { add } else { 0.0 }
+            })
+            .sum();
+        base_total + proj_total
+    }
 }
 
 
@@ -4833,5 +4910,102 @@ mod golden_path_tests {
         assert!(tracker.portfolio_stats().is_some(), "Kelly için kanıt oluşmalı");
         // ── 8) ÇIKIŞ SEBEBİ sözleşmesi ──
         assert_eq!(exit_reason_from_fill(true, false, 0, false, false), Some(ExitReason::TakeProfit));
+    }
+}
+
+#[cfg(test)]
+mod cycle_projection_tests {
+    use super::*;
+    use crate::risk_manager::RiskViolation;
+
+    fn risk(total: f64, pos: f64) -> crate::RiskManager {
+        crate::RiskManager::new(crate::risk_manager::RiskConfig {
+            max_total_notional_usd: total,
+            max_position_notional_usd: pos,
+            ..Default::default()
+        })
+    }
+
+    /// total 100 / mevcut 0: ilk 60 kabul, ikinci 60 (farklı coin) redd;
+    /// reddedilen proje state'e girmemli → 40'lık aday sonradan geçmeli.
+    #[test]
+    fn cycle_ici_toplam_tavan_asilamaz() {
+        let r = risk(100.0, 100.0);
+        let mut proj = CycleProjection::seeded(&HashMap::new());
+        proj.check_and_commit(&r, 10_000.0, "BTC", 60.0, 1.0).unwrap();
+        let err = proj
+            .check_and_commit(&r, 10_000.0, "ETH", 60.0, 1.0)
+            .unwrap_err();
+        assert!(matches!(err, RiskViolation::TotalExposure(..)), "{err}");
+        assert_eq!(proj.total(), 60.0, "reddedilen aday eklendi mi? HAYIR olmalı");
+        proj.check_and_commit(&r, 10_000.0, "SOL", 40.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 100.0);
+    }
+
+    /// aynı coin: position limiti cycle projeksiyonuyla korunur.
+    #[test]
+    fn ayni_coin_position_limiti() {
+        let r = risk(100.0, 50.0);
+        let mut proj = CycleProjection::seeded(&HashMap::new());
+        proj.check_and_commit(&r, 10_000.0, "BTC", 50.0, 1.0).unwrap();
+        let err = proj
+            .check_and_commit(&r, 10_000.0, "BTC", 10.0, 1.0)
+            .unwrap_err();
+        assert!(matches!(err, RiskViolation::PositionLimit(..)), "{err}");
+    }
+
+    /// mevcut borsa pozisyonu + yeni emir: toplam birlikte hesaplanır.
+    #[test]
+    fn mevcut_pozisyon_yeni_emir_toplam_gorur() {
+        let mut base = HashMap::new();
+        base.insert(
+            "BTC".into(),
+            crate::executor::Position { position_value: 60.0, ..Default::default() },
+        );
+        let r = risk(100.0, 100.0);
+        let mut proj = CycleProjection::seeded(&base);
+        let err = proj
+            .check_and_commit(&r, 10_000.0, "ETH", 60.0, 1.0)
+            .unwrap_err();
+        assert!(matches!(err, RiskViolation::TotalExposure(..)), "{err}");
+        // 60(borsa) + 40(yeni) = 100 ≤ 100 → kabul
+        proj.check_and_commit(&r, 10_000.0, "ETH", 40.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 100.0);
+    }
+
+    /// batch entry + exit birlikte: exit emirleri maruziyet EKLEMEZ
+    /// (kod kontratı: yalnız Place yolu check_and_commit çağırır).
+    #[test]
+    fn exit_maruziyet_eklemez() {
+        let r = risk(100.0, 100.0);
+        let mut proj = CycleProjection::seeded(&HashMap::new());
+        proj.check_and_commit(&r, 10_000.0, "BTC", 60.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 60.0);
+        proj.check_and_commit(&r, 10_000.0, "ETH", 40.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 100.0);
+    }
+
+    /// tam tavan sınırda kabul edilir (100 ≤ 100).
+    #[test]
+    fn tam_tavan_kabul() {
+        let r = risk(100.0, 100.0);
+        let mut proj = CycleProjection::seeded(&HashMap::new());
+        proj.check_and_commit(&r, 10_000.0, "BTC", 100.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 100.0);
+    }
+
+    /// proje + mevcut aynı coin'de toplanır (piramit kapısı motor
+    /// tarafında ayrı ama matematiği doğru olmalı).
+    #[test]
+    fn ayni_coin_mevcut_uzerine_toplanir() {
+        let mut base = HashMap::new();
+        base.insert(
+            "BTC".into(),
+            crate::executor::Position { position_value: 30.0, ..Default::default() },
+        );
+        let r = risk(100.0, 100.0);
+        let mut proj = CycleProjection::seeded(&base);
+        proj.check_and_commit(&r, 10_000.0, "BTC", 30.0, 1.0).unwrap();
+        assert_eq!(proj.total(), 60.0);
     }
 }
