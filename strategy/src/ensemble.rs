@@ -52,7 +52,7 @@ pub struct EnsembleConfig {
 impl Default for EnsembleConfig {
     fn default() -> Self {
  // eşit ağırlık başlangıcı; canlıda backtest/win-rate ile güncellenir
-        Self { weights: HashMap::new(), min_score: 0.25, damping: 1.0 }
+        Self { weights: HashMap::new(), min_score: 0.30, damping: 1.0 }
     }
 }
 
@@ -173,7 +173,12 @@ impl Ensemble {
                     }
                 }
             }
-            RegimeGate::TrendBoost => ConsensusSignal { score: (cs.score * 1.2).clamp(-1.0, 1.0), ..cs },
+            RegimeGate::TrendBoost => {
+                // NOT: skor [−1,1]'e normalize → ×1.2 boost yalnız
+                // |skor| ≤ 0.833'te tam etkilidir; üstünde clamp tavanı
+                // boost'u yutar (ölçekli kompresyon — bilinçli).
+                ConsensusSignal { score: (cs.score * 1.2).clamp(-1.0, 1.0), ..cs }
+            }
         }
     }
 }
@@ -339,4 +344,15 @@ mod exit_channel_tests {
         );
         assert_eq!(blocked.exit_contributors, vec!["B".to_string()]);
     }
+    /// damping < 1: skor sönümü belirgin — (0.8/1)×0.5 = 0.4.
+    #[test]
+    fn damping_sonumler() {
+        let mut cfg = EnsembleConfig::default();
+        cfg.damping = 0.5;
+        let e = Ensemble::new(cfg);
+        let cs = e.combine(vec![("A".into(), Signal::Long { strength: 0.8, note: "x".into() })]);
+        assert!((cs.score - 0.4).abs() < 1e-9, "{cs:?}");
+        assert_eq!(cs.dir, Dir::Long, "0.4 ≥ min_score 0.30");
+    }
+
 }
