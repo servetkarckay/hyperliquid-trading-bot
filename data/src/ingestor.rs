@@ -98,7 +98,22 @@ pub async fn load_universe(info: &Info, cfg: &IngestorConfig) -> Result<Universe
         if m.isDelisted.unwrap_or(false) {
             continue;
         }
-        let vol: f64 = ctxs.get(i).map(|c| c.dayNtlVlm.parse().unwrap_or(0.0)).unwrap_or(0.0);
+        // VERİ DÜRÜSTLÜĞÜ: bozuk hacim = coin SESSİZ düşürülmez — loglanır
+        // (fail-closed: hacim doğrulanamayan coin evren dışı kalır, ama
+        // bunun görülür olması zorunludur).
+        let vol: f64 = match ctxs.get(i) {
+            Some(c) => match c.dayNtlVlm.parse::<f64>() {
+                Ok(v) if v.is_finite() => v,
+                _ => {
+                    tracing::warn!("[UNIVERSE] {}: dayNtlVlm bozuk ('{}') — coin düşürüldü", m.name, c.dayNtlVlm);
+                    0.0
+                }
+            },
+            None => {
+                tracing::warn!("[UNIVERSE] {}: ctx yok — coin düşürüldü", m.name);
+                0.0
+            }
+        };
         if vol < cfg.min_day_volume_usd {
             continue;
         }
@@ -171,10 +186,17 @@ impl Ingestor {
             let tx_raw = tx_raw.clone();
             let cfg = api_cfg.clone();
             tracing::info!("shard {shard}: {} abonelik", subs.len());
+            // SUPERVISOR: shard kalıcı ölüm = veri akışında kalıcı boşluk;
+            // log + 5 sn sonra yeniden başlat (keep-alive tasarımı —
+            // iç reconnect'in üst katmanı).
             tokio::spawn(async move {
-                let ws = WsClient::new(cfg);
-                if let Err(e) = ws.run(subs, tx_raw).await {
-                    tracing::error!("shard sonlandı: {e}");
+                loop {
+                    let ws = WsClient::new(cfg.clone());
+                    match ws.run(subs.clone(), tx_raw.clone()).await {
+                        Ok(()) => tracing::warn!("shard {shard} döndü — yeniden başlatılıyor"),
+                        Err(e) => tracing::error!("shard {shard} ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor"),
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             });
         }
@@ -290,6 +312,28 @@ impl Ingestor {
 mod num_sozlesme_testleri {
     use super::*;
     use serde_json::json;
+
+    // REGRESYON KORUMASI: shard kalıcı ölüm bir zamanlar sadece loglanıp
+    // bırakılıyordu — veri akışı kalıcı boşlukta kalırdı.
+    #[test]
+    fn shard_supervisor_dongusu_mevcut() {
+        let src = include_str!("ingestor.rs");
+        assert!(
+            src.contains("shard {shard} ÖLDÜ"),
+            "shard ölüm logu yok"
+        );
+        let bas = src.find("// SUPERVISOR: shard kalıcı ölüm").expect("shard supervisor bloğu yok");
+        let blok = &src[bas..];
+        assert!(
+            blok.contains("loop {"),
+            "shard supervisor DÖNGÜSÜ yok — shard kalıcı ölürse veri akışı kalıcı boşlukta kalır"
+        );
+        assert!(
+            blok.contains("sleep(std::time::Duration::from_secs(5))"),
+            "shard supervisor yeniden başlatma beklemesi yok"
+        );
+    }
+
 
     /// SAYI SÖZLEŞMESİ: eksik/geçersiz/finite-olmayan → None; sahte 0.0 YOK.
     #[test]

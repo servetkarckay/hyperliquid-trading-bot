@@ -225,7 +225,19 @@ async fn main() -> anyhow::Result<()> {
                 serde_json::json!({ "type": "orderUpdates", "user": user.to_ascii_lowercase() }),
                 serde_json::json!({ "type": "userEvents", "user": user.to_ascii_lowercase() }),
             ];
-            tokio::spawn(async move { ws.run(subs, tx).await.ok(); });
+            // SUPERVISOR: kullanıcı akışı (fill geri beslemesi!) öldüyse
+            // SESSİZ ölü değildir — loglanır + 5 sn sonra yeniden başlatılır.
+            // (eskiden .ok() ile yutuluyordu: task ölürse bot fillsiz
+            // çalışmaya devam ederdi ve kimse göremezdi.)
+            tokio::spawn(async move {
+                loop {
+                    match ws.run(subs.clone(), tx.clone()).await {
+                        Ok(()) => tracing::warn!("[WS] kullanıcı akışı döndü — yeniden başlatılıyor"),
+                        Err(e) => tracing::error!("[WS] kullanıcı akışı ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor (fill geri beslemesi bu arada REST recon'dan)"),
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            });
             Some(rx)
         }
     };
@@ -474,4 +486,45 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("bot kapanıyor");
     Ok(())
+}
+
+#[cfg(test)]
+mod supervisor_tests {
+    // REGRESYON KORUMASI: kullanıcı-event akışı (fill geri beslemesi)
+    // bir zamanlar `.ok()` ile sessizce ölebiliyordu — task ölürse bot
+    // fillsiz çalışmaya devam ederdi ve kill-switch bunu saymazdı.
+    // Aşağıdaki source-scan testleri bu bozulmayı tekrar edemez yapar.
+
+    #[test]
+    fn kullanici_akis_spawn_ok_yutma_yasak() {
+        let src = include_str!("bot.rs");
+        let desen = ".await.".to_owned() + "ok();";
+        // ok() ile yutulan WS task deseni asla geri gelmemeli
+        assert!(
+            !src.contains(&desen),
+            "WS task olumu ok() ile YUTULUYOR — sessiz veri kaybi riski"
+        );
+    }
+
+    #[test]
+    fn kullanici_akis_supervisor_dongusu_mevcut() {
+        let src = include_str!("bot.rs");
+        assert!(
+            src.contains("kullanıcı akışı ÖLDÜ"),
+            "kullanıcı-event WS supervisor logu yok — task ölümü görünmez olur"
+        );
+        // Supervisor bloğunu ASCII-güvenli sınırlarla kes (Türkçe karakter
+        // byte sınırı paniklerini önle): SUPERVISOR yorumu → Some(rx).
+        let bas = src.find("// SUPERVISOR").expect("supervisor bloğu yok");
+        let son = src[bas..].find("Some(rx)").expect("spawn bloğu sonu yok") + bas;
+        let blok = &src[bas..son];
+        assert!(
+            blok.contains("loop {"),
+            "supervisor DÖNGÜSÜ yok — tek atımlık respawn ölürse akış kalıcı gider"
+        );
+        assert!(
+            blok.contains("sleep(std::time::Duration::from_secs(5))"),
+            "supervisor yeniden başlatma beklemesi yok"
+        );
+    }
 }
