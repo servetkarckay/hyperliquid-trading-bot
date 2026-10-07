@@ -20,7 +20,7 @@ pub mod lob_emir_akisi;
 pub mod market_making;
 pub mod garch_regime;
 pub mod carry_funding_basis;
-pub mod oi_likidasyon;
+pub mod open_interest;
 pub mod regime_detection;
 pub mod risk_kelly;
 pub mod dow_theory;
@@ -190,7 +190,7 @@ pub struct ExitIntent {
 pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
-        "GARCH", "Carry", "OI Likidasyon",
+        "GARCH", "Carry", "Open Interest",
         "Regime Detection", "Kelly Sizing", "Dow Theory", "Davranışsal", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
     ]
@@ -204,7 +204,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(market_making::MarketMaking),
         Box::new(garch_regime::GarchRegime),
         Box::new(carry_funding_basis::CarryFundingBasis),
-        Box::new(oi_likidasyon::OiLikidasyon),
+        Box::new(open_interest::OpenInterest),
         Box::new(regime_detection::RegimeDetection),
         Box::new(risk_kelly::RiskKelly),
         Box::new(dow_theory::DowTheory),
@@ -252,7 +252,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "LOB Emir Akışı" | "Market Making" => InfoCluster::OrderFlow,
         "GARCH" => InfoCluster::Volatility,
         "Carry" => InfoCluster::Carry,
-        "OI Likidasyon" => InfoCluster::Liquidation,
+        "Open Interest" => InfoCluster::Liquidation,
         "Davranışsal" => InfoCluster::MeanReversion,
         // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
         // Turtle, Squeeze Breakout, Regime Detection
