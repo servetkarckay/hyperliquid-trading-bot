@@ -4837,10 +4837,11 @@ mod golden_path_tests {
 
     /// deterministik mum kuyruğu: 100 sabit → dip → kırılım yukarı
     fn candles() -> Vec<data::Candle> {
-        let mut c = crate::helpers_for_tests::flat(60, 100.0);
+        // Turtle S1 (>=85 mum) ve Rejim şeması için yeterli derinlik
+        let mut c = crate::helpers_for_tests::flat(100, 100.0);
         c.extend((0..20).map(|i| {
             let px = 100.0 + (i + 1) as f64 * 0.5;
-            crate::helpers_for_tests::candle((60 + i) as i64 * 3_600_000, px, px + 0.3, px - 0.3, px, 150.0)
+            crate::helpers_for_tests::candle((100 + i) as i64 * 3_600_000, px, px + 0.3, px - 0.3, px, 150.0)
         }));
         c
     }

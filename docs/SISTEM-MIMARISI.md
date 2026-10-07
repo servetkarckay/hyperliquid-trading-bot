@@ -330,7 +330,7 @@ ExitReason: Unknown | StopLoss | TakeProfit | TrailingStop |
 ```
 
 - **Strateji sahipliği**: çıkış KURALLARI `Strategy::exit_intent(&ExitCtx)`
-  API'sinde yaşar (Kesit rank kayması, Turtle 55-bar altı). Motor kural
+  API'sinde yaşar (Kesit rank kayması, Turtle S1 10-bar adverse). Motor kural
   fonksiyonlarını doğrudan çağıramaz (kaynak taraması testi).
 - **Ensemble çıkışı**: `exit_requested` → `force_exit` (Flat'ta emir yok).
 - **Borsa sahipliği**: SL/TP trigger fill → oid eşleşmesiyle

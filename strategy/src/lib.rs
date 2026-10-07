@@ -28,7 +28,7 @@ pub mod davranissal_finans;
 pub mod ensemble;
 pub mod klasik_indikatorler;
 pub mod elliott_dalga;
-pub mod trend_following_turtle;
+pub mod turtle_system;
 pub mod squeeze_breakout;
 
 use data::market_ctx::CtxState;
@@ -212,7 +212,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(davranissal_finans::DavranissalFinans),
         Box::new(klasik_indikatorler::KlasikIndikatorler),
         Box::new(elliott_dalga::ElliottDalga),
-        Box::new(trend_following_turtle::TurtleTrendFollowing),
+        Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
         
     ]
