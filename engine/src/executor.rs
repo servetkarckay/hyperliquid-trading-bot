@@ -807,8 +807,12 @@ impl Executor {
     pub async fn cancel_tp(&mut self, coin: &str) {
         self.tp_armed_at.remove(coin);
         if let Some(oid) = self.tp_orders.remove(coin) {
-            let _ = self.cancel(coin, oid).await;
-            tracing::info!("[TP] {coin} borsa TP iptal edildi oid={oid}");
+            // İptal sonucu YUTULMAZ: başarısız iptal = borsada KALINTI emir
+            // riski (yeni pozisyon eski TP'yle çakışabilir) — görünür olmalı.
+            match self.cancel(coin, oid).await {
+                Ok(_) => tracing::info!("[TP] {coin} borsa TP iptal edildi oid={oid}"),
+                Err(e) => tracing::warn!("[TP] {coin} borsa TP İPTAL EDİLEMEDİ oid={oid}: {e} — kalıntı emir riski, manuel kontrol"),
+            }
         }
     }
 
@@ -930,8 +934,12 @@ impl Executor {
     pub async fn cancel_sl(&mut self, coin: &str) {
         self.sl_armed_at.remove(coin);
         if let Some(oid) = self.sl_orders.remove(coin) {
-            let _ = self.cancel(coin, oid).await;
-            tracing::info!("[SL] {coin} borsa stop iptal edildi oid={oid}");
+            // İptal sonucu YUTULMAZ: başarısız iptal = borsada KORUMASIZLIK
+            // veya kalıntı stop riski — görünür olmalı.
+            match self.cancel(coin, oid).await {
+                Ok(_) => tracing::info!("[SL] {coin} borsa stop iptal edildi oid={oid}"),
+                Err(e) => tracing::warn!("[SL] {coin} borsa stop İPTAL EDİLEMEDİ oid={oid}: {e} — kalıntı stop riski, manuel kontrol"),
+            }
         }
     }
 
@@ -1950,6 +1958,22 @@ impl Executor {
 #[cfg(test)]
 mod tick_tests {
     use super::*;
+
+    // REGRESYON KORUMASI: cancel_tp/cancel_sl iptal sonucunu YUTAMAZ —
+    // başarısız iptal sessiz kalırsa borsada kalıntı emir/korumsuzluk kalır.
+    #[test]
+    fn cancel_sonucu_yutulamaz() {
+        let src = include_str!("executor.rs");
+        let desen = "let _ = self.".to_owned() + "cancel";
+        assert!(
+            !src.contains(&desen),
+            "cancel sonucu let _ ile YUTULUYOR — kalıntı emir/korumsuzluk sessizce kalır"
+        );
+        assert!(
+            src.contains("İPTAL EDİLEMEDİ"),
+            "cancel başarısızlığı görünür loglanmıyor"
+        );
+    }
     use hyperliquid_api::round_px_for;
 
  // NOT: parametre coin'in AZAMI HANE SAYISI (meta'da tick yok, borsa
