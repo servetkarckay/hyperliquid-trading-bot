@@ -78,10 +78,10 @@ pub fn round_5sig(x: f64) -> f64 {
 /// Fiyat: 5 anlamli hane + perp MAX_DECIMALS(6) siniri.
 /// 5 sig fig tek basina yetmiyor: 1e-8'lik fiyat 7 haneye yuvarlaniyor ve
 /// borsa "Order has invalid price." donuyor.
+/// GENERIC fiyat yuvarlama (asset bilinmiyorken): = perp_price(x, 0)
+/// (6 hane + 5 anlamlı hane) — TEK KURALın szd=0 durumudur.
 pub fn round_px_wire(x: f64) -> f64 {
-    let r = round_5sig(x);
-    let c = (r * 1e6).round() / 1e6;
-    if c > 0.0 { c } else { 0.0 }
+    perp_price(x, 0)
 }
 
 /// Fiyatı coin'in TICK'Ine oturt (`max_decimals` = tick'in azami hane sayısı).
@@ -101,6 +101,26 @@ pub fn round_px_for(x: f64, max_decimals: u32) -> f64 {
     } else {
         0.0
     }
+}
+
+/// ── PERP FİYAT PRECISION — TEK MERKEZİ KURAL ─────────────────────
+/// Kural (Hyperliquid): 1) 5 anlamlı hane; 2) szDecimals-uyumlu azami
+/// hane = 6 − szDecimals (kanıt: ME szd=1 → 5 hane; MEME szd=0 → 6 hane).
+/// TÜM emir yolları (normal limit / trigger / modify / replace SL / TP /
+/// flatten / exit) BU fonksiyona bağlanır — ad-hoc yuvarlama kalmaz.
+/// Sonuç ≤ 0 / non-finite → 0.0 (çağrı tarafı reddeder).
+pub fn perp_price(x: f64, sz_decimals: u32) -> f64 {
+    round_px_for(x, 6u32.saturating_sub(sz_decimals))
+}
+
+/// Keşfedilen (doğrulanmış) tick bilgisiyle merkezi kuralın birleşimi:
+/// azami hane = min(keşif, 6−szDecimals). Keşif daha sıkıysa keşif
+/// kazanır (bugünkü davranış); keşif yoksa/gevşekse MERKEZİ KURAL
+/// sınırlar (invalid-precision riski kapatılır). Yön/yan rounding'i
+/// değişmez (nearest `.round()`).
+pub fn perp_price_verified(x: f64, sz_decimals: u32, verified: Option<u32>) -> f64 {
+    let central = 6u32.saturating_sub(sz_decimals);
+    round_px_for(x, verified.unwrap_or(central).min(central))
 }
 
 /// Boyutu szDecimals hanesine yukari yuvarla (min notional guvencesi icin)
@@ -325,11 +345,14 @@ impl Exchange {
         sz: f64,
         limit_px: f64,
         tif: Tif,
+        sz_decimals: u32,
     ) -> Result<OrderStatuses> {
         let order = json!({
             "a": asset,
             "b": is_buy,
-            "p": float_to_wire(round_5sig(limit_px)),
+            // TEK MERKEZİ KURAL: normal emirle AYNI precision (5sig +
+            // 6−szDecimals grid); generic 5sig yalnız-yuvarlama kaldırıldı.
+            "p": float_to_wire(perp_price(limit_px, sz_decimals)),
             "s": float_to_wire(sz),
             "r": false,
             "t": { "limit": { "tif": tif.wire() } }
@@ -394,5 +417,59 @@ impl Exchange {
  /// Guvenli test emri boyutu: min $10 notional guvence altina alinir
     pub fn min_test_sz(&self, px: f64, sz_decimals: u32) -> f64 {
         round_sz_up(12.0 / px, sz_decimals)
+    }
+}
+
+#[cfg(test)]
+mod precision_tests {
+    use super::*;
+
+    /// FARKLI szDecimals VARYANTLARI — TEK MERKEZİ KURAL:
+    /// 5 anlamlı hane + azami hane = 6 − szDecimals.
+    #[test]
+    fn perp_price_szd_varyantlari() {
+        // ME (szd=1): probe kanıtı — 6 hane RED, 5 hane KABUL
+        assert_eq!(perp_price(0.07370625, 1), 0.07371);
+        // MEME (szd=0): 6 hane kabul
+        assert_eq!(perp_price(0.07370625, 0), 0.073706);
+        // szd=2 → azami 4 hane
+        assert_eq!(perp_price(1.23456789, 2), 1.2346);
+        // 5-anlamlı-hane + grid sırası: 84730.9 → 84731.0 (bozulmadan)
+        assert_eq!(perp_price(84730.9, 0), 84731.0);
+        // precision sonrası 0/non-finite → 0 (reddedilebilir işaret)
+        assert_eq!(perp_price(f64::NAN, 0), 0.0);
+        assert_eq!(perp_price(-1.0, 0), 0.0);
+        assert_eq!(perp_price(0.0, 0), 0.0);
+        assert_eq!(perp_price(f64::INFINITY, 0), 0.0);
+    }
+
+    /// TÜM EMİR YOLLARI AYNI FINAL KURAL:
+    /// normal limit (round_px_wire) = trigger triggerPx = perp_price(x, 0);
+    /// modify artık szDecimals-uyumlu (generic-5sig yalnız yuvarlama yok);
+    /// SL/TP/flatten/exit → batch wire tek noktadan (verified-bağlı).
+    #[test]
+    fn tum_yollar_ayni_final_kural() {
+        assert_eq!(round_px_wire(0.07370625), perp_price(0.07370625, 0));
+        // modify merkezi kurala bağlandı (kaynak kanıtı):
+        let src = include_str!("exchange_endpoint.rs");
+        assert!(
+            src.contains("perp_price(limit_px, sz_decimals)"),
+            "modify, normal emirle AYNI precision fonksiyonunu kullanmalı"
+        );
+        // ad-hoc 5sig yalnız yuvarlama modify'da kalmadı:
+        let mod_body = src.split("pub async fn modify").nth(1).unwrap_or("");
+        let head = mod_body.split("pub async fn").next().unwrap_or(mod_body);
+        assert!(!head.contains("round_5sig"), "modify'da ad-hoc 5sig kalmadı");
+    }
+
+    /// verified (keşif) birleşimi: keşif sıkıysa keşif; yoksa/gevşekse kural.
+    #[test]
+    fn verified_ogrenilmis_tick_birligi() {
+        // keşif yok → merkezi kural
+        assert_eq!(perp_price_verified(0.07370625, 1, None), 0.07371);
+        // keşif daha sıkı → keşif (bugünkü davranış korunur)
+        assert_eq!(perp_price_verified(0.07370625, 1, Some(4)), 0.0737);
+        // keşif kuraldan GEVŞEKSE merkezi kural sınırlar (invalid riski kapatır)
+        assert_eq!(perp_price_verified(0.07370625, 1, Some(6)), 0.07371);
     }
 }

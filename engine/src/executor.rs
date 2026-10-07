@@ -1775,7 +1775,13 @@ impl Executor {
                         asset: w.asset,
                         is_buy: w.is_buy,
                         sz: w.sz,
-                        px: hyperliquid_api::round_px_for(w.px, self.px_dec_for(w.asset)),
+                        // TEK MERKEZİ KURAL: azami hane = min(keşif,
+                        // 6−szDecimals) — keşif gevşekse kural sınırlar
+                        px: hyperliquid_api::perp_price_verified(
+                            w.px,
+                            self.sz_dec_of(w.asset),
+                            self.px_dec.get(&w.asset).copied(),
+                        ),
                         tif: w.tif,
                         reduce_only: w.reduce_only,
                         cloid: w.cloid.clone(),
@@ -1909,6 +1915,15 @@ impl Executor {
  /// coin -> (asset id, szDecimals) — cache'li, ağ çağrısı yapmaz (None: yok)
     pub fn cached_asset(&self, coin: &str) -> Option<(u32, u32)> {
         self.assets.get(coin).map(|(a, d, _)| (*a, *d))
+    }
+
+ /// asset id -> szDecimals (bilinmiyorsa 0 — merkezi kural 6 hane verir).
+    pub fn sz_dec_of(&self, asset: u32) -> u32 {
+        self.assets
+            .iter()
+            .find(|(_, (a, _, _))| *a == asset)
+            .map(|(_, (_, d, _))| *d)
+            .unwrap_or(0)
     }
 
  /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).

@@ -18,7 +18,7 @@ pub mod types;
 pub mod websocket;
 
 pub use config::Config;
-pub use exchange_endpoint::{round_5sig, round_px_for, round_px_wire, round_sz_up, Exchange, OrderStatuses, Tif};
+pub use exchange_endpoint::{perp_price, perp_price_verified, round_5sig, round_px_for, round_px_wire, round_sz_up, Exchange, OrderStatuses, Tif};
 pub use info_endpoint::Info;
 pub use signing::{now_ms, HyperliquidClient, L1Signature};
 pub use websocket::WsClient;
