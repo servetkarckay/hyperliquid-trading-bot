@@ -27,7 +27,7 @@ pub mod dow_teorisi;
 pub mod davranissal_finans;
 pub mod ensemble;
 pub mod klasik_indikatorler;
-pub mod elliott_dalga;
+pub mod elliott_wave;
 pub mod turtle_system;
 pub mod squeeze_breakout;
 
@@ -211,7 +211,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         
         Box::new(davranissal_finans::DavranissalFinans),
         Box::new(klasik_indikatorler::KlasikIndikatorler),
-        Box::new(elliott_dalga::ElliottDalga),
+        Box::new(elliott_wave::ElliottWave),
         Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
         

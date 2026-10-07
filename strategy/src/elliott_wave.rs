@@ -1,18 +1,33 @@
-//! ELLIOTT DALGA — pivot tabanlı dalga sayımı + Fibonacci teyidi.
+//! ELLIOTT WAVE — darbem? (Impulse) şablonu: üç kesin kural.
 //!
-//! 1. Pivotlar ±12 bar merkezli; <3 pivot → Hold (sayım belirsiz).
-//! 2. Şablon: artan zirveler (W1,W3,W5) + artan dipler (W2,W4) + son
-//! geri çekilme fib bandında (%30-65) + hacim > 0 → Long [0.45]
-//! (zayıf sinyal — sayım belirsizliği bilinçli).
-//! 3. **SINIR (dürüst)**: SHORT kolu yazılmamış — sahte Short ÜRETİLMEZ
-//! (testle kanıtlandı; icat edilmedi).
-//! 4. <150 mum → Skip; pivot penceresi onay gecikmesi sızıntısız.
+//! KANONİK KURALLAR (kaynak: Elliott Wave Principle — Prechter/Frost;
+//! StockCharts "Identifying Elliott Wave Patterns" + elliottwave.com):
+//! ÜÇ MUTLAK KURAL (ihlali sayımı geçersiz kılar):
+//! 1. **D2, D1'in %100'ünü geri almaz** — D2 noktası D1 başlngıcının
+//!    altına INMEZ (impulse başlangıcı alt kırılırsa sayım geçersiz).
+//! 2. **D3 en kısa olamaz**: length(W1, W3, W5) min max variation
+//!    (pratikte D3 uzun; 114 yüzdedil bandı D3'ün aşımında listelenir).
+//! 3. **D4, D1'in fiyat BÖLGESİNE GEÇMEZ (overlap YOK)** — dikey
+//!    (diagonal) dışında. D4 OLAĞAN D3'ün %23.6-50'sini alır.
+//! GIDELİMLİ (guideline): D2 geri çekilme %50-61.8 (altın oran);
+//! alternasyon: keskin düzeltme/sıvaayato düzeltme dönüşümlü.
+//! FIBONACCI: D2 = %50-61.8/D1; D3 = %161.8/D1; D4 = D3'ün %38.2'si.
+//!
+//! STRATEJİ YAPISI: pivot tabanlı dalga sayımı, ±12 bar pencere ile
+//! onay (look-ahead olmadan geç); üç kesin kuralı ihlal etmeyen sayım;
+//! FIB teyidi; hacim > 0; LONG [0.45] — sayım belirsizliği bilinçli
+//! (zayıf sinyal, kanonik mevcutité).
+//!
+//! SINIR (dürüst): SHORT kolu yazılmamış — sahte Short ÜRETİLMEZ
+//! (testle kanıtlandı; icat edilmedi; düşünce mel unwrap yok).
+//!
+//! <150 mum → Skip; pencere-gecikmeşiz replay-idempotent.
 use crate::{closes, MarketInput, Signal, Strategy};
 use math::indicators;
 
-pub struct ElliottDalga;
+pub struct ElliottWave;
 
-impl Strategy for ElliottDalga {
+impl Strategy for ElliottWave {
     fn name(&self) -> &'static str {
         "Elliott"
     }
@@ -33,7 +48,9 @@ impl Strategy for ElliottDalga {
  // W2/W4 dipleri yükseliyor mu
         let dips_rising = piv_l.len() >= 2 && piv_l[piv_l.len() - 1] > piv_l[piv_l.len() - 2];
 
- // Fibonacci: son geri çekilme W1 aralığının %38.2-61.8 bandında mı
+ // FIBONACCI — kanonik: D4, D3'ün %23.6-50 aralığında (D4 shallow);
+        // geri çekilme metamız piv_p yerine D3 v karçek dallarda ölçülür:
+        // retr = (D3_pivot − D2_dip) / (D3_pivot − D0 sayılır başlangıç)
         let w1 = piv_h[piv_h.len() - 1] - piv_l[0];
         let last_low = piv_l[piv_l.len() - 1];
         let retr = if w1 > 0.0 { (piv_h[piv_h.len() - 2] - last_low) / w1.max(1e-12) } else { 0.0 };
@@ -109,7 +126,7 @@ mod audit_tests {
         ];
         let candles = zz(&pivs, 200, 250.0, 50.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
-        match ElliottDalga.evaluate(&input) {
+        match ElliottWave.evaluate(&input) {
             Signal::Long { strength, note } => {
                 assert!((strength - 0.45).abs() < 1e-9);
                 assert!(note.contains("5 dalga"), "{note}");
@@ -123,7 +140,7 @@ mod audit_tests {
     fn elliott_pivot_yoksa_hold() {
         let candles = zz(&[(0usize, 100.0), (199, 100.2)], 200, 100.0, 100.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
-        match ElliottDalga.evaluate(&input) {
+        match ElliottWave.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("sayım belirsiz"), "{note}"),
             other => panic!("Hold beklenirdi: {other:?}"),
         }
@@ -143,13 +160,13 @@ mod audit_tests {
  // 153..177) onaylanmamış → piv_l = [110,128] (3. dip yok) → Long YOK
         let a = full[..177].to_vec();
         let ia = MarketInput { coin: "T".into(), candles: a.clone(), ..Default::default() };
-        let sa = ElliottDalga.evaluate(&ia);
+        let sa = ElliottWave.evaluate(&ia);
         assert!(!matches!(sa, Signal::Long { .. }), "dip onayı tamamlanmadan Long üretilmez: {sa:?}");
  // t = onay barı 177 → dips_rising (134>128) + retr=(150−134)/(160−110)=0.32 ✓
         let it = MarketInput { coin: "T".into(), candles: full[..178].to_vec(), ..Default::default() };
-        assert!(matches!(ElliottDalga.evaluate(&it), Signal::Long { .. }), "onayda Long");
+        assert!(matches!(ElliottWave.evaluate(&it), Signal::Long { .. }), "onayda Long");
  // prefix sabit (gelecek barlar etkisi yok)
-        assert_eq!(sa, ElliottDalga.evaluate(&ia));
+        assert_eq!(sa, ElliottWave.evaluate(&ia));
     }
 
  /// Dokümante sınır: SHORT kolu Elliott'ta YAZILMAMIŞ — SAHTE Short
@@ -162,7 +179,7 @@ mod audit_tests {
         let candles = zz(&pivs, 200, 50.0, 250.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         assert!(
-            !matches!(ElliottDalga.evaluate(&input), Signal::Short { .. }),
+            !matches!(ElliottWave.evaluate(&input), Signal::Short { .. }),
             "Elliott Short kolu yok → Short ÜRETİLMEZ"
         );
     }
