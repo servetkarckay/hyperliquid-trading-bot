@@ -88,6 +88,11 @@ pub enum PosState {
     Pending { side: Side, oid: i64, remaining: f64, ts: u64 },
     InPosition { side: Side, entry: f64, size: f64, peak: f64 },
     PendingExit { oid: i64, side: Side },
+    /// Exchange sonucu UNKNOWN (ağ zaman aşımı — borsada işlenmiş
+    /// OLABİLİR): anında Flat SANMAZ; cloid-kimliğiyle bounded
+    /// reconciliation bekler. Kanıt gelene kadar yeni emir de üretilmez
+    /// (duplicate yasağı).
+    ReconciliationPending { side: Side, cloid: String, ts: u64, attempts: u8 },
 }
 
 pub struct PositionStateMachine {
@@ -130,6 +135,10 @@ impl PositionStateMachine {
                 } else {
                     Action::Nothing
                 }
+            }
+            PosState::ReconciliationPending { .. } => {
+                // reconciliation bitene kadar yeni karar yok (duplicate yasağı)
+                Action::Nothing
             }
             PosState::Pending { side, oid, remaining: _, ts: _ } => {
  // idempotency: aynı yönde yine sinyal — yeni emir yok
@@ -175,6 +184,9 @@ impl PositionStateMachine {
  /// (Flat pozisyonda Exit HİÇBİR emir üretmez; PendingExit → idempotent,
  /// ikinci ExitNow yok).
     pub fn force_exit(&mut self, bid: f64, ask: f64) -> Action {
+        if matches!(self.state, PosState::ReconciliationPending { .. }) {
+            return Action::Nothing; // onaylanmamış emir yok
+        }
         match self.state.clone() {
             PosState::InPosition { side, size, .. } => {
                 self.state = PosState::PendingExit { oid: 0, side };
@@ -240,6 +252,9 @@ impl PositionStateMachine {
 
  /// Fiyat tikleri: trailing stop + timeout
     pub fn on_price_tick(&mut self, price: f64, now_ms: u64) -> Action {
+        if matches!(self.state, PosState::ReconciliationPending { .. }) {
+            return Action::Nothing; // recon pass (sınırlı zaman) sahiplenir
+        }
         match self.state.clone() {
             PosState::InPosition { side, entry, size, peak } => {
                 let new_peak = match side {
@@ -273,6 +288,42 @@ impl PositionStateMachine {
                 }
             }
             _ => Action::Nothing,
+        }
+    }
+
+ // ── RECONCILIATION STATE ────────────────────────────────────────────
+    pub fn is_recon_pending(&self) -> bool {
+        matches!(self.state, PosState::ReconciliationPending { .. })
+    }
+
+    /// UNKNOWN sonucu: anlık Flat'a DÖNME; cloid kimliğini state'e koy.
+    pub fn enter_reconciliation(&mut self, cloid: String, ts: u64) {
+        if let PosState::Pending { side, .. } = self.state.clone() {
+            self.state = PosState::ReconciliationPending { side, cloid, ts, attempts: 0 };
+        }
+    }
+
+    /// Emir borsada BULUNDU: oid'le bağla (ReconciliationPending → Pending).
+    pub fn link_recon_oid(&mut self, oid: i64, remaining: f64) {
+        if let PosState::ReconciliationPending { side, .. } = self.state.clone() {
+            self.state = PosState::Pending { side, oid, remaining, ts: hyperliquid_api::now_ms() as u64 };
+        }
+    }
+
+    /// FILL kanıtı: pozisyon borsada var (ReconciliationPending → InPosition).
+    pub fn recon_to_position(&mut self, entry: f64, size: f64) {
+        if let PosState::ReconciliationPending { side, .. } = self.state.clone() {
+            self.state = PosState::InPosition { side, entry, size, peak: entry };
+        }
+    }
+
+    pub fn recon_attempt_bump(&mut self) -> u8 {
+        if let PosState::ReconciliationPending { side, cloid, ts, attempts } = self.state.clone() {
+            let a = attempts.saturating_add(1);
+            self.state = PosState::ReconciliationPending { side, cloid, ts, attempts: a };
+            a
+        } else {
+            0
         }
     }
 

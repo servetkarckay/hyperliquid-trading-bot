@@ -479,6 +479,39 @@ pub fn synth_recovered_attr(
     }
 }
 
+/// ── UNKNOWN RECONCILIATION — tek-adım karar (saf) ────────────────────
+/// Kanıt sırası: open-order (cloid) → pozisyon (fill kanıtı) → retry
+/// → Flat. UNKNOWN'da anlık Flat YASAK: emir borsada kabul edilmiş
+/// olabilir (geçikmeli görünürlük).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconAction {
+    /// emir borsada var → oid bağlanır (Pending'e geç)
+    LinkOid,
+    /// pozisyon kanıtı → fill gerçekleşmiş (InPosition'a geç)
+    ToPosition,
+    /// kanıt yok, deneme hakkı var → yeniden sorgula (geçikmeli görü.)
+    Retry,
+    /// kanıt yok + deneme hakkı bitti → Flat
+    Flat,
+}
+
+/// Bounded recheck: UNKNOWN emir için en fazla bu kadar yeniden sorgu.
+pub const RECON_MAX_ATTEMPTS: u8 = 3;
+/// recheck arası bekleme (delayed visibility penceresi).
+pub const RECON_RECHECK_MS: u64 = 2_000;
+
+pub fn recon_decide(has_order: bool, has_position: bool, attempts: u8) -> ReconAction {
+    if has_order {
+        ReconAction::LinkOid
+    } else if has_position {
+        ReconAction::ToPosition
+    } else if attempts < RECON_MAX_ATTEMPTS {
+        ReconAction::Retry
+    } else {
+        ReconAction::Flat
+    }
+}
+
 /// RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
 ///
 /// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber
@@ -2564,6 +2597,20 @@ let position = self.machines.get(&e.coin).and_then(|m| {
             let e = &evals[idx];
             match act {
                 Action::Place(_o) => {
+ // ── DUPLICATE YASAĞI: reconciliation bekleyen (UNKNOWN) emir varsa
+ // aynı coine ikinci GERÇEK entry YOLLANMAZ — cloid tek kimlik;
+ // farklı fiyattan yeni cloid üretimi çift maruziyet doğururdu.
+                    if self
+                        .machines
+                        .get(&e.coin)
+                        .is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending())
+                    {
+                        tracing::info!(
+                            "{}: reconciliation bekleyen emir var — aynı cycle'da ikinci entry atlandı",
+                            e.coin
+                        );
+                        continue;
+                    }
  // EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
  // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
                     if !self.entries_allowed() {
@@ -2965,26 +3012,89 @@ let position = self.machines.get(&e.coin).and_then(|m| {
         cloid: &str,
         coin: &str,
     ) -> anyhow::Result<()> {
-        let rows = self.executor.refresh_open_orders_all().await?;
-        match find_by_cloid(&rows, coin, cloid) {
-            Some(oid) => {
-                if let Some(m) = self.machines.get_mut(coin) {
-                    m.link_pending_oid(oid);
+        // CLOID TEK KİMLİK: eşleşme yalnız (coin, cloid) çiftiyle.
+        // Anlık Flat YASAK — bounded recheck döngüsü:
+        //   1. open orders (cloid) → oid bağlanır
+        //   2. pozisyon (fill kanıtı) → InPosition + sentetik attr
+        //   3. kanıt yok → recheck (geçikmeli görünürlük penceresi)
+        //   4. deneme hakkı bitti → Flat
+        let mut attempts: u8 = 0;
+        loop {
+            let rows_opt = self.executor.refresh_open_orders_all().await.ok();
+            let has_order = rows_opt
+                .as_ref()
+                .map(|r| find_by_cloid(r, coin, cloid).is_some())
+                .unwrap_or(false);
+            // kanıt 2 (yalnız emir yokken): fill → pozisyon kanıtı
+            let has_position = if has_order {
+                false
+            } else {
+                let _ = self.executor.refresh_positions().await;
+                self.executor
+                    .positions()
+                    .get(coin)
+                    .map(|p| p.szi.abs() > 1e-12)
+                    .unwrap_or(false)
+            };
+            match recon_decide(has_order, has_position, attempts) {
+                ReconAction::LinkOid => {
+                    let oid = rows_opt
+                        .and_then(|r| find_by_cloid(&r, coin, cloid))
+                        .expect("has_order=true ⇒ oid bulunmalı");
+                    if let Some(m) = self.machines.get_mut(coin) {
+                        m.link_recon_oid(oid, 0.0); // kalan; dolum bildirimi ayrı akışta
+                    }
+                    tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
+                    return Ok(());
                 }
-                tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
-            }
-            None => {
-                if let Some(m) = self.machines.get_mut(coin) {
-                    if m.oid_zero_pending() {
+                ReconAction::ToPosition => {
+                    let pos = self
+                        .executor
+                        .positions()
+                        .get(coin)
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(m) = self.machines.get_mut(coin) {
+                        let side = if pos.szi > 0.0 {
+                            crate::state_machine::Side::Long
+                        } else {
+                            crate::state_machine::Side::Short
+                        };
+                        let _ = side;
+                        m.recon_to_position(pos.entry_px, pos.szi.abs());
+                    }
+                    // sentetik attr (recovery kontratı): kapanış sayılır;
+                    // voter kanıtı YAZILMAZ (sahipsiz stratejiye kredi yok)
+                    let now = hyperliquid_api::now_ms();
+                    if let Some(m) = self.machines.get(coin) {
+                        if let Some((_s, entry, size)) = m.in_position() {
+                            self.entry_attr.insert(
+                                coin.to_string(),
+                                synth_recovered_attr(coin, crate::state_machine::Side::Long, entry, size, now),
+                            );
+                        }
+                    }
+                    tracing::info!("[RECON] cloid={cloid} coin={coin} FILL kanıtı → pozisyon devri");
+                    return Ok(());
+                }
+                ReconAction::Retry => {
+                    attempts += 1;
+                    tracing::debug!(
+                        "[RECON] cloid={cloid} coin={coin} kanıt yok — recheck {attempts}/{RECON_MAX_ATTEMPTS}"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(RECON_RECHECK_MS)).await;
+                }
+                ReconAction::Flat => {
+                    if let Some(m) = self.machines.get_mut(coin) {
                         m.state = crate::state_machine::PosState::Flat;
                     }
+                    tracing::warn!(
+                        "[RECON] cloid={cloid} coin={coin} kanıt YOK ({attempts} recheck) → Flat"
+                    );
+                    return Ok(());
                 }
-                tracing::warn!(
-                    "[RECON] cloid={cloid} coin={coin} borsada YOK -> machine Flat revert"
-                );
             }
         }
-        Ok(())
     }
 }
 
@@ -5008,5 +5118,144 @@ mod cycle_projection_tests {
         let mut proj = CycleProjection::seeded(&base);
         proj.check_and_commit(&r, 10_000.0, "BTC", 30.0, 1.0).unwrap();
         assert_eq!(proj.total(), 60.0);
+    }
+}
+
+#[cfg(test)]
+mod recon_pending_tests {
+    use super::*;
+    use crate::state_machine::{PositionStateMachine, SmConfig, Side};
+
+    /// timeout AMA order borsada var → LinkOid.
+    #[test]
+    fn timeout_order_borsada_var() {
+        assert_eq!(recon_decide(true, false, 0), ReconAction::LinkOid);
+    }
+
+    /// timeout VE fill gerçekleşmiş (emir yok, pozisyon var) → ToPosition.
+    #[test]
+    fn timeout_fill_gerceklesmis() {
+        assert_eq!(recon_decide(false, true, 0), ReconAction::ToPosition);
+    }
+
+    /// timeout VE order gerçekten yok → önce Retry; hak biterse Flat.
+    #[test]
+    fn timeout_order_gercekten_yok() {
+        assert_eq!(recon_decide(false, false, 0), ReconAction::Retry);
+        assert_eq!(recon_decide(false, false, 1), ReconAction::Retry);
+        assert_eq!(recon_decide(false, false, RECON_MAX_ATTEMPTS), ReconAction::Flat);
+    }
+
+    /// delayed visibility: 1. recheck kanıtsız, 2. recheck'te emir göründü
+    /// → LinkOid (anlık Flat sanılmadı — emir kurtarıldı).
+    #[test]
+    fn gecikmeli_gorunurluk() {
+        assert_eq!(recon_decide(false, false, 0), ReconAction::Retry);
+        assert_eq!(recon_decide(true, false, 1), ReconAction::LinkOid);
+    }
+
+    /// duplicate retry: order + pozisyon AYNI ANDA görünürse (fill+rest)
+    /// emir kanıtı ÖNCELİKLİ (aynı cloid ikinci entry üretmez; fill
+    /// bildirimi ayrı akışla gelir).
+    #[test]
+    fn duplicate_retry_emir_oncelikli() {
+        assert_eq!(recon_decide(true, true, 0), ReconAction::LinkOid);
+    }
+
+    /// DURUM MAKİNESİ akışı: UNKNOWN → ReconciliationPending (anlık Flat
+    /// YOK) → guard'lar (yeni karar/exit yok) → kanıt geldiğinde geçişler.
+    #[test]
+    fn recon_state_akisi() {
+        let mut m = {
+            let mut x = PositionStateMachine::new("BTC", SmConfig::default());
+            let a = x.on_decision(
+                crate::state_machine::Decision { score: 0.9 },
+                99.0, 101.0, 1000,
+            );
+            assert!(matches!(a, crate::state_machine::Action::Place(_)));
+            // UNKNOWN: cloid'li ReconciliationPending'e geç (anlık Flat YOK)
+            x.enter_reconciliation("deadbeef01".into(), 1001);
+            x
+        };
+        assert!(m.is_recon_pending(), "anlık Flat DUR: {:?}", m.state);
+        // guard: yeni karar yok
+        let a = m.on_decision(
+            crate::state_machine::Decision { score: 0.9 },
+            99.0, 101.0, 2000,
+        );
+        assert!(matches!(a, crate::state_machine::Action::Nothing), "{a:?}");
+        // guard: force_exit yok (onaylanmamış emir)
+        let a = m.force_exit(99.0, 101.0);
+        assert!(matches!(a, crate::state_machine::Action::Nothing), "{a:?}");
+        // kanıt 1: emir borsada göründü → oid bağlanır
+        m.link_recon_oid(555, 0.0);
+        assert!(
+            matches!(m.state, crate::state_machine::PosState::Pending { oid: 555, .. }),
+            "link sonrasi Pending(555) beklenirdi: {:?}",
+            m.state
+        );
+    }
+
+    /// kanıt 2 akışı: fill gerçekleşmiş → InPosition (sentetik attr yolu).
+    #[test]
+    fn recon_fill_inposition_gecer() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        let a = m.on_decision(
+            crate::state_machine::Decision { score: -0.9 },
+            99.0, 101.0, 1000,
+        );
+        assert!(matches!(a, crate::state_machine::Action::Place(_)));
+        m.enter_reconciliation("feed0223".into(), 1001);
+        assert!(m.is_recon_pending());
+        m.recon_to_position(101.0, 2.0); // SHORT fill (side state'te)
+        assert!(
+            matches!(m.state, crate::state_machine::PosState::InPosition { .. }),
+            "fill sonrasi InPosition beklenirdi: {:?}",
+            m.state
+        );
+        let (side, entry, size) = m.in_position().unwrap();
+        assert!(side == crate::state_machine::Side::Short && entry == 101.0 && size == 2.0);
+    }
+
+    /// attempts bump: kanıt yokken deneme sayacı artar; Flat'e döner.
+    #[test]
+    fn recon_attempts_artar() {
+        let mut m = PositionStateMachine::new("BTC", SmConfig::default());
+        let _ = m.on_decision(
+            crate::state_machine::Decision { score: 0.9 },
+            99.0, 101.0, 1000,
+        );
+        m.enter_reconciliation("r1".into(), 1001);
+        assert_eq!(m.recon_attempt_bump(), 1);
+        assert_eq!(m.recon_attempt_bump(), 2);
+        assert!(m.is_recon_pending());
+        m.state = crate::state_machine::PosState::Flat; // exhausted → motor karar
+        assert!(!m.is_recon_pending());
+    }
+
+    /// DUPLICATE GATE kaynak-taraması: Place dalında reconciliation
+    /// bekleyen emir koruması OLMALI (aynı cloid'e ikinci entry yasağı).
+    #[test]
+    fn place_dalinda_recon_gate_kaynakta_var() {
+        let src = include_str!("engine_loop.rs");
+        let prod = src.split("#[cfg(test)]").next().unwrap_or("");
+        // Place dalını bul: 'Action::Place' ... ilk 'EXITS_ONLY' segmenti
+        let place = prod.split("Action::Place").nth(1).unwrap_or("");
+        let head = place.split("EXITS_ONLY").next().unwrap_or("");
+        assert!(
+            head.contains("is_recon_pending") && head.contains("oid_zero_pending"),
+            "Place dalı reconciliation gate'i İÇERMELİ (duplicate yasağı): {head}"
+        );
+        // reconcile fonksiyonu bounded recheck içermeli (anlık Flat yok)
+        let recon = prod.split("fn reconcile_unknown_cloid").nth(1).unwrap_or("");
+        let body = recon.split("pub async fn").next().unwrap_or(recon);
+        assert!(
+            body.contains("recon_decide") && body.contains("RECON_MAX_ATTEMPTS"),
+            "reconcile bounded recheck döngüsü İÇERMELİ"
+        );
+        assert!(
+            !body.contains("borsada YOK -> machine Flat revert"),
+            "anlık Flat revert davranışı kaldırılmalıydı"
+        );
     }
 }
