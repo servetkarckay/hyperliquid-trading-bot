@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use hyperliquid_api::exchange_endpoint::WireOrder;
 use hyperliquid_api::{Config, Info, Tif};
 use strategy::ensemble::{ConsensusSignal, Dir, Ensemble, EnsembleConfig, RegimeGate};
-use strategy::rejim_tespiti::{classify};
+use strategy::regime_detection::{classify};
 use strategy::{MarketInput, Signal, Strategy};
 
 use crate::allocation_manager::{AllocationConfig, AllocationManager, Candidate, Vote};
@@ -4876,7 +4876,7 @@ mod golden_path_tests {
         assert!(matches!(cs.dir, strategy::ensemble::Dir::Long), "kırılım zinciri Long üretmeli: {:?}", cs);
         assert!(cs.score > 0.0);
         // ── 3) REJİM: kapı (bozuk girdi → güvenli varsayım) ──
-        let gate = strategy::rejim_tespiti::classify(&input).map(|(l, _)| l.gate()).unwrap_or(strategy::ensemble::RegimeGate::Open);
+        let gate = strategy::regime_detection::classify(&input).map(|(l, _)| l.gate()).unwrap_or(strategy::ensemble::RegimeGate::Open);
         let cs = ens.apply_regime(cs, gate);
         assert!(matches!(cs.dir, strategy::ensemble::Dir::Long), "açık rejimde yön korunmalı");
         // ── 4) TAHSİS: conviction + kontratlı SL/TP ──

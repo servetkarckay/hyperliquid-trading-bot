@@ -21,7 +21,7 @@ pub mod market_making;
 pub mod garch_regime;
 pub mod carry_funding_basis;
 pub mod oi_likidasyon;
-pub mod rejim_tespiti;
+pub mod regime_detection;
 pub mod risk_kelly;
 pub mod dow_theory;
 pub mod davranissal_finans;
@@ -191,7 +191,7 @@ pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
         "GARCH", "Carry", "OI Likidasyon",
-        "Rejim Tespiti", "Kelly Sizing", "Dow Theory", "Davranışsal", "Klasik Göstergeler",
+        "Regime Detection", "Kelly Sizing", "Dow Theory", "Davranışsal", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
     ]
 }
@@ -205,7 +205,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(garch_regime::GarchRegime),
         Box::new(carry_funding_basis::CarryFundingBasis),
         Box::new(oi_likidasyon::OiLikidasyon),
-        Box::new(rejim_tespiti::RejimTespiti),
+        Box::new(regime_detection::RegimeDetection),
         Box::new(risk_kelly::RiskKelly),
         Box::new(dow_theory::DowTheory),
         
@@ -226,7 +226,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InfoCluster {
     /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle,
-    /// Squeeze Breakout, Elliott, Klasik Göstergeler, Rejim Tespiti
+    /// Squeeze Breakout, Elliott, Klasik Göstergeler, Regime Detection
     Trend,
     /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,
@@ -255,7 +255,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "OI Likidasyon" => InfoCluster::Liquidation,
         "Davranışsal" => InfoCluster::MeanReversion,
         // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
-        // Turtle, Squeeze Breakout, Rejim Tespiti
+        // Turtle, Squeeze Breakout, Regime Detection
         _ => InfoCluster::Trend,
     }
 }
