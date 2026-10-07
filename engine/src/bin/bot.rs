@@ -243,25 +243,33 @@ async fn main() -> anyhow::Result<()> {
         if user.is_empty() {
             None
         } else {
-            let ws = hyperliquid_api::WsClient::new(cfg.clone());
             let (tx, rx) = tokio::sync::mpsc::channel(2048);
             let subs = vec![
                 serde_json::json!({ "type": "orderUpdates", "user": user.to_ascii_lowercase() }),
                 serde_json::json!({ "type": "userEvents", "user": user.to_ascii_lowercase() }),
             ];
-            // SUPERVISOR: kullanıcı akışı (fill geri beslemesi!) öldüyse
+            // SUPERVISOR (kanıtlanan kod: api::supervisor::keepalive + 4
+            // runtime testi): kullanıcı akışı (fill geri beslemesi!) öldüyse
             // SESSİZ ölü değildir — loglanır + 5 sn sonra yeniden başlatılır.
             // (eskiden .ok() ile yutuluyordu: task ölürse bot fillsiz
             // çalışmaya devam ederdi ve kimse göremezdi.)
-            tokio::spawn(async move {
-                loop {
-                    match ws.run(subs.clone(), tx.clone()).await {
-                        Ok(()) => tracing::warn!("[WS] kullanıcı akışı döndü — yeniden başlatılıyor"),
-                        Err(e) => tracing::error!("[WS] kullanıcı akışı ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor (fill geri beslemesi bu arada REST recon'dan)"),
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            });
+            let cfg_task = cfg.clone();
+            tokio::spawn(hyperliquid_api::supervisor::keepalive(
+                move |episode: u64| {
+                    let _ = episode;
+                    // Her bölüm kendi bağlantı-client'ıyla — içeride
+                    // bekleyen gelecek dışarıdaki durumu ödünç almaz.
+                    let cfg = cfg_task.clone();
+                    let subs = subs.clone();
+                    let tx = tx.clone();
+                    async move { hyperliquid_api::WsClient::new(cfg).run(subs, tx).await }
+                },
+                std::time::Duration::from_secs(5),
+                move |episode, r| match r {
+                    Ok(()) => tracing::warn!("[WS] kullanıcı akışı döndü — bölüm {episode} yeniden başlatılıyor"),
+                    Err(e) => tracing::error!("[WS] kullanıcı akışı ÖLDÜ: {e} — bölüm {episode} 5 sn sonra yeniden başlatılıyor (fill geri beslemesi bu arada REST recon'dan)"),
+                },
+            ));
             Some(rx)
         }
     };
@@ -539,18 +547,12 @@ mod supervisor_tests {
             src.contains("kullanıcı akışı ÖLDÜ"),
             "kullanıcı-event WS supervisor logu yok — task ölümü görünmez olur"
         );
-        // Supervisor bloğunu ASCII-güvenli sınırlarla kes (Türkçe karakter
-        // byte sınırı paniklerini önle): SUPERVISOR yorumu → Some(rx).
-        let bas = src.find("// SUPERVISOR").expect("supervisor bloğu yok");
-        let son = src[bas..].find("Some(rx)").expect("spawn bloğu sonu yok") + bas;
-        let blok = &src[bas..son];
+        // Döngünün kendisi artık KANITLANMIŞ helper'daydı:
+        // api::supervisor::keepalive (+4 runtime testi: ölüm algılama,
+        // respawn, event tüketimi, tek-atımlık değişmezlği).
         assert!(
-            blok.contains("loop {"),
-            "supervisor DÖNGÜSÜ yok — tek atımlık respawn ölürse akış kalıcı gider"
-        );
-        assert!(
-            blok.contains("sleep(std::time::Duration::from_secs(5))"),
-            "supervisor yeniden başlatma beklemesi yok"
+            src.contains("supervisor::keepalive"),
+            "kullanıcı akışı keepalive helper'ını kullanmıyor — respawn garantisi zayıflar"
         );
     }
 }

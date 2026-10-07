@@ -224,18 +224,23 @@ impl Ingestor {
             // SUPERVISOR: shard kalıcı ölüm = veri akışında kalıcı boşluk;
             // log + 5 sn sonra yeniden başlat (keep-alive tasarımı —
             // iç reconnect'in üst katmanı).
-            tokio::spawn(async move {
-                loop {
-                    let ws = WsClient::new(cfg.clone());
-                    match ws.run(subs.clone(), tx_raw.clone()).await {
-                        Ok(()) => tracing::warn!("shard {shard} döndü — yeniden başlatılıyor"),
-                        Err(e) => tracing::error!(
-                            "shard {shard} ÖLDÜ: {e} — 5 sn sonra yeniden başlatılıyor"
-                        ),
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            });
+            tokio::spawn(hyperliquid_api::supervisor::keepalive(
+                move |episode: u64| {
+                    let _ = episode;
+                    // Her bölüm kendi bağlantı-client'ıyla — borç kaçışı yok.
+                    let cfg = cfg.clone();
+                    let subs = subs.clone();
+                    let tx_raw = tx_raw.clone();
+                    async move { WsClient::new(cfg).run(subs, tx_raw).await }
+                },
+                std::time::Duration::from_secs(5),
+                move |episode, r| match r {
+                    Ok(()) => tracing::warn!("shard {shard} döndü — bölüm {episode} yeniden başlatılıyor"),
+                    Err(e) => tracing::error!(
+                        "shard {shard} ÖLDÜ: {e} — bölüm {episode} 5 sn sonra yeniden başlatılıyor"
+                    ),
+                },
+            ));
         }
         // tx_raw'un son kopyasını bırak -> tüm shardlar bittiğinde pump da biter
         drop(tx_raw);
@@ -360,17 +365,9 @@ mod num_sozlesme_testleri {
     fn shard_supervisor_dongusu_mevcut() {
         let src = include_str!("ingestor.rs");
         assert!(src.contains("shard {shard} ÖLDÜ"), "shard ölüm logu yok");
-        let bas = src
-            .find("// SUPERVISOR: shard kalıcı ölüm")
-            .expect("shard supervisor bloğu yok");
-        let blok = &src[bas..];
         assert!(
-            blok.contains("loop {"),
-            "shard supervisor DÖNGÜSÜ yok — shard kalıcı ölürse veri akışı kalıcı boşlukta kalır"
-        );
-        assert!(
-            blok.contains("sleep(std::time::Duration::from_secs(5))"),
-            "shard supervisor yeniden başlatma beklemesi yok"
+            src.contains("supervisor::keepalive"),
+            "shard supervisor keepalive helper'ını kullanmıyor — yeniden başlatma garantisi zayıflar"
         );
     }
 

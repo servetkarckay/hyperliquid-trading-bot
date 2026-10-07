@@ -14,6 +14,7 @@ pub mod error_responses;
 pub mod exchange_endpoint;
 pub mod info_endpoint;
 pub mod signing;
+pub mod supervisor;
 pub mod types;
 pub mod websocket;
 
