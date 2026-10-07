@@ -1,16 +1,30 @@
-//! CARRY — funding taşıma + basis yardımcıları.
+//! FUNDING CARRY — funding oranı taşıma (perp bacağı).
 //!
-//! 1. HL mekanizması (DOĞRULANMIŞ): API `funding` alanı **SAATLİK**
-//! (fundingHistory 1h aralıklı; BTC 1.25e-5 = faiz+premium imzası);
-//! funding HER SAAT ödenir; UI'daki "8s" gösterimi = hourly×8.
+//! HL MEKANİZMASI (doğrulanmış): API `funding` alanı **SAATLİK**
+//! (fundingHistory 1h; BTC 1.25e-5 tipik); funding HER SAAT ödenir;
 //! `FUNDING_ANNUALIZATION = 24×365 = 8760`.
-//! 2. Yön: pozitif funding → LONG öder → SHORT carry; negatif → LONG.
-//! Eşik |yıllık| > %10; altı Hold (sıfır funding Hold).
-//! 3. ctx yok → Skip. Yardımcılar: `basis_pct`, `find_spot_mid`.
+//!
+//! KANONİK CARRY TANIMI (funding rate arbitrajı / cash-and-carry):
+//! delta-nötr — **long spot + short perp** eşit notional; fiyat hareketi
+//! bacaklar arasında SIFIRLANIR; P&L = funding ödemesi. Pozitif funding
+//! → short perp ALICI; negatif → long perp alıcı (Hyperliquid: funding
+//! her saat, alıcı/ödeyen taraf işarete göre).
+//!
+//! **BİLİNCİ SINIR — SPOT BACAĞI YOK**: motor yalnız perp pozisyonu
+//! tutar; spot ayağı yoksa bu delta-nötr carry arbitrajı DEĞİLDİR —
+//! funding-koşullu yönlü perp pozisyonudur (fiyat riski AÇIK). Sinyal
+//! yönü yine de funding alıcı tarafına göredir: pozitif → Short perp
+//! (funding toplar), negatif → Long. Eşik: |yıllık| > %10 (altı
+//! taşıma cazip değil → Hold).
+//!
+//! Yardımcılar: `basis_pct` / `find_spot_mid` (basis ölçümü — spot
+//! mids bağlanırsa gerçek carry kontratına geçiş için hazır).
+//!
+//! ctx yok → Skip. Deterministik, panik yok.
 use crate::{MarketInput, Signal, Strategy};
 use data::market_ctx::CtxState;
 
-pub struct CarryFundingBasis;
+pub struct FundingCarry;
 
 /// funding yıllıklaştırma: API alanı **saatlik** → yearly = hourly × 24 × 365.
 ///
@@ -20,9 +34,9 @@ pub struct CarryFundingBasis;
 /// Hold üretmek).
 pub const FUNDING_ANNUALIZATION: f64 = 24.0 * 365.0; // = 8760
 
-impl Strategy for CarryFundingBasis {
+impl Strategy for FundingCarry {
     fn name(&self) -> &'static str {
-        "Carry"
+        "Funding Carry"
     }
 
     fn evaluate(&self, input: &MarketInput) -> Signal {
@@ -37,12 +51,12 @@ impl Strategy for CarryFundingBasis {
         if funding_ann > 0.10 {
             Signal::Short {
                 strength: (funding_ann / 0.5).min(0.8),
-                note: format!("funding %{:.1} (yıllık) pozitif → LONG öder, SHORT carry toplar (mark={mark_px})", funding_ann * 100.0),
+                note: format!("funding %{:.1} (yıllık) pozitif → LONG öder, SHORT funding toplar (perp bacağı; spot hedge yok)", funding_ann * 100.0),
             }
         } else if funding_ann < -0.10 {
             Signal::Long {
                 strength: ((-funding_ann) / 0.5).min(0.8),
-                note: format!("funding %{:.1} (yıllık) negatif → SHORT öder, LONG carry toplar", funding_ann * 100.0),
+                note: format!("funding %{:.1} (yıllık) negatif → SHORT öder, LONG funding toplar (perp bacağı; spot hedge yok)", funding_ann * 100.0),
             }
         } else {
             Signal::Hold { note: format!("funding %{:.2} yıllık — taşıma cazip değil", funding_ann * 100.0) }
@@ -78,19 +92,19 @@ mod audit_tests {
     fn carry_funding_sign_long_short() {
  // pozitif: SHORT carry toplar
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(0.0001)), ..Default::default() };
-        match CarryFundingBasis.evaluate(&input) {
+        match FundingCarry.evaluate(&input) {
             Signal::Short { strength, note } => {
                 assert!(strength > 0.0 && strength <= 0.8);
-                assert!(note.contains("SHORT carry toplar"), "{note}");
+                assert!(note.contains("SHORT funding toplar"), "{note}");
             }
             other => panic!("pozitif funding → Short beklenirdi: {other:?}"),
         }
  // negatif: LONG carry toplar
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(-0.0001)), ..Default::default() };
-        assert!(matches!(CarryFundingBasis.evaluate(&input), Signal::Long { .. }));
+        assert!(matches!(FundingCarry.evaluate(&input), Signal::Long { .. }));
  // ters yön SAHTE: pozitif funding asla Long üretmez
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(0.001)), ..Default::default() };
-        assert!(!matches!(CarryFundingBasis.evaluate(&input), Signal::Long { .. }));
+        assert!(!matches!(FundingCarry.evaluate(&input), Signal::Long { .. }));
     }
 
  /// E — ÖLÇEK: API alanı SAATLİK → yıllık = ×24×365 (=8760).
@@ -105,18 +119,18 @@ mod audit_tests {
  // eşik davranışı: %11 yıllık (funding = 0.11/8760) → Short
         let f = 0.11 / FUNDING_ANNUALIZATION;
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(f)), ..Default::default() };
-        assert!(matches!(CarryFundingBasis.evaluate(&input), Signal::Short { .. }), "yıllık %11 → Short");
+        assert!(matches!(FundingCarry.evaluate(&input), Signal::Short { .. }), "yıllık %11 → Short");
  // %9 → Hold (eşik altı)
         let f = 0.09 / FUNDING_ANNUALIZATION;
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(f)), ..Default::default() };
-        assert!(matches!(CarryFundingBasis.evaluate(&input), Signal::Hold { .. }));
+        assert!(matches!(FundingCarry.evaluate(&input), Signal::Hold { .. }));
     }
 
  /// E — funding = 0 → Hold (yön üretmez).
     #[test]
     fn carry_zero_funding_is_hold() {
         let input = MarketInput { coin: "T".into(), ctx: Some(ctx(0.0)), ..Default::default() };
-        match CarryFundingBasis.evaluate(&input) {
+        match FundingCarry.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("cazip değil"), "{note}"),
             other => panic!("Hold beklenirdi: {other:?}"),
         }
@@ -126,6 +140,6 @@ mod audit_tests {
     #[test]
     fn carry_ctx_yoksa_skip() {
         let input = MarketInput::default();
-        assert!(matches!(CarryFundingBasis.evaluate(&input), Signal::Skip { .. }));
+        assert!(matches!(FundingCarry.evaluate(&input), Signal::Skip { .. }));
     }
 }

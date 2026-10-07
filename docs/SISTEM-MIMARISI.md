@@ -175,7 +175,7 @@ Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Rejim)
 MeanReversion (Davranışsal)
 OrderFlow (LOB, Market Making)
 CrossSectional (Kesit Momentum)
-Carry · Volatility (GARCH koşullu volatilite rejimi) · Open Interest (Price×OI matrisi) · Sizing (Kelly)
+Carry (Funding Carry — perp bacağı) · Volatility (GARCH koşullu volatilite rejimi) · Open Interest (Price×OI matrisi) · Sizing (Kelly)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
@@ -525,6 +525,9 @@ engine 170 · data 19 · api 5 · strategy 76
 - **Market Making** AUXILIARY'dir: yönlü sinyal üretmez (raporda
   görünür; sahte alpha kanıtı üretmez).
 - **Kelly Sizing** portföy-düzey öneridir; tahsise etkisi yoktur.
+- **Funding Carry** perp bacağıdır: spot hedge ayağı motor kontratında
+  yoktur → gerçek delta-nötr carry arbitrajı DEĞİLDİR;
+  funding-koşullu yönlü pozisyondur (notta beyan).
 - **GARCH** kanonik Bollerslev(1986) GARCH(1,1) ölçümü + momentum
   kaplaması (yön kanıtı kaplamadır — notta açıkça işaretli; istasyonarlık
   kısıtı α+β<1 yüklüdür).
