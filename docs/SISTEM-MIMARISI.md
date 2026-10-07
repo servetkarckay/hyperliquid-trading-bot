@@ -171,7 +171,7 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 kaynaktır — 8 bilgi kümesi:
 
 ```text
-Trend (Wyckoff, Dow, Turtle, Squeeze Breakout, Elliott, Klasik, Rejim)
+Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Klasik, Rejim)
 MeanReversion (Davranışsal)
 OrderFlow (LOB, Market Making)
 CrossSectional (Kesit Momentum)
@@ -407,8 +407,8 @@ TESTNET ──► cold start ──► 100 gerçek kapanmış işlem ──► r
 - Öğrenme dönemi tek deneydir: aynı konfigürasyonla (stratejiler, eşikler,
   risk limitleri, evren) 100 gerçek kapanış toplanır. Deney sırasında
   parametre değişikliği yapılmaz.
-- `cargo test --workspace`: **276 passed / 0 failed** (engine 170,
-  data 19, api 5, strategy 72). Release build ayrı derlenir.
+- `cargo test --workspace`: **277 passed / 0 failed** (engine 170,
+  data 19, api 5, strategy 73). Release build ayrı derlenir.
 
 ## 26. Mainnet promotion boundary
 
@@ -501,8 +501,8 @@ anlamsızdır.
 ## 30. Test architecture
 
 ```text
-cargo test --workspace  →  276 passed / 0 failed
-engine 170 · data 19 · api 5 · strategy 72
+cargo test --workspace  →  277 passed / 0 failed
+engine 170 · data 19 · api 5 · strategy 73
 ```
 
 - **Kontrat testleri**: EntryGate denklemi (kaynak taraması), exit sahipliği

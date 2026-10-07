@@ -23,7 +23,7 @@ pub mod carry_funding_basis;
 pub mod oi_likidasyon;
 pub mod rejim_tespiti;
 pub mod risk_kelly;
-pub mod dow_teorisi;
+pub mod dow_theory;
 pub mod davranissal_finans;
 pub mod ensemble;
 pub mod klasik_indikatorler;
@@ -191,7 +191,7 @@ pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
         "GARCH", "Carry", "OI Likidasyon",
-        "Rejim Tespiti", "Kelly Sizing", "Dow", "Davranışsal", "Klasik Göstergeler",
+        "Rejim Tespiti", "Kelly Sizing", "Dow Theory", "Davranışsal", "Klasik Göstergeler",
         "Elliott", "Turtle", "Squeeze Breakout",
     ]
 }
@@ -207,7 +207,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(oi_likidasyon::OiLikidasyon),
         Box::new(rejim_tespiti::RejimTespiti),
         Box::new(risk_kelly::RiskKelly),
-        Box::new(dow_teorisi::DowTeorisi),
+        Box::new(dow_theory::DowTheory),
         
         Box::new(davranissal_finans::DavranissalFinans),
         Box::new(klasik_indikatorler::KlasikIndikatorler),
