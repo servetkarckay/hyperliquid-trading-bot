@@ -1,12 +1,24 @@
-//! RİSK KELLY — işlem boyutu hesabı (yön üretmez, AUXILIARY).
+//! RISK KELLY — Kelly kriteri işlem boyutu hesabı (yön üretmez,
+//! AUXILIARY).
 //!
-//! 1. f* = p − (1−p)/b — p ve b YALNIZ tracker'ın GERÇEK canlı kanıtından
-//! (`MarketInput::portfolio_*`); kanıt yok → Skip — sabit varsayılan
-//! win-rate ile boyutlama YASAKTIR.
-//! 2. Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle kanıtlı);
-//! not yalnız boyut ÖNERİSİdir.
-//! 3. Kapsam: **PORTFÖY-DÜZEY advisory** — coin/strateji-özel Kelly
+//! KANONİK KAYNAKLAR:
+//! - **Kelly (1956), "A New Interpretation of Information Rate"** —
+//!   orijinal: büyüme oranını maksimize eden oran (log-utility).
+//! - **Thorp — binary form**: g(f) = p·log(1+f) + q·log(1−f);
+//!   even-money'de f* = p − q; odds b'de **f* = p − (1−p)/b** — bu
+//!   modülün formülü.
+//! - **Yarım Kelly** — Thorp: "pratikte genel olarak aşağı doğru
+//!   değiştirilir" (varyans düşürme); kod: f*/2 (kanonik pratik).
+//!
+//! VERİ SÖZLEŞMESİ: p ve b YALNIZ tracker'ın GERÇEK canlı kanıtından
+//! (`MarketInput::portfolio_*`); kanıt yok → Skip — sabit win-rate
+//! (örn. %45) ile boyutlama YASAKTIR (kaynak-tarama testli).
+//! f* ≤ 0 → pozitif edge yok → pozisyon $0.
+//!
+//! KAPSAM: **PORTFÖY-DÜZEY advisory** — coin/strateji-özel Kelly
 //! DEĞİLDİR; tracker'ın toplam canlı kanıt pencerisinden okunur.
+//! Çıktı Hold/Skip — actual allocation'a etkisi SIFIR (testle
+//! kanıtlı); not yalnız boyut ÖNERİSİdir.
 use crate::{MarketInput, Signal, StratStatus, Strategy};
 use math::portfolio;
 
@@ -28,7 +40,13 @@ impl Strategy for RiskKelly {
             };
         };
         let kelly = portfolio::kelly_binary(p, b).unwrap_or(0.0);
- // yarım Kelly (pratik kural)
+        // KANONİK: f* ≤ 0 = pozitif edge YOK → Kelly 0 önerir (yatırım yok)
+        if kelly <= 0.0 {
+            return Signal::Hold {
+                note: format!("Kelly f*={kelly:.3} ≤ 0 — pozitif edge YOK (p={p:.2} b={b:.2}); pozisyon $0"),
+            };
+        }
+ // yarım Kelly (pratik kural — Thorp: pratikte aşağı doğru ayarlanır)
         let half = kelly * 0.5;
         let max_usd = input.equity * half;
 
@@ -138,3 +156,21 @@ mod kelly_tests {
         assert_eq!(MarketMaking.status(&MarketInput::default()), StratStatus::Auxiliary);
     }
 }
+
+ /// f* ≤ 0 → pozitif edge YOK → pozisyon $0 (kanonik Kelly sıfır önerir).
+    #[test]
+    fn kelly_sifir_edge_pozisyon_sifir() {
+        let input = MarketInput {
+            equity: 300.0,
+            portfolio_win_rate: Some(0.5),
+            portfolio_wl_ratio: Some(1.0), // b=1: f* = p − (1−p) = 0
+            ..Default::default()
+        };
+        match RiskKelly.evaluate(&input) {
+            Signal::Hold { note } => {
+                assert!(note.contains("pozitif edge YOK"), "{note}");
+                assert!(note.contains("$0"), "{note}");
+            }
+            other => panic!("Hold beklenirdi: {other:?}"),
+        }
+    }
