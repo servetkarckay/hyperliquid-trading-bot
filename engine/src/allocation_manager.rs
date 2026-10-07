@@ -974,6 +974,6 @@ mod cluster_tests {
             distinct.len()
         );
         assert_eq!(strategy::info_cluster("Kelly Sizing"), strategy::InfoCluster::Sizing);
-        assert_eq!(strategy::info_cluster("Carry"), strategy::InfoCluster::Carry);
+        assert_eq!(strategy::info_cluster("Funding Carry"), strategy::InfoCluster::Carry);
     }
 }
