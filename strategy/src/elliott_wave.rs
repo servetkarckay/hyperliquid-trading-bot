@@ -99,21 +99,6 @@ mod audit_tests {
     use crate::strat_test_helpers::helpers as H;
 
  /// Deterministik zigzag: pivotlar arasında lineer interpolasyon.
-    fn zz(pivots: &[(usize, f64)], n: usize, up_v: f64, down_v: f64) -> Vec<data::Candle> {
-        let mut candles = Vec::new();
-        for i in 0..n {
-            let mut seg = 0usize;
-            for (j, (b, _)) in pivots.iter().enumerate() {
-                if *b <= i { seg = j; }
-            }
-            let (b0, p0) = pivots[seg];
-            let (b1, p1) = pivots[(seg + 1).min(pivots.len() - 1)];
-            let px = if b1 > b0 { p0 + (p1 - p0) * (i - b0) as f64 / (b1 - b0) as f64 } else { p0 };
-            let v = if p1 >= p0 { up_v } else { down_v };
-            candles.push(H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, v));
-        }
-        candles
-    }
 
  /// A — 5-dalga yukarı şablonu → Long [0.45].
  /// pvh = [130, 150, 152] (artan), pvl = [110, 128] (artan),
@@ -124,7 +109,7 @@ mod audit_tests {
             (0usize, 96.0), (20, 130.0), (40, 110.0), (70, 150.0),
             (95, 128.0), (119, 152.0), (150, 135.0), (199, 148.0),
         ];
-        let candles = zz(&pivs, 200, 250.0, 50.0);
+        let candles = H::zigzag(&pivs, 200, 250.0, 50.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         match ElliottWave.evaluate(&input) {
             Signal::Long { strength, note } => {
@@ -138,7 +123,7 @@ mod audit_tests {
  /// D — sayım belirsizse Hold (SAHTE yön yok).
     #[test]
     fn elliott_pivot_yoksa_hold() {
-        let candles = zz(&[(0usize, 100.0), (199, 100.2)], 200, 100.0, 100.0);
+        let candles = H::zigzag(&[(0usize, 100.0), (199, 100.2)], 200, 100.0, 100.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         match ElliottWave.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("sayım belirsiz"), "{note}"),
@@ -155,7 +140,7 @@ mod audit_tests {
             (0usize, 96.0), (20, 130.0), (40, 110.0), (70, 150.0),
             (95, 128.0), (140, 160.0), (165, 134.0), (199, 140.0),
         ];
-        let full = zz(&pivs, 200, 250.0, 50.0);
+        let full = H::zigzag(&pivs, 200, 250.0, 50.0);
  // A = bar 0..=176 (177 mum ≥ 150): son dip (bar 165, pencere
  // 153..177) onaylanmamış → piv_l = [110,128] (3. dip yok) → Long YOK
         let a = full[..177].to_vec();
@@ -176,7 +161,7 @@ mod audit_tests {
         let pivs = [
             (0usize, 152.0), (20, 100.0), (40, 128.0), (70, 90.0), (95, 118.0), (119, 88.0), (199, 92.0),
         ];
-        let candles = zz(&pivs, 200, 50.0, 250.0);
+        let candles = H::zigzag(&pivs, 200, 50.0, 250.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         assert!(
             !matches!(ElliottWave.evaluate(&input), Signal::Short { .. }),

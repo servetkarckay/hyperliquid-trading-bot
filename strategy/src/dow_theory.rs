@@ -102,35 +102,12 @@ mod audit_tests {
 
  /// Deterministik zigzag: pivotlar (bar, fiyat) arasında lineer interpolasyon.
  /// Yükselen ayaklarda hacim 250, düşenlerde 50.
-    fn zigzag(pivots: &[(usize, f64)], n: usize, up_v: f64, down_v: f64) -> Vec<data::Candle> {
-        let mut candles = Vec::new();
-        for i in 0..n {
- // pivot segmentini bul
-            let mut seg = 0usize;
-            for (j, (b, _)) in pivots.iter().enumerate() {
-                if *b <= i {
-                    seg = j;
-                }
-            }
-            let (b0, p0) = pivots[seg];
-            let (b1, p1) = pivots[(seg + 1).min(pivots.len() - 1)];
-            let px = if b1 > b0 {
-                p0 + (p1 - p0) * (i - b0) as f64 / (b1 - b0) as f64
-            } else {
-                p0
-            };
-            let up = p1 >= p0;
-            let v = if up { up_v } else { down_v };
-            candles.push(H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, v));
-        }
-        candles
-    }
 
  /// Yükseliş yapısı: HH (112→122) + HL (98→102→108), yükseliş hacmi baskın.
     #[test]
     fn dow_rhea_buy_hh_hl_hacim_long_uretir() {
         let pivs = [(0usize, 100.0), (10, 98.0), (30, 112.0), (50, 102.0), (70, 122.0), (90, 108.0), (119, 116.0)];
-        let candles = zigzag(&pivs, 120, 250.0, 50.0);
+        let candles = H::zigzag(&pivs, 120, 250.0, 50.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         match DowTheory.evaluate(&input) {
             Signal::Long { strength, note } => {
@@ -146,7 +123,7 @@ mod audit_tests {
     fn dow_lh_ll_short_uretir() {
         let pivs = [(0usize, 112.0), (10, 122.0), (30, 108.0), (50, 118.0), (70, 98.0), (90, 112.0), (119, 104.0)];
  // düşen ayaklarda hacim baskın (dow short hacim onayı)
-        let candles = zigzag(&pivs, 120, 50.0, 250.0);
+        let candles = H::zigzag(&pivs, 120, 50.0, 250.0);
         let input = MarketInput { coin: "T".into(), candles, ..Default::default() };
         match DowTheory.evaluate(&input) {
             Signal::Short { strength, .. } => assert!(strength > 0.0),
@@ -165,7 +142,7 @@ mod audit_tests {
     #[test]
     fn dow_nan_pivot_sahte_sinyal_uretmez() {
         let pivs = [(0usize, 100.0), (10, 98.0), (30, 112.0), (50, 102.0), (70, 122.0), (90, 108.0), (119, 116.0)];
-        let mut c = zigzag(&pivs, 120, 250.0, 50.0);
+        let mut c = H::zigzag(&pivs, 120, 250.0, 50.0);
         H::set(&mut c, 70, f64::NAN, f64::NAN, f64::NAN, 100.0); // pivot bar 70 bozuk → pivot seti <2
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         let sig = DowTheory.evaluate(&input);
@@ -179,7 +156,7 @@ mod audit_tests {
     #[test]
     fn dow_future_leak_pivot_onayindan_once_sinyal_yok() {
         let pivs = [(0usize, 100.0), (10, 98.0), (30, 112.0), (50, 102.0), (70, 122.0), (90, 108.0), (119, 116.0)];
-        let full = zigzag(&pivs, 170, 250.0, 50.0);
+        let full = H::zigzag(&pivs, 170, 250.0, 50.0);
  // A = bar 0..=79 (son pivot penceresi 60..80 tamamlanmamış)
         let a = full[..80].to_vec();
         let input = MarketInput { coin: "T".into(), candles: a, ..Default::default() };
@@ -192,7 +169,7 @@ mod audit_tests {
         let input_b = MarketInput { coin: "T".into(), candles: full[..80].to_vec(), ..Default::default() };
         assert_eq!(sig_a, DowTheory.evaluate(&input_b), "gelecek barlar geçmiş kararını değiştirmez");
  // pivot penceresi tamamlandığında sinyal GELİR (gerekçe kanıtlandı)
-        let full2 = zigzag(&pivs, 120, 250.0, 50.0);
+        let full2 = H::zigzag(&pivs, 120, 250.0, 50.0);
         let input2 = MarketInput { coin: "T".into(), candles: full2, ..Default::default() };
         assert!(matches!(DowTheory.evaluate(&input2), Signal::Long { .. }));
     }

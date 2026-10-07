@@ -160,13 +160,7 @@ mod audit_tests {
     /// 125 mum; genişlik AZALAN → PLATO (sıkışmada): a(i) = min(1−0.005i, 0.40).
     /// Kırılım barı (son): bant üstü/altı kapanış.
     fn squeeze_series(breakout_close: f64) -> Vec<data::Candle> {
-        let mut c: Vec<data::Candle> = (0..150)
-            .map(|i| {
-                let a = (1.0 - 0.005 * i as f64).min(0.40);
-                let px = 100.0 + a * (if i % 2 == 0 { 1.0 } else { -1.0 });
-                H::candle(i as i64 * 3_600_000, px, px + 0.1, px - 0.1, px, 100.0)
-            })
-            .collect();
+        let mut c = H::oscillator(150, |i| (1.0 - 0.005 * i as f64).min(0.40), 100.0, 0.1);
         H::set_last(&mut c, breakout_close, breakout_close + 0.1, breakout_close - 0.1, 200.0);
         c
     }

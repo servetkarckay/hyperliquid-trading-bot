@@ -120,19 +120,11 @@ mod audit_tests {
     use std::f64::consts::PI;
 
  /// Deterministik sinüs serisi: döngüsel deneysel metrikler.
-    fn sine(n: usize, period: f64, amp: f64, v: f64) -> Vec<data::Candle> {
-        (0..n)
-            .map(|i| {
-                let px = 100.0 + amp * (2.0 * PI * i as f64 / period).sin();
-                H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, v)
-            })
-            .collect()
-    }
 
  /// A — dip noktasında çoklu onay → Long (skor ≥ +2).
     #[test]
     fn klasik_coklu_onay_long() {
-        let full = sine(200, 60.0, 2.0, 150.0);
+        let full = H::sine(200, 60.0, 2.0, 150.0);
  // sinüsün DİP noktası: i = 3T/4 = 45 (i mod 60)
         let mut best: Option<(usize, String)> = None;
         for cut in 150..=190 {
@@ -152,7 +144,7 @@ mod audit_tests {
  /// C — Short simetrisi: zirve noktasında Short (skor ≤ −2).
     #[test]
     fn klasik_asiri_short() {
-        let full = sine(200, 60.0, 2.0, 150.0);
+        let full = H::sine(200, 60.0, 2.0, 150.0);
  // zirve + DÖNÜŞ sonrası kısa inişte MACD hist − olur; zirve barında
  // hist hâlâ + olabilir → dönüşü izleyen barlarda ara
         let mut best: Option<(usize, String)> = None;

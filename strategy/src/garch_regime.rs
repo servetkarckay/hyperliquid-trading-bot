@@ -68,13 +68,7 @@ mod audit_tests {
     #[test]
     fn volzaman_sikisma_momentum_yonu() {
  // geniş→dar geçiş: ilk 100 bar geniş, son 100 bar dar
-        let mut c: Vec<data::Candle> = (0..220)
-            .map(|i| {
-                let a = if i < 110 { 3.0 } else { 0.15 };
-                let px = 100.0 + a * (if i % 2 == 0 { 1.0 } else { -1.0 });
-                H::candle(i as i64 * 3_600_000, px, px + 0.05, px - 0.05, px, 100.0)
-            })
-            .collect();
+        let mut c = H::oscillator(220, |i| if i < 110 { 3.0 } else { 0.15 }, 100.0, 0.05);
  // son bar momentum yukarı
         H::set_last(&mut c, 101.0, 101.2, 100.8, 100.0);
         let input = MarketInput { coin: "T".into(), candles: c.clone(), ..Default::default() };

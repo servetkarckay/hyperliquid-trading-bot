@@ -514,22 +514,11 @@ mod wyckoff_professional_tests {
     use crate::Candle;
 
     /// Anlık mum üretici: (o,h,l,c,v) dizisi → artan t'li seriler
-    fn mk(start_idx: i64, rows: &[(f64, f64, f64, f64, f64)]) -> Vec<Candle> {
-        rows.iter()
-            .enumerate()
-            .map(|(k, (o, h, l, c, v))| {
-                H::candle(
-                    (start_idx + k as i64) * 3_600_000,
-                    *o, *h, *l, *c, *v,
-                )
-            })
-            .collect()
-    }
 
     /// Birikim dizilimi üretir (SC+AR) ve son barı taketover ile değiştirir
     fn accumulation_base() -> Vec<Candle> {
         let mut c = H::flat(92, 100.0); // tablo: v=100, spread 0.2
-        c.extend(mk(92, &[
+        c.extend(H::rows(92, &[
             // SC idx92 (tail idx 0): klimaks + düşük üstünden kapanış
             (100.0, 98.0, 95.0, 97.5, 400.0),
             // AR idx93 (tail idx 1): tepki → direnç 96.9
@@ -557,7 +546,7 @@ mod wyckoff_professional_tests {
         let mut c = accumulation_base();
         let n = c.len();
         // spring bar: 94.97 < 95 destek, c=95.5 > destek
-        c.extend(mk(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)]));
+        c.extend(H::rows(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)]));
         c.extend(H::flat(n + 1 - 130, 96.4)); // c2 dengesi: toplamı 130 yap
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
@@ -574,8 +563,8 @@ mod wyckoff_professional_tests {
     #[test]
     fn test_spring_onayli_gucune_hucum() {
         let mut c = accumulation_base();
-        c.extend(mk(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)])); // spring
-        c.extend(mk(125, &[(95.6, 95.8, 95.2, 96.1, 140.0)]));  // test-onay
+        c.extend(H::rows(124, &[(95.6, 95.7, 94.97, 95.5, 180.0)])); // spring
+        c.extend(H::rows(125, &[(95.6, 95.8, 95.2, 96.1, 140.0)]));  // test-onay
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
@@ -590,7 +579,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn sos_aralik_kirilisi_long() {
         let mut c = accumulation_base();
-        c.extend(mk(127, &[(96.9, 97.5, 96.9, 97.2, 260.0)]));
+        c.extend(H::rows(127, &[(96.9, 97.5, 96.9, 97.2, 260.0)]));
         c.extend(H::flat(2, 96.4));
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
@@ -608,7 +597,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn fiyati_kirilis_giris_uretmez() {
         let mut c = accumulation_base();
-        c.extend(mk(129, &[(94.9, 95.0, 94.3, 94.4, 110.0)]));
+        c.extend(H::rows(129, &[(94.9, 95.0, 94.3, 94.4, 110.0)]));
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
             Signal::Hold { note } => assert!(note.contains("İPTAL"), "{note}"),
@@ -618,7 +607,7 @@ mod wyckoff_professional_tests {
 
     fn distribution_base() -> Vec<Candle> {
         let mut c = H::flat(92, 100.0);
-        c.extend(mk(92, &[
+        c.extend(H::rows(92, &[
             // BC idx92 (tail 0): klimaks + zirvenin altından kapanış
             (100.0, 105.0, 101.0, 102.5, 420.0),
             // AR-down idx93 (tail 1): destek 101.4
@@ -670,7 +659,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn sow_short() {
         let mut c = distribution_base();
-        c.extend(mk(129, &[(101.6, 101.5, 100.6, 101.0, 260.0)]));
+        c.extend(H::rows(129, &[(101.6, 101.5, 100.6, 101.0, 260.0)]));
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
             Signal::Short { strength, note } => {
@@ -685,14 +674,14 @@ mod wyckoff_professional_tests {
     #[test]
     fn divergence_uyarisi_ekler() {
         let mut c = H::flat(92, 100.0);
-        c.extend(mk(92, &[
+        c.extend(H::rows(92, &[
             (100.0, 98.0, 95.0, 97.5, 400.0),  // SC
             (97.5, 96.9, 96.2, 96.5, 120.0),   // AR → 96.9
             (96.5, 96.8, 95.8, 96.2, 90.0),
         ]));
         c.extend(H::flat(32, 96.4));
         c.pop(); c.pop(); c.pop();
-        c.extend(mk(127, &[
+        c.extend(H::rows(127, &[
             (96.0, 96.1, 95.98, 96.02, 210.0), // yüksek hacim, dar sonuç
             (96.0, 96.1, 95.98, 96.02, 210.0),
             (96.0, 96.1, 95.98, 96.02, 210.0),
@@ -708,7 +697,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn divergence_signal_0_6x() {
         let mut c = H::flat(92, 100.0);
-        c.extend(mk(92, &[
+        c.extend(H::rows(92, &[
             (100.0, 98.0, 95.0, 97.5, 400.0),
             (97.5, 96.9, 96.2, 96.5, 120.0),
             (96.5, 96.8, 95.8, 96.2, 90.0),
@@ -716,7 +705,7 @@ mod wyckoff_professional_tests {
             (96.0, 96.0, 95.01, 95.8, 140.0),
         ]));
         c.extend(H::flat(32, 96.4)); // pos97..128
-        c.extend(mk(129, &[(95.6, 95.6, 94.97, 95.56, 500.0)])); // spring + dar sonuç
+        c.extend(H::rows(129, &[(95.6, 95.6, 94.97, 95.56, 500.0)])); // spring + dar sonuç
         let input = MarketInput { coin: "T".into(), candles: c, ..Default::default() };
         match Wyckoff.evaluate(&input) {
             Signal::Long { strength, note } => {
@@ -731,7 +720,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn exit_long_dagitim_uyarisi() {
         let mut c = H::flat(119, 100.0);
-        c.extend(mk(119, &[(104.0, 104.05, 103.95, 104.0, 380.0)]));
+        c.extend(H::rows(119, &[(104.0, 104.05, 103.95, 104.0, 380.0)]));
         let ctx = ExitCtx {
             coin: "T".into(),
             candles: c.clone(),
@@ -754,7 +743,7 @@ mod wyckoff_professional_tests {
     #[test]
     fn exit_short_birikim_uyarisi() {
         let mut c = H::flat(119, 100.0);
-        c.extend(mk(119, &[(96.0, 96.05, 95.95, 96.0, 380.0)]));
+        c.extend(H::rows(119, &[(96.0, 96.05, 95.95, 96.0, 380.0)]));
         let ctx = ExitCtx {
             coin: "T".into(),
             candles: c,
