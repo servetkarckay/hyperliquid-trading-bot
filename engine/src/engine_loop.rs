@@ -4905,7 +4905,7 @@ mod golden_path_tests {
         let mut tracker = StrategyTracker::default();
         let fill = cand.tp_px; // TP dolumu (kâr tarafı)
         let r = (fill - mid) / (mid - cand.sl_px).abs();
-        tracker.record_outcome_r(vec!["Turtle".into(), "Breakout".into()], 1_700_000_000, r);
+        tracker.record_outcome_r(vec!["Turtle".into(), "Squeeze Breakout".into()], 1_700_000_000, r);
         assert_eq!(tracker.evidence_n("Turtle"), 1, "gerçek kapanış → kanıt");
         assert!(tracker.portfolio_stats().is_some(), "Kelly için kanıt oluşmalı");
         // ── 8) ÇIKIŞ SEBEBİ sözleşmesi ──

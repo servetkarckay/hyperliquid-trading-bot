@@ -29,7 +29,7 @@ pub mod ensemble;
 pub mod klasik_indikatorler;
 pub mod elliott_dalga;
 pub mod trend_following_turtle;
-pub mod breakout_kirilim;
+pub mod squeeze_breakout;
 
 use data::market_ctx::CtxState;
 use data::Candle;
@@ -192,7 +192,7 @@ pub fn registry_names() -> Vec<&'static str> {
         "Wyckoff", "Kesit Momentum", "LOB Emir Akışı", "Market Making",
         "Volatilite Zaman Serisi", "Carry", "OI Likidasyon",
         "Rejim Tespiti", "Kelly Sizing", "Dow", "Davranışsal", "Klasik Göstergeler",
-        "Elliott", "Turtle", "Breakout",
+        "Elliott", "Turtle", "Squeeze Breakout",
     ]
 }
 
@@ -213,7 +213,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(klasik_indikatorler::KlasikIndikatorler),
         Box::new(elliott_dalga::ElliottDalga),
         Box::new(trend_following_turtle::TurtleTrendFollowing),
-        Box::new(breakout_kirilim::BreakoutKirilim),
+        Box::new(squeeze_breakout::SqueezeBreakout),
         
     ]
 }
@@ -225,8 +225,8 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
 /// yüzden küme sayısına göre verir (aynı küme = çift sayılmaz).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InfoCluster {
-    /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle, Breakout,
-    /// Elliott, Klasik Göstergeler, Rejim Tespiti
+    /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle,
+    /// Squeeze Breakout, Elliott, Klasik Göstergeler, Rejim Tespiti
     Trend,
     /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,
@@ -255,7 +255,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "OI Likidasyon" => InfoCluster::Liquidation,
         "Davranışsal" => InfoCluster::MeanReversion,
         // fiyat/trend türevleri: Wyckoff, Dow, Klasik Göstergeler, Elliott,
-        // Turtle, Breakout, Rejim Tespiti
+        // Turtle, Squeeze Breakout, Rejim Tespiti
         _ => InfoCluster::Trend,
     }
 }
