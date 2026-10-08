@@ -2707,7 +2707,7 @@ impl Engine {
         // ÖNCÜ temizlik: öncesinden beri oid=0 bekleyen ve ASLA batch'e
         // girmemiş makine — kanıtsız kalıntıdır; cycle penceresi (2×cycle)
         // aşılırsa geri Flat'a döner (bounded, sessiz kilit YOK).
-        let oid0_grace_ms = (self.loop_cfg.cycle_secs.max(1) as u64) * 2 * 1000;
+        let oid0_grace_ms = self.loop_cfg.cycle_secs.max(1) * 2 * 1000;
         let now0 = hyperliquid_api::now_ms();
         for (cn, m) in self.machines.iter_mut() {
             if let PosState::Pending { oid: 0, ts, .. } = m.state.clone() {

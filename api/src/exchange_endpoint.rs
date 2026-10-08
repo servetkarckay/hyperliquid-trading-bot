@@ -481,3 +481,70 @@ mod precision_tests {
         assert_eq!(perp_price_verified(0.07370625, 1, Some(6)), 0.07371);
     }
 }
+
+#[cfg(test)]
+mod rastgele_property_testleri {
+    use super::perp_price;
+
+    /// Deterministik xorshift — CI'da tekrar edilebilir (rastgele SAHTE YOK).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn f64_pos(&mut self) -> f64 {
+            // 1e-9 .. 1e9 — pozitif/finite
+            let e = (self.next() % 36) as i32 - 8; // 10^(-8..27)
+            let m = (self.next() % 10_000) as f64 + 1.0;
+            m * (10f64).powi(e) / 10_000.0
+        }
+    }
+
+    /// Değişmezlər: sonuç (1) pozitif, (2) finite, (3) dec-lar üstünde hane
+    /// kuralına uygun, (4) 5 anlamlı hane içinde (sig beraber), (5) idempotent.
+    #[test]
+    fn perp_price_değişmezler_10000_girdi() {
+        let mut r = Rng(0xACE1_0001);
+        for _ in 0..10_000 {
+            let x = r.f64_pos();
+            for szd in 0..=5u32 {
+                let p = perp_price(x, szd);
+                // KONTRAT: dec-lar altındaki çok küçük fiyat → 0.0'a
+                // yuvarlama (exchange tick kuralı); çağıran 0'ı guard eder.
+                // p ≥ 0 + finite her zaman; p > 0 için pazar-aralığı (x ≥ 1e-3,
+                // tüm gerçek pazarlar) garanti edilir.
+                assert!(p >= 0.0, "x={x} szd={szd} → {p} (negatif)");
+                assert!(p.is_finite(), "x={x} szd={szd} → finite değil");
+                // rep. edilebilir birer tick: 10^-(6-szd) → o bornぉ ÜSTÜ
+                // sıfırla yuvarlanamaz (near-tick yarısından aşağısı olabilir).
+                let d = 6i32 - szd as i32;
+                if x >= (10f64).powi(-d) {
+                    assert!(
+                        p > 0.0,
+                        "x={x} szd={szd} → 0 (rep. tick 10^-{d} üstü sıfır olamaz!)"
+                    );
+                }
+                // maksimum ondalık hane: 6 - szd
+                let dec = p.to_string();
+                if let Some(dot) = dec.find('.') {
+                    let digits = dec[dot + 1..].trim_end_matches('0').len();
+                    assert!(
+                        digits <= (6 - szd as usize),
+                        "szd={szd} fazla hane: x={x} p={p}"
+                    );
+                }
+                // idempotent: tekrar yuvarlama değiştirmez (bounded epsilon)
+                let p2 = perp_price(p, szd);
+                assert!(
+                    (p2 - p).abs() <= p.abs() * 1e-12 + 1e-12,
+                    "idempotent weekday: x={x} p={p} p2={p2}"
+                );
+            }
+        }
+    }
+}

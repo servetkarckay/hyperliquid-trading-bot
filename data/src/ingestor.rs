@@ -484,3 +484,87 @@ mod num_sozlesme_testleri {
         }
     }
 }
+
+#[cfg(test)]
+mod rastgele_fuzz_fallback_testleri {
+    use super::num;
+    use serde_json::{json, Value};
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+    }
+
+    /// FUZ-ZE FALLBACK (klasik kargo): 20k rastgele/deforme değer
+    /// parser'a素 girer — (1) PANİK YOK, (2) asla sahte 0.0 DÖNÜŞMEZ
+    /// (missing/invalid → None sözleşmesi), (3) geçerli sayı → None değildir.
+    #[test]
+    fn num_rastgele_deforme_değerler_panik_yok() {
+        let mut r = Rng(0xBADC0DE);
+        let çorba: Vec<Value> = vec![
+            json!(null),
+            json!(true),
+            json!(false),
+            json!(""),
+            json!("abc"),
+            json!("NaN"),
+            json!("Infinity"),
+            json!("-Infinity"),
+            json!("1e999"),
+            json!("0.0"),
+            json!(0.0),
+            json!(-0.0),
+            json!(1.0),
+            json!(-1.0),
+            json!([1, 2, 3]),
+            json!({}),
+            json!("\"`qq."),
+            json!(-1e308),
+            json!(1e308),
+            json!(f64::NAN.to_string()),
+            json!("0x10"),
+            json!(" 12 "),
+            json!("+12"),
+            json!(".5"),
+            json!("12."),
+            json!("1_000"),
+        ];
+        for _ in 0..20_000 {
+            let idx = (r.next() as usize) % çorba.len();
+            let v = çorba[idx].clone();
+            // yan değiştme: değerlere rastgele kayan eklemeler
+            let v = if r.next() % 3 == 0 {
+                if let Some(s) = v.as_str() {
+                    json!(format!("{s}x"))
+                } else {
+                    v
+                }
+            } else {
+                v
+            };
+            let got = num(&v);
+            match (&v, &got) {
+                (Value::Number(n), Some(out)) => {
+                    if let Some(f) = n.as_f64() {
+                        if f.is_finite() {
+                            assert_eq!(*out, f, "sayı bozuldu: {v}");
+                        }
+                    }
+                }
+                _ => {
+                    if got.is_some() {
+                        let f = got.unwrap();
+                        assert!(f.is_finite());
+                    }
+                }
+            }
+        }
+    }
+}

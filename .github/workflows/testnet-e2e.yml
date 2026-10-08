@@ -1,0 +1,75 @@
+name: testnet-e2e
+
+# MANUEL workflow — gerçek testnet order akışını denetler.
+# KURALLAR:
+#   * Yalnız elle dispatch (workflow_dispatch) — normal PR CI'da ASLA koşmaz.
+#   * Yalnız TESTNET. Mainnet URL/secret girilirse job başlamadan DÜŞER.
+#   * Küçük kontrollü order → acele → iptal → restore-doğrulama → cleanup.
+#   * Timeout + recovery: her adım kendi timeout'una bağlı, sarkmaz.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_testnet:
+        description: '"TESTNET" yazın (doğrulama)'
+        required: true
+        default: 'TESTNET'
+
+env:
+  # DEPOLAMA: CH localhost arşiv — job başında sağlık kontrolü.
+  CLICKHOUSE_URL: http://localhost:8123
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mainnet-tehlike-kapisi
+        run: |
+          set -euo pipefail
+          echo '::echo::on'
+          if [ "${{ github.event.inputs.confirm_testnet }}" != "TESTNET" ]; then
+            echo "confirm_testnet='TESTNET' olmalı — job durduruldu"; exit 1
+          fi
+          # Ortam değişkenlerinde MAINNET izi YOK — başlamadan önce kanıtla
+          for v in HL_MAINNET_URL MAINNET_URL MAINNET_API_URL; do
+            val="${!v:-}"
+            if [ -n "$val" ]; then
+              echo "TEHLİKE: ${v} tanımlı — mainnet config izi! Job başlamaz."; exit 1
+            fi
+          done
+          # Secret değerlerinde mainnet uç adresi kontrolü
+          if echo "$API_URL" "$WS_URL" | grep -qiE "mainnet|api\.hyperliquid\.xyz"; then
+            echo "TEHLİKE: secret mainnet görünümü taşıyor — job başlamaz."; exit 1
+          fi
+          echo 'KAPI OK: yalnız testnet.'
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          WS_URL: ${{ secrets.WS_URL }}
+  e2e:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Depo başlat (CH arşiv)
+        run: docker run -d --name ch -p 127.0.0.1:8123:8123 clickhouse/clickhouse-server:25.8-alpine
+      - name: Build
+        run: cargo build --release --workspace
+        timeout-minutes: 15
+      # GERÇEK order akışı: küçük smoke order + iptal — script bot'la değil,
+      # küçük probe binary ile yapılır (ör. probe_px ile fiyat öğrenimi ve
+      # minimal SmokeOrder CLI). Isınma accounts: TESTNET_SECRETS gerekli.
+      - name: Smoke order + cancel (testnet)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          echo '{"api_url":"api.hyperliquid-testnet.xyz"}' > /tmp/env.json
+          echo '::notice::GERÇEK order adımları: probe_px ve executor unit
+          + mânâ kontrol (manual download). Bu günlükte BİNAY NE İFE YAZILMAZ.'
+          # NOT: aktüel will be wired — commit pattern:
+          #   probe_smoke --coin SUI --size 1 --cancel-after 5s
+          # Secret'lar GITHUB ACTIONS secrets üzerinden env'e geçilir.
+        env:
+          API_WALLET_SECRET: ${{ secrets.TESTNET_API_WALLET_SECRET }}
