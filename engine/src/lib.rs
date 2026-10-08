@@ -46,3 +46,6 @@ pub mod helpers_for_tests {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod e2e_matrix;
