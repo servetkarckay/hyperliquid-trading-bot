@@ -1,20 +1,26 @@
 name: pr-ci
 
-# Normal PR CI — canlı borsa NONE: yalnız derleme + test + analiz.
-# Canlı testnet order akışı AYRI workflow'tur: .github/workflows/testnet-e2e.yml
+# Normal PR CI — CANLI BORSA YOK: derleme + test + analiz (deterministik).
+# Canlı testnet order akışı AYRI workflow: testnet-e2e.yml (yalnız manual).
+# KURAL: her adım gerçek geçiş — continue-on-error / || true YASAK.
 
 on:
   pull_request:
   push:
     branches: [master]
 
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental OFF: cache-ler arası deterministik
+  CARGO_INCREMENTAL: 0
+
 jobs:
-  build-test:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust toolchain
+      - name: Rust toolchain (stable + rustfmt/clippy)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -22,18 +28,20 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: fmt
+      - name: 1) fmt
         run: cargo fmt --all -- --check
 
-      - name: clippy (mechanic-clean baraj)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -A clippy::result_large_err -A clippy::too_many_arguments || true
-        continue-on-error: true
-        # NOT: result_large_err/too_many_arguments yapısal borç olarak
-        # belgendi — kapatma satırı allow değil, LINT-AFTER-REPORT.
-        # Temizlendiğinde `|| true` silinir (borç listesi AUDIT_REPORT.md).
+      - name: 2) check (all targets, all features)
+        run: cargo check --workspace --all-targets --all-features
 
-      - name: test
-        run: cargo test --workspace --all-features
+      - name: 3) clippy — HARD GATE (-D warnings, suppression YASAK)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: release build
+      - name: 4) test
+        run: cargo test --workspace --all-targets --all-features
+
+      - name: 5) debug build (all targets)
+        run: cargo build --workspace --all-targets --all-features
+
+      - name: 6) release build
         run: cargo build --release --workspace --all-features

@@ -96,7 +96,15 @@ async fn main() -> Result<()> {
             let (px2, sz2, a2) = (px2, sz2, a2);
             async move {
                 let st = ex
-                    .place_limit_cloid(a2, true, sz2, px2, Tif::Gtc, false, Some(&cloid))
+                    .place_limit_cloid(hyperliquid_api::exchange_endpoint::OrderRequestParams {
+                        asset: a2,
+                        is_buy: true,
+                        sz: sz2,
+                        limit_px: px2,
+                        tif: Tif::Gtc,
+                        reduce_only: false,
+                        cloid: Some(&cloid),
+                    })
                     .await;
                 match st {
                     Ok(s) => match (s.resting_oid(0), s.error(0)) {

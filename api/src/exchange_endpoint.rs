@@ -17,6 +17,39 @@ use crate::config::Config;
 use crate::error_responses::{ApiError, Result};
 use crate::signing::{float_to_wire, ExchangeOutcome, HyperliquidClient};
 
+/// Emir parametre struct'ları — 8-9 arg'lık imzalar yerine adlandırılmış
+/// alanlar (clippy too_many_arguments kök çözümü; çağrı biçimi daha okunur).
+pub struct OrderRequestParams<'a> {
+    pub asset: u32,
+    pub is_buy: bool,
+    pub sz: f64,
+    pub limit_px: f64,
+    pub tif: Tif,
+    pub reduce_only: bool,
+    pub cloid: Option<&'a str>,
+}
+
+pub struct TriggerOrderParams<'a> {
+    pub asset: u32,
+    pub is_buy: bool,
+    pub sz: f64,
+    pub trigger_px: f64,
+    pub is_market: bool,
+    pub is_take_profit: bool,
+    pub reduce_only: bool,
+    pub cloid: Option<&'a str>,
+}
+
+pub struct ModifyOrderParams {
+    pub asset: u32,
+    pub oid: i64,
+    pub is_buy: bool,
+    pub sz: f64,
+    pub limit_px: f64,
+    pub tif: Tif,
+    pub sz_decimals: u32,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Tif {
     /// post-only: anında eşleşirse iptal
@@ -240,24 +273,32 @@ impl Exchange {
         tif: Tif,
         reduce_only: bool,
     ) -> Result<OrderStatuses> {
-        self.place_limit_cloid(asset, is_buy, sz, limit_px, tif, reduce_only, None)
-            .await
+        self.place_limit_cloid(OrderRequestParams {
+            asset,
+            is_buy,
+            sz,
+            limit_px,
+            tif,
+            reduce_only,
+            cloid: None,
+        })
+        .await
     }
 
     /// `place_limit` + **açık `cloid`** (idempotency anahtarı).
     ///
     /// `cloid` emir nesnesinin İÇİNDE `{"c": "0x..."}` olarak gider (128 bit
     /// hex, `0x` + 32 hane — 16 hane API 422 döndürür).
-    pub async fn place_limit_cloid(
-        &self,
-        asset: u32,
-        is_buy: bool,
-        sz: f64,
-        limit_px: f64,
-        tif: Tif,
-        reduce_only: bool,
-        cloid: Option<&str>,
-    ) -> Result<OrderStatuses> {
+    pub async fn place_limit_cloid(&self, p: OrderRequestParams<'_>) -> Result<OrderStatuses> {
+        let OrderRequestParams {
+            asset,
+            is_buy,
+            sz,
+            limit_px,
+            tif,
+            reduce_only,
+            cloid,
+        } = p;
         let mut order = json!({
             "a": asset,
             "b": is_buy,
@@ -290,17 +331,17 @@ impl Exchange {
     }
 
     /// Trigger (TP/SL) emri
-    pub async fn place_trigger(
-        &self,
-        asset: u32,
-        is_buy: bool,
-        sz: f64,
-        trigger_px: f64,
-        is_market: bool,
-        is_take_profit: bool,
-        reduce_only: bool,
-        cloid: Option<&str>,
-    ) -> Result<OrderStatuses> {
+    pub async fn place_trigger(&self, p: TriggerOrderParams<'_>) -> Result<OrderStatuses> {
+        let TriggerOrderParams {
+            asset,
+            is_buy,
+            sz,
+            trigger_px,
+            is_market,
+            is_take_profit,
+            reduce_only,
+            cloid,
+        } = p;
         let mut order = json!({
             "a": asset,
             "b": is_buy,
@@ -342,16 +383,16 @@ impl Exchange {
     }
 
     /// Emir duzenleme (batchModify)
-    pub async fn modify(
-        &self,
-        asset: u32,
-        oid: i64,
-        is_buy: bool,
-        sz: f64,
-        limit_px: f64,
-        tif: Tif,
-        sz_decimals: u32,
-    ) -> Result<OrderStatuses> {
+    pub async fn modify(&self, p: ModifyOrderParams) -> Result<OrderStatuses> {
+        let ModifyOrderParams {
+            asset,
+            oid,
+            is_buy,
+            sz,
+            limit_px,
+            tif,
+            sz_decimals,
+        } = p;
         let order = json!({
             "a": asset,
             "b": is_buy,

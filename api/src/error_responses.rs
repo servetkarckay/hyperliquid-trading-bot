@@ -18,8 +18,11 @@ pub enum ApiError {
     Sign(String),
     #[error("Hex hatası: {0}")]
     Hex(#[from] hex::FromHexError),
+    // BOYUT KURALI (clippy result_large_err): tungstenite::Error HTTP
+    // yanıtını (headers) taşıyabilir — varyant enum'u 128+ byte'a çıkarır.
+    // Box ile taşınır: semantik/değişmezler korunur (sadece dolgu küçülür).
     #[error("WebSocket hatası: {0}")]
-    Ws(#[from] tokio_tungstenite::tungstenite::Error),
+    Ws(Box<tokio_tungstenite::tungstenite::Error>),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -34,3 +37,9 @@ impl From<reqwest::Error> for ApiError {
 }
 
 pub type Result<T> = std::result::Result<T, ApiError>;
+
+impl From<tokio_tungstenite::tungstenite::Error> for ApiError {
+    fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
+        ApiError::Ws(Box::new(e))
+    }
+}

@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         } else {
             "POSİZYON VAR — manuel temizlik!"
         },
-        p.and_then(|x| Some(x.szi))
+        p.map(|x| x.szi)
     );
     if !flat {
         anyhow::bail!("smoke bitti ama pozisyon kapısı kapanmadı");

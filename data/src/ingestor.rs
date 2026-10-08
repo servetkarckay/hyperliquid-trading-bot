@@ -540,7 +540,7 @@ mod rastgele_fuzz_fallback_testleri {
             let idx = (r.next() as usize) % çorba.len();
             let v = çorba[idx].clone();
             // yan değiştme: değerlere rastgele kayan eklemeler
-            let v = if r.next() % 3 == 0 {
+            let v = if r.next().is_multiple_of(3) {
                 if let Some(s) = v.as_str() {
                     json!(format!("{s}x"))
                 } else {
@@ -559,8 +559,7 @@ mod rastgele_fuzz_fallback_testleri {
                     }
                 }
                 _ => {
-                    if got.is_some() {
-                        let f = got.unwrap();
+                    if let Some(f) = got {
                         assert!(f.is_finite());
                     }
                 }

@@ -141,7 +141,16 @@ async fn place_sl_grid(
         // ızgaranın retry'si aynı cloid'i alır → borsa ikinciyi reddeder.
         let cloid = make_cloid(coin, px, qty, dec as u64);
         match ex
-            .place_trigger(asset, exit_is_buy, qty, px, true, false, true, Some(&cloid))
+            .place_trigger(hyperliquid_api::exchange_endpoint::TriggerOrderParams {
+                asset,
+                is_buy: exit_is_buy,
+                sz: qty,
+                trigger_px: px,
+                is_market: true,
+                is_take_profit: false,
+                reduce_only: true,
+                cloid: Some(&cloid),
+            })
             .await
         {
             Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
@@ -182,7 +191,16 @@ async fn place_tp_grid(
         let px = hyperliquid_api::round_px_for(tp, dec);
         let cloid = make_cloid(coin, px, qty, TP_CLOID_SALT);
         match ex
-            .place_trigger(asset, exit_is_buy, qty, px, false, true, true, Some(&cloid))
+            .place_trigger(hyperliquid_api::exchange_endpoint::TriggerOrderParams {
+                asset,
+                is_buy: exit_is_buy,
+                sz: qty,
+                trigger_px: px,
+                is_market: false,
+                is_take_profit: true,
+                reduce_only: true,
+                cloid: Some(&cloid),
+            })
             .await
         {
             Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
