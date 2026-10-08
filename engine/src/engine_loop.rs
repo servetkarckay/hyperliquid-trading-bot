@@ -5919,7 +5919,7 @@ mod deadlock_fix_tests {
 #[cfg(test)]
 mod mutation_hardening_tests {
     // MUTASYON KANITI: surviving mutantların her biri artık YAKALANIR.
-    use crate::state_machine::{Decision, PosState, PositionStateMachine, Side, SmConfig};
+    use crate::state_machine::{PosState, PositionStateMachine, Side, SmConfig};
     use crate::track::{Health, Mode, PerformanceMetrics, StrategyTracker};
 
     // missed: delete mae_r / delete trades+pass-through (empty-branch)
@@ -5941,14 +5941,20 @@ mod mutation_hardening_tests {
         assert_eq!(m.trades, 3);
         let wr = m.win_rate.unwrap();
         assert!((wr - 1.0 / 3.0).abs() < 1e-9, "0.0 kazan sayılmaz: {wr}");
-        assert!((m.profit_factor.unwrap() - 1.0).abs() < 1e-9, "0.0 kayıp sayılmaz");
+        assert!(
+            (m.profit_factor.unwrap() - 1.0).abs() < 1e-9,
+            "0.0 kayıp sayılmaz"
+        );
     }
 
     // missed: replace > with >=/==/< (pf special branch loss_sum==0)
     #[test]
     fn metrik_kayip_yok_pf_sapir_10() {
         let m = PerformanceMetrics::from_rs(&[2.0, 3.0], None, None);
-        assert!((m.profit_factor.unwrap() - 10.0).abs() < 1e-9, "kayıp yok → pf=10.0 (inf YOK)");
+        assert!(
+            (m.profit_factor.unwrap() - 10.0).abs() < 1e-9,
+            "kayıp yok → pf=10.0 (inf YOK)"
+        );
     }
 
     // missed: record_outcomes (bool wrapper) — win +1.0 / loss −1.0
@@ -5969,7 +5975,10 @@ mod mutation_hardening_tests {
     #[test]
     fn pendingexit_oid0_statustakilamaz() {
         let mut mach = PositionStateMachine::new("SUI", SmConfig::default());
-        mach.state = PosState::PendingExit { oid: 0, side: Side::Long };
+        mach.state = PosState::PendingExit {
+            oid: 0,
+            side: Side::Long,
+        };
         let _ = mach.on_order_status(0, 10.0, 0.0, 4.4);
         match &mach.state {
             PosState::PendingExit { oid: 0, .. } => {}
@@ -6001,7 +6010,11 @@ mod mutation_hardening_tests {
         }
         assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına → ExitsOnly");
         h.on_cycle_ok();
-        assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına window dolmadan normal'e DÖNÜLMEZ");
+        assert_eq!(
+            h.mode(),
+            Mode::ExitsOnly,
+            "fırtına window dolmadan normal'e DÖNÜLMEZ"
+        );
         let h3 = Health::new(5);
         assert!(h3.entries_allowed(), "temiz başlangıç girişler açık");
     }
