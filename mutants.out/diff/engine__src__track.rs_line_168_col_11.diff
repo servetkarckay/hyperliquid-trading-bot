@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace >= with < in LearnPolicy::full
+@@ -160,17 +160,17 @@
+ 
+ impl LearnPolicy {
+     /// Ağırlık değiştirilebilir mi? (2-3 rastgele işlem ağırlığı öldürmesin)
+     pub fn frozen(&self, n: usize) -> bool {
+         n < self.min_n
+     }
+     /// Tam kurallar (win<%35 → 0) devreye girdi mi?
+     pub fn full(&self, n: usize) -> bool {
+-        n >= self.full_n
++        n < /* ~ changed by cargo-mutants ~ */ self.full_n
+     }
+ }
+ 
+ fn env_usize(k: &str, d: usize) -> usize {
+     std::env::var(k)
+         .ok()
+         .and_then(|v| v.parse().ok())
+         .unwrap_or(d)

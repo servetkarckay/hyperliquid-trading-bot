@@ -1,0 +1,30 @@
+--- engine/src/track.rs
++++ replace PortfolioHistory::avg_win -> Option<f64> with None
+@@ -295,26 +295,17 @@
+         if n == 0 {
+             return None;
+         }
+         Some(self.trades.iter().filter(|(_, r)| *r > 0.0).count() as f64 / n as f64)
+     }
+ 
+     /// ort kazanç R (r > 0)
+     pub fn avg_win(&self) -> Option<f64> {
+-        let wins: Vec<f64> = self
+-            .trades
+-            .iter()
+-            .map(|(_, r)| *r)
+-            .filter(|r| *r > 0.0)
+-            .collect();
+-        if wins.is_empty() {
+-            return None;
+-        }
+-        Some(wins.iter().sum::<f64>() / wins.len() as f64)
++        None /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// ort kayıp R (r ≤ 0)
+     pub fn avg_loss(&self) -> Option<f64> {
+         let losses: Vec<f64> = self
+             .trades
+             .iter()
+             .map(|(_, r)| *r)

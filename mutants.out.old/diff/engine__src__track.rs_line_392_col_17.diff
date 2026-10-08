@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ delete field trades from struct Self expression in PerformanceMetrics::from_rs
+@@ -384,17 +384,17 @@
+ impl PerformanceMetrics {
+     /// R dizisinden (GERÇEK fill kayıtları) metrikler.
+     ///
+     /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
+     /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
+     pub fn from_rs(rs: &[f64], mfe_r: Option<f64>, mae_r: Option<f64>) -> Self {
+         if rs.is_empty() {
+             return Self {
+-                trades: 0,
++                 /* ~ changed by cargo-mutants ~ */
+                 mfe_r,
+                 mae_r,
+                 ..Default::default()
+             };
+         }
+         let wins: Vec<f64> = rs.iter().copied().filter(|r| *r > 0.0).collect();
+         let losses: Vec<f64> = rs.iter().copied().filter(|r| *r < 0.0).collect();
+         let win_sum: f64 = wins.iter().sum();

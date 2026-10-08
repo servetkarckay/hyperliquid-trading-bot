@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace PortfolioHistory::replace_all with ()
+@@ -348,17 +348,17 @@
+     /// toplam R
+     pub fn total_r(&self) -> f64 {
+         self.trades.iter().map(|(_, r)| *r).sum()
+     }
+ 
+     /// restart load: kayıt listesini birebir yükle (duplicate yok —
+     /// dosyadaki satır sayısı = kayıt sayısı; birebir tutarlılık).
+     pub fn replace_all(&mut self, trades: Vec<(u64, f64)>) {
+-        self.trades = trades;
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[derive(Debug, Default)]
+ pub struct StrategyTracker {
+     stats: HashMap<String, StratStats>,
+     /// GERÇEK trade-level portfolio outcome history (attribution'dan
+     /// AYRI): kapanan pozisyon başına TAM BİR kayıt — Kelly/portfolio

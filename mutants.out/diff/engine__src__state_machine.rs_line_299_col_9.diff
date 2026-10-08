@@ -1,0 +1,48 @@
+--- engine/src/state_machine.rs
++++ replace PositionStateMachine::on_order_status -> Action with Default::default()
+@@ -291,44 +291,17 @@
+     /// Emir status olayı: (filled?, kalan, avgPx)
+     pub fn on_order_status(
+         &mut self,
+         oid: i64,
+         filled_size: f64,
+         remaining: f64,
+         avg_px: f64,
+     ) -> Action {
+-        match self.state.clone() {
+-            PosState::Pending { side, .. } if oid == pending_oid(&self.state).unwrap_or(0) => {
+-                if remaining <= 1e-12 {
+-                    // tam dolum
+-                    self.state = PosState::InPosition {
+-                        side,
+-                        entry: avg_px,
+-                        size: filled_size,
+-                        peak: avg_px,
+-                    };
+-                    Action::Nothing
+-                } else {
+-                    // kısmi — kalan devam ediyor
+-                    if let PosState::Pending { remaining: r, .. } = &mut self.state {
+-                        *r = remaining;
+-                    }
+-                    Action::Nothing
+-                }
+-            }
+-            PosState::PendingExit { oid: poid, side } if oid != 0 && oid == poid => {
+-                if remaining <= 1e-12 {
+-                    self.state = PosState::Flat;
+-                }
+-                let _ = side;
+-                Action::Nothing
+-            }
+-            _ => Action::Nothing,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Fiyat tikleri: trailing stop + timeout
+     pub fn on_price_tick(&mut self, price: f64, now_ms: u64) -> Action {
+         if matches!(self.state, PosState::ReconciliationPending { .. }) {
+             return Action::Nothing; // recon pass (sınırlı zaman) sahiplenir
+         }
+         match self.state.clone() {

@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace / with * in PortfolioHistory::wl_ratio
+@@ -328,17 +328,17 @@
+ 
+     /// win/loss ratio: ort kazanç / |ort kayıp|
+     pub fn wl_ratio(&self) -> Option<f64> {
+         let w = self.avg_win()?;
+         let l = self.avg_loss()?;
+         if l == 0.0 {
+             return None;
+         }
+-        Some(w / l.abs())
++        Some(w * /* ~ changed by cargo-mutants ~ */ l.abs())
+     }
+ 
+     /// expectancy: ort R (tüm trade'ler)
+     pub fn expectancy(&self) -> Option<f64> {
+         let n = self.n();
+         if n == 0 {
+             return None;
+         }

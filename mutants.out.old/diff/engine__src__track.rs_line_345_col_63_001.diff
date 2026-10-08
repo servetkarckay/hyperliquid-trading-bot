@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace / with * in PortfolioHistory::expectancy
+@@ -337,17 +337,17 @@
+     }
+ 
+     /// expectancy: ort R (tüm trade'ler)
+     pub fn expectancy(&self) -> Option<f64> {
+         let n = self.n();
+         if n == 0 {
+             return None;
+         }
+-        Some(self.trades.iter().map(|(_, r)| *r).sum::<f64>() / n as f64)
++        Some(self.trades.iter().map(|(_, r)| *r).sum::<f64>() * /* ~ changed by cargo-mutants ~ */ n as f64)
+     }
+ 
+     /// toplam R
+     pub fn total_r(&self) -> f64 {
+         self.trades.iter().map(|(_, r)| *r).sum()
+     }
+ 
+     /// restart load: kayıt listesini birebir yükle (duplicate yok —

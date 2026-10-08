@@ -1,0 +1,21 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::is_halted -> bool with true
+@@ -115,17 +115,17 @@
+     pub fn drawdown_pct(&self, equity: f64) -> f64 {
+         if self.peak_equity <= 0.0 {
+             return 0.0;
+         }
+         (self.peak_equity - equity) / self.peak_equity * 100.0
+     }
+ 
+     pub fn is_halted(&self) -> bool {
+-        self.halted.is_some()
++        true /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn halt_reason(&self) -> Option<&str> {
+         self.halted.as_deref()
+     }
+ 
+     /// **Kalıcı risk hafızası** — restart drawdown hafızasını SİFIRLAMAZ:
+     /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.

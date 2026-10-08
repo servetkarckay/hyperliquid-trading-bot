@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace / with * in StratStats::kelly
+@@ -256,17 +256,17 @@
+         }
+         let wins = self.outcomes.iter().filter(|(_, w)| *w).count();
+         Some(wins as f64 / self.outcomes.len() as f64)
+     }
+ 
+     /// binary Kelly (f*), pencere doluyken Some
+     pub fn kelly(&self, b: f64, min_trades: usize) -> Option<f64> {
+         let p = self.win_rate(min_trades)?;
+-        Some(p - (1.0 - p) / b)
++        Some(p - (1.0 - p) * /* ~ changed by cargo-mutants ~ */ b)
+     }
+ }
+ 
+ /// ── GERÇEK TRADE-LEVEL PORTFOLIO HISTORY (attribution'dan ayrı) ──────
+ /// Kapanan pozisyon başına TAM OLARAK BİR outcome: (ts, r).
+ /// Duplicate koruması: aynı (coin, tid) kapanışı bir kez (tid dedup
+ /// üst akışta zaten var; burada ek olarak aynı-ts-sıfır-r koruması
+ /// YOK — dürüst 0R ayrıca yazılamaz).

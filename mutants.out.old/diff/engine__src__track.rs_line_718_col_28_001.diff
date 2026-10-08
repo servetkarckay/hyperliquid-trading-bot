@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace match guard f > 0.0 with false in StrategyTracker::ensemble_weights
+@@ -710,17 +710,17 @@
+         Some(act[cursor % act.len()].clone())
+     }
+ 
+     /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
+     pub fn ensemble_weights(&self) -> HashMap<String, f64> {
+         let mut raw: HashMap<String, f64> = HashMap::new();
+         for (name, s) in &self.stats {
+             let w = match s.kelly(DEFAULT_PAYOFF, 15) {
+-                Some(f) if f > 0.0 => f,
++                Some(f) if false /* ~ changed by cargo-mutants ~ */ => f,
+                 Some(_) if s.outcomes.len() >= 15 => 0.0, // pencere dolu ama f* korkunç
+                 _ => NEUTRAL_WEIGHT,
+             };
+             raw.insert(name.clone(), w);
+         }
+         raw
+     }
+ 

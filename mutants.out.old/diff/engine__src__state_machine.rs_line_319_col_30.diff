@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace <= with > in PositionStateMachine::on_order_status
+@@ -311,17 +311,17 @@
+                     // kısmi — kalan devam ediyor
+                     if let PosState::Pending { remaining: r, .. } = &mut self.state {
+                         *r = remaining;
+                     }
+                     Action::Nothing
+                 }
+             }
+             PosState::PendingExit { oid: poid, side } if oid != 0 && oid == poid => {
+-                if remaining <= 1e-12 {
++                if remaining > /* ~ changed by cargo-mutants ~ */ 1e-12 {
+                     self.state = PosState::Flat;
+                 }
+                 let _ = side;
+                 Action::Nothing
+             }
+             _ => Action::Nothing,
+         }
+     }

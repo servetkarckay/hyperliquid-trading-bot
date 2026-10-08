@@ -1,0 +1,32 @@
+--- engine/src/track.rs
++++ replace StratStats::profit_factor -> Option<f64> with None
+@@ -214,28 +214,17 @@
+         if self.outcomes.len() > TRACK_WINDOW {
+             self.outcomes.remove(0);
+             self.rs.remove(0);
+         }
+     }
+ 
+     /// kâr faktörü: toplam kazanç R / toplam kayıp |R| (pencere doluysa).
+     pub fn profit_factor(&self) -> Option<f64> {
+-        if self.rs.is_empty() {
+-            return None;
+-        }
+-        let win: f64 = self.rs.iter().filter(|r| **r > 0.0).sum();
+-        let loss: f64 = self.rs.iter().filter(|r| **r < 0.0).sum::<f64>().abs();
+-        Some(if loss > 0.0 {
+-            win / loss
+-        } else if win > 0.0 {
+-            10.0
+-        } else {
+-            0.0
+-        })
++        None /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Keşif kararı: kanıt yeterli mi, kanıt ne diyor?
+     pub fn explore_verdict(&self) -> ExploreVerdict {
+         if self.rs.len() < EXPLORE_MIN_TRADES {
+             return ExploreVerdict::Insufficient;
+         }
+         let wr = self.win_rate(0).unwrap_or(0.0);

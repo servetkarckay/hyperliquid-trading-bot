@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ delete - in StratStats::record
+@@ -194,17 +194,17 @@
+     pub outcomes: Vec<(u64, bool)>,
+     /// işlem başına R-çarpanı (kâr/(başlangıç riski)); PF hesabı için.
+     /// `outcomes` ile aynı uzunlukta.
+     pub rs: Vec<f64>,
+ }
+ 
+ impl StratStats {
+     pub fn record(&mut self, ts: u64, win: bool) {
+-        self.record_r(ts, if win { 1.0 } else { -1.0 });
++        self.record_r(ts, if win { 1.0 } else {  /* ~ changed by cargo-mutants ~ */1.0 });
+     }
+ 
+     /// Gerçek R-çarpanıyla kayıt: `r` = net PnL / giriş riski (SL mesafesi).
+     pub fn record_r(&mut self, ts: u64, r: f64) {
+         let r = if r.is_finite() {
+             r.clamp(-20.0, 20.0)
+         } else {
+             0.0

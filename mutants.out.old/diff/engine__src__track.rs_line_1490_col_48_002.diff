@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace < with <= in Health::on_ws_reconnect
+@@ -1482,17 +1482,17 @@
+     /// WS reconnect bildir. Fırtına (5 dk'da >10) → **kill DEĞİL**, `ExitsOnly`.
+     pub fn on_ws_reconnect(&mut self) -> bool {
+         let now = std::time::SystemTime::now()
+             .duration_since(std::time::UNIX_EPOCH)
+             .map(|d| d.as_millis() as u64)
+             .unwrap_or(0);
+         self.ws_reconnects.push(now);
+         self.ws_reconnects
+-            .retain(|t| now.saturating_sub(*t) < WS_STORM_WINDOW_MS);
++            .retain(|t| now.saturating_sub(*t) <= /* ~ changed by cargo-mutants ~ */ WS_STORM_WINDOW_MS);
+         if self.ws_reconnects.len() > WS_STORM_COUNT && self.mode == Mode::Normal {
+             self.mode = Mode::ExitsOnly;
+             return true;
+         }
+         false
+     }
+ 
+     pub fn ws_recent(&self) -> usize {

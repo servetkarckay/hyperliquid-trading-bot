@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace == with != in PositionStateMachine::on_decision
+@@ -224,17 +224,17 @@
+                 if against {
+                     self.state = PosState::PendingExit { oid: 0, side };
+                     Action::ExitNow(BotOrder {
+                         // GERÇEK pozisyon boyutu — `sz: 0.0` placeholder borsaya
+                         // 0-lot (hayalet) emir gönderiyordu.
+                         coin: self.coin.clone(),
+                         side: side.flip(),
+                         sz: size,
+-                        px: if side == Side::Long { bid } else { ask },
++                        px: if side != /* ~ changed by cargo-mutants ~ */ Side::Long { bid } else { ask },
+                         post_only: false,
+                         reduce_only: true,
+                     })
+                 } else {
+                     Action::Nothing
+                 }
+             }
+             PosState::PendingExit { .. } => Action::Nothing,

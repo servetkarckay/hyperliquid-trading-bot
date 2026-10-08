@@ -1,0 +1,39 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::save_state -> anyhow::Result<()> with Ok(())
+@@ -127,35 +127,17 @@
+         self.halted.as_deref()
+     }
+ 
+     /// **Kalıcı risk hafızası** — restart drawdown hafızasını SİFIRLAMAZ:
+     /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.
+     /// (Bu hafızayı kaybetmek, "100→80'de halt, restart'ta 80 yeni peak" tipi
+     /// resetlenmiş risk koruması demektir.)
+     pub fn save_state(&self, path: &str) -> anyhow::Result<()> {
+-        use serde::{Deserialize, Serialize};
+-        #[derive(Serialize, Deserialize)]
+-        struct Persisted {
+-            peak_equity: f64,
+-            current_equity: f64,
+-            halted: Option<String>,
+-        }
+-        let json = serde_json::to_string_pretty(&Persisted {
+-            peak_equity: self.peak_equity,
+-            current_equity: self.current_equity,
+-            halted: self.halted.clone(),
+-        })?;
+-        if let Some(par) = std::path::Path::new(path).parent() {
+-            let _ = std::fs::create_dir_all(par);
+-        }
+-        let tmp = format!("{path}.tmp");
+-        std::fs::write(&tmp, json.as_bytes())?;
+-        std::fs::rename(&tmp, path)?;
+-        Ok(())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn load_state(&mut self, path: &str) -> bool {
+         use serde::{Deserialize, Serialize};
+         #[derive(Serialize, Deserialize)]
+         struct Persisted {
+             peak_equity: f64,
+             current_equity: f64,

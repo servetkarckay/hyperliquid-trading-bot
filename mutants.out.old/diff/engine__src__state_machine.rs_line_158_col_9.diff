@@ -1,0 +1,104 @@
+--- engine/src/state_machine.rs
++++ replace PositionStateMachine::on_decision -> Action with Default::default()
+@@ -150,100 +150,17 @@
+                 };
+             }
+             _ => self.state = PosState::Flat,
+         }
+     }
+ 
+     /// Ensemble kararı -> eylem. Öncek hem idempotent hem reversal-bilinçlidir.
+     pub fn on_decision(&mut self, d: Decision, bid: f64, ask: f64, now_ms: u64) -> Action {
+-        match self.state.clone() {
+-            PosState::Flat => {
+-                if d.score >= self.cfg.entry_min_score {
+-                    self.state = PosState::Pending {
+-                        side: Side::Long,
+-                        oid: 0,
+-                        remaining: 0.0,
+-                        ts: now_ms,
+-                    };
+-                    Action::Place(BotOrder {
+-                        coin: self.coin.clone(),
+-                        side: Side::Long,
+-                        sz: 0.0,
+-                        px: ask,
+-                        post_only: true,
+-                        reduce_only: false,
+-                    })
+-                } else if d.score <= -self.cfg.entry_min_score {
+-                    self.state = PosState::Pending {
+-                        side: Side::Short,
+-                        oid: 0,
+-                        remaining: 0.0,
+-                        ts: now_ms,
+-                    };
+-                    Action::Place(BotOrder {
+-                        coin: self.coin.clone(),
+-                        side: Side::Short,
+-                        sz: 0.0,
+-                        px: bid,
+-                        post_only: true,
+-                        reduce_only: false,
+-                    })
+-                } else {
+-                    Action::Nothing
+-                }
+-            }
+-            PosState::ReconciliationPending { .. } => {
+-                // reconciliation bitene kadar yeni karar yok (duplicate yasağı)
+-                Action::Nothing
+-            }
+-            PosState::Pending {
+-                side,
+-                oid,
+-                remaining: _,
+-                ts: _,
+-            } => {
+-                // idempotency: aynı yönde yine sinyal — yeni emir yok
+-                let same_dir =
+-                    (side == Side::Long && d.score > 0.0) || (side == Side::Short && d.score < 0.0);
+-                if same_dir {
+-                    // timeout kontrolü hariç: kalanın iptal + sweep (motor karar)
+-                    return Action::Nothing;
+-                }
+-                // ters taraf güçlü -> Pending'i iptal
+-                if d.score.abs() >= self.cfg.reversal_min_score {
+-                    if oid != 0 {
+-                        return Action::Cancel(oid);
+-                    }
+-                    return Action::Nothing;
+-                }
+-                Action::Nothing
+-            }
+-            PosState::InPosition { side, size, .. } => {
+-                // ters taraf güçlü -> kapat
+-                let against = (side == Side::Long && d.score <= -self.cfg.reversal_min_score)
+-                    || (side == Side::Short && d.score >= self.cfg.reversal_min_score);
+-                if against {
+-                    self.state = PosState::PendingExit { oid: 0, side };
+-                    Action::ExitNow(BotOrder {
+-                        // GERÇEK pozisyon boyutu — `sz: 0.0` placeholder borsaya
+-                        // 0-lot (hayalet) emir gönderiyordu.
+-                        coin: self.coin.clone(),
+-                        side: side.flip(),
+-                        sz: size,
+-                        px: if side == Side::Long { bid } else { ask },
+-                        post_only: false,
+-                        reduce_only: true,
+-                    })
+-                } else {
+-                    Action::Nothing
+-                }
+-            }
+-            PosState::PendingExit { .. } => Action::Nothing,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **B — SIGNAL::EXIT KANALI**: ensemble exit_requested → gerçek ExitNow.
+     ///
+     /// Yalnız `InPosition` emir üretir; Flat/Pending/PendingExit → `Nothing`
+     /// (Flat pozisyonda Exit HİÇBİR emir üretmez; PendingExit → idempotent,
+     /// ikinci ExitNow yok).
+     pub fn force_exit(&mut self, bid: f64, ask: f64) -> Action {

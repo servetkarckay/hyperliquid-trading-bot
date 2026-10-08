@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace > with >= in PositionStateMachine::on_price_tick
+@@ -362,17 +362,17 @@
+                 }
+                 let _ = entry;
+                 Action::Nothing
+             }
+             PosState::Pending {
+                 oid, remaining, ts, ..
+             } => {
+                 // kısmi dolum timeout: kalanı iptal et
+-                if now_ms - ts > self.cfg.pending_timeout_ms && remaining > 1e-12 && oid != 0 {
++                if now_ms - ts > self.cfg.pending_timeout_ms && remaining >= /* ~ changed by cargo-mutants ~ */ 1e-12 && oid != 0 {
+                     if let PosState::Pending { remaining: r, .. } = &mut self.state {
+                         *r = 0.0;
+                     }
+                     Action::Cancel(oid)
+                 } else {
+                     Action::Nothing
+                 }
+             }

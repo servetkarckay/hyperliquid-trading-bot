@@ -1,0 +1,41 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::load_state -> bool with false
+@@ -149,37 +149,17 @@
+         }
+         let tmp = format!("{path}.tmp");
+         std::fs::write(&tmp, json.as_bytes())?;
+         std::fs::rename(&tmp, path)?;
+         Ok(())
+     }
+ 
+     pub fn load_state(&mut self, path: &str) -> bool {
+-        use serde::{Deserialize, Serialize};
+-        #[derive(Serialize, Deserialize)]
+-        struct Persisted {
+-            peak_equity: f64,
+-            current_equity: f64,
+-            halted: Option<String>,
+-        }
+-        let Ok(txt) = std::fs::read_to_string(path) else {
+-            return false;
+-        };
+-        let Ok(p) = serde_json::from_str::<Persisted>(&txt) else {
+-            tracing::error!("risk hafızası BOZUK ({path}) — sıfırdan başlatıldı (uyarı: drawdown hafızası sıfır)");
+-            return false;
+-        };
+-        self.peak_equity = p.peak_equity;
+-        self.current_equity = p.current_equity;
+-        self.halted = p.halted;
+-        if self.halted.is_some() {
+-            tracing::error!("risk hafızası yüklendi — trading HALTED (operatör resume gerekli)");
+-        }
+-        true
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
+     pub fn resume(&mut self) {
+         self.peak_equity = self.current_equity;
+         self.halted = None;
+     }
+ 

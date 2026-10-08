@@ -1,0 +1,21 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::total_exposure -> f64 with 1.0
+@@ -187,17 +187,17 @@
+     /// `min(cfg_max, floor(equity / equity_per_position))`.
+     /// $111 bakiyeyle 5 pozisyon açmak 5×$10'luk zorunlu minimuma takılırdı.
+     pub fn max_positions(&self, equity: f64, cfg_max: usize) -> usize {
+         let by_equity = (equity / self.cfg.equity_per_position_usd.max(1.0)).floor();
+         (by_equity as usize).min(cfg_max)
+     }
+ 
+     fn total_exposure(positions: &HashMap<String, Position>) -> f64 {
+-        positions.values().map(|p| p.position_value.abs()).sum()
++        1.0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Emir öncesi kontrol. Ok: emir gönderilebilir.
+     pub fn pre_trade(
+         &self,
+         equity: f64,
+         positions: &HashMap<String, Position>,
+         coin: &str,

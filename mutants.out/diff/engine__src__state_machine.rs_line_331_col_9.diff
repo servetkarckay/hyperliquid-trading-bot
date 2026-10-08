@@ -1,0 +1,70 @@
+--- engine/src/state_machine.rs
++++ replace PositionStateMachine::on_price_tick -> Action with Default::default()
+@@ -323,66 +323,17 @@
+                 Action::Nothing
+             }
+             _ => Action::Nothing,
+         }
+     }
+ 
+     /// Fiyat tikleri: trailing stop + timeout
+     pub fn on_price_tick(&mut self, price: f64, now_ms: u64) -> Action {
+-        if matches!(self.state, PosState::ReconciliationPending { .. }) {
+-            return Action::Nothing; // recon pass (sınırlı zaman) sahiplenir
+-        }
+-        match self.state.clone() {
+-            PosState::InPosition {
+-                side,
+-                entry,
+-                size,
+-                peak,
+-            } => {
+-                let new_peak = match side {
+-                    Side::Long => peak.max(price),
+-                    Side::Short => peak.min(price),
+-                };
+-                let draw = match side {
+-                    Side::Long => (new_peak - price) / new_peak.max(1e-12),
+-                    Side::Short => (price - new_peak) / new_peak.max(1e-12),
+-                };
+-                if draw * 100.0 >= self.cfg.trailing_exit_pct {
+-                    self.state = PosState::PendingExit { oid: 0, side };
+-                    return Action::ExitNow(BotOrder {
+-                        coin: self.coin.clone(),
+-                        side: side.flip(),
+-                        sz: size,
+-                        px: price,
+-                        post_only: false,
+-                        reduce_only: true,
+-                    });
+-                }
+-                if let PosState::InPosition { peak: p, .. } = &mut self.state {
+-                    *p = new_peak;
+-                }
+-                let _ = entry;
+-                Action::Nothing
+-            }
+-            PosState::Pending {
+-                oid, remaining, ts, ..
+-            } => {
+-                // kısmi dolum timeout: kalanı iptal et
+-                if now_ms - ts > self.cfg.pending_timeout_ms && remaining > 1e-12 && oid != 0 {
+-                    if let PosState::Pending { remaining: r, .. } = &mut self.state {
+-                        *r = 0.0;
+-                    }
+-                    Action::Cancel(oid)
+-                } else {
+-                    Action::Nothing
+-                }
+-            }
+-            _ => Action::Nothing,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     // ── RECONCILIATION STATE ────────────────────────────────────────────
+     pub fn is_recon_pending(&self) -> bool {
+         matches!(self.state, PosState::ReconciliationPending { .. })
+     }
+ 
+     /// UNKNOWN sonucu: anlık Flat'a DÖNME; cloid kimliğini state'e koy.

@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ delete ! in StrategyTracker::save_state
+@@ -773,17 +773,17 @@
+             let sr: f64 = st.rs.iter().sum();
+             let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
+             // R history array: [[ts, r], ...]
+             let mut r_hist = String::new();
+             for (idx, (ts, _win)) in st.outcomes.iter().enumerate() {
+                 let r = st.rs[idx];
+                 let _ = write!(r_hist, "[{ts},{r:.6}],");
+             }
+-            if !r_hist.is_empty() {
++            if  /* ~ changed by cargo-mutants ~ */r_hist.is_empty() {
+                 r_hist.pop(); // trailing comma
+             }
+             let mut entry = String::new();
+             let _ = write!(
+                 entry,
+                 "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":2,\"r_hist\":[{r_hist}]}}",
+                 st.rs.len(),
+                 wr,

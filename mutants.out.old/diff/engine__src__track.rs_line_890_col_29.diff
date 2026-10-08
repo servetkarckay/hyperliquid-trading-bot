@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace || with && in StrategyTracker::load_state
+@@ -882,17 +882,17 @@
+                 })
+                 .collect();
+             self.portfolio.replace_all(trades);
+             tracing::info!(
+                 "[LEARN] portfolio history yüklendi: {} GERÇEK trade (trade-level, attribution ayırı)",
+                 self.portfolio.n()
+             );
+         }
+-        let ok = loaded > 0 || self.portfolio.n() > 0;
++        let ok = loaded > 0 && /* ~ changed by cargo-mutants ~ */ self.portfolio.n() > 0;
+         if ok {
+             tracing::info!(
+                 "[LEARN] tracker durumu yüklendi: {loaded} strateji + {} portfolio trade ← {path} \
+                  (gerçek R history korundu — cold-start YOK, origin=live, schema=v2)",
+                 self.portfolio.n()
+             );
+         }
+         ok

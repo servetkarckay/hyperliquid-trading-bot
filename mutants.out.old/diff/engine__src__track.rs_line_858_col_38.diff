@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace == with != in StrategyTracker::load_state
+@@ -850,17 +850,17 @@
+         let mut loaded = 0usize;
+         for (name, e) in map {
+             // r_hist ZORUNLU — yoksa bu strateji atlanır (sentetik R YAZMA)
+             let r_hist = e.get("r_hist").and_then(|x| x.as_array());
+             let st = self.stats.entry(name.clone()).or_default();
+             if let Some(hist) = r_hist {
+                 for entry in hist {
+                     if let Some(arr) = entry.as_array() {
+-                        if arr.len() == 2 {
++                        if arr.len() != /* ~ changed by cargo-mutants ~ */ 2 {
+                             let ts = arr[0].as_u64().unwrap_or(0);
+                             let r = arr[1].as_f64().unwrap_or(0.0);
+                             st.record_r(ts, r);
+                         }
+                     }
+                 }
+                 loaded += 1;
+                 continue;

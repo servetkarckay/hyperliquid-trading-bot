@@ -1,0 +1,24 @@
+--- engine/src/state_machine.rs
++++ replace Side::flip -> Side with Default::default()
+@@ -461,20 +461,17 @@
+     match s {
+         PosState::Pending { oid, .. } | PosState::PendingExit { oid, .. } => Some(*oid),
+         _ => None,
+     }
+ }
+ 
+ impl Side {
+     pub fn flip(self) -> Side {
+-        match self {
+-            Side::Long => Side::Short,
+-            Side::Short => Side::Long,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Tüm coinlerin makineleri (engine_loop kullanır)
+ pub type Machines = HashMap<String, PositionStateMachine>;
+ 
+ #[cfg(test)]
+ mod tests {

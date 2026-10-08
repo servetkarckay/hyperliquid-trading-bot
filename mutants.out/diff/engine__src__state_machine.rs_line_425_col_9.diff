@@ -1,0 +1,38 @@
+--- engine/src/state_machine.rs
++++ replace PositionStateMachine::recon_attempt_bump -> u8 with 0
+@@ -417,34 +417,17 @@
+                 entry,
+                 size,
+                 peak: entry,
+             };
+         }
+     }
+ 
+     pub fn recon_attempt_bump(&mut self) -> u8 {
+-        if let PosState::ReconciliationPending {
+-            side,
+-            cloid,
+-            ts,
+-            attempts,
+-        } = self.state.clone()
+-        {
+-            let a = attempts.saturating_add(1);
+-            self.state = PosState::ReconciliationPending {
+-                side,
+-                cloid,
+-                ts,
+-                attempts: a,
+-            };
+-            a
+-        } else {
+-            0
+-        }
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Pending, oid bekliyor (0-sız)? tahsis reddinde düz revert koşulu
+     pub fn oid_zero_pending(&self) -> bool {
+         matches!(self.state, PosState::Pending { oid: 0, .. })
+     }
+ 
+     pub fn in_position(&self) -> Option<(Side, f64, f64)> {

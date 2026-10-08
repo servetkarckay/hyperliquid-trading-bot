@@ -5915,3 +5915,94 @@ mod deadlock_fix_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mutation_hardening_tests {
+    // MUTASYON KANITI: surviving mutantların her biri artık YAKALANIR.
+    use crate::state_machine::{Decision, PosState, PositionStateMachine, Side, SmConfig};
+    use crate::track::{Health, Mode, PerformanceMetrics, StrategyTracker};
+
+    // missed: delete mae_r / delete trades+pass-through (empty-branch)
+    #[test]
+    fn metrik_mae_ve_passthrough() {
+        let m = PerformanceMetrics::from_rs(&[], Some(3.0), Some(-1.5));
+        assert_eq!(m.mfe_r, Some(3.0), "empty-branch pass-through (mfe)");
+        assert_eq!(m.mae_r, Some(-1.5), "empty-branch pass-through (mae)");
+        let m2 = PerformanceMetrics::from_rs(&[2.0, -1.0, -1.0, 3.0, -1.0], Some(3.0), Some(-1.5));
+        assert_eq!(m2.mae_r, Some(-1.5), "dolu-branch pass-through (mae)");
+        assert_eq!(m2.trades, 5);
+    }
+
+    // missed: replace > with >= / < with <= (win/loss filtreleri)
+    // 0.0 işlemde KAZANÇ DAĞILMAZ (0 = kayıp değil, kazanç da değil)
+    #[test]
+    fn metrik_sifir_islemi_tarf() {
+        let m = PerformanceMetrics::from_rs(&[1.0, 0.0, -1.0], None, None);
+        assert_eq!(m.trades, 3);
+        let wr = m.win_rate.unwrap();
+        assert!((wr - 1.0 / 3.0).abs() < 1e-9, "0.0 kazan sayılmaz: {wr}");
+        assert!((m.profit_factor.unwrap() - 1.0).abs() < 1e-9, "0.0 kayıp sayılmaz");
+    }
+
+    // missed: replace > with >=/==/< (pf special branch loss_sum==0)
+    #[test]
+    fn metrik_kayip_yok_pf_sapir_10() {
+        let m = PerformanceMetrics::from_rs(&[2.0, 3.0], None, None);
+        assert!((m.profit_factor.unwrap() - 10.0).abs() < 1e-9, "kayıp yok → pf=10.0 (inf YOK)");
+    }
+
+    // missed: record_outcomes (bool wrapper) — win +1.0 / loss −1.0
+    #[test]
+    fn record_outcomes_bool_wrapper() {
+        let mut t = StrategyTracker::default();
+        t.record_outcomes(vec!["A".into()], 1, true);
+        t.record_outcomes(vec!["A".into()], 2, false);
+        let m = t.metrics("A");
+        assert_eq!(m.trades, 2);
+        assert_eq!(m.win_rate, Some(0.5), "win=+1/loss=−1 dönüş");
+        assert!((m.expectancy_r.unwrap() - 0.0).abs() < 1e-9);
+        assert!((m.avg_win_r.unwrap() - 1.0).abs() < 1e-9);
+        assert!((m.avg_loss_r.unwrap() - (-1.0)).abs() < 1e-9);
+    }
+
+    // missed: replace && with || (on_order_status PendingExit{oid:0} guard)
+    #[test]
+    fn pendingexit_oid0_statustakilamaz() {
+        let mut mach = PositionStateMachine::new("SUI", SmConfig::default());
+        mach.state = PosState::PendingExit { oid: 0, side: Side::Long };
+        let _ = mach.on_order_status(0, 10.0, 0.0, 4.4);
+        match &mach.state {
+            PosState::PendingExit { oid: 0, .. } => {}
+            _ => panic!("oid=0 status başka state'i bozdu (mutant davranışı)"),
+        }
+    }
+
+    // missed: replace / with % (on_price_tick — SHORT retracement 0.4%)
+    #[test]
+    fn on_price_tick_kisa_retracement_yuksek_hane_mutant_yakalar() {
+        let mut mach = PositionStateMachine::new("SUI", SmConfig::default());
+        mach.recover(Some((Side::Short, 100.0, 1.0, 100.0)));
+        let _ = mach.on_price_tick(100.4, 1);
+        assert!(
+            !matches!(mach.state, PosState::PendingExit { .. }),
+            "0.4% geri çekilme çıkış değil — % mutantı 40 yapardı"
+        );
+    }
+
+    // missed: Health::ws_recent -> 0/1 + on_cycle_ok (==, &&, <= mutantları)
+    #[test]
+    fn health_ws_recent_ve_cycle_ok_mutantlari() {
+        let mut h = Health::new(5);
+        assert_eq!(h.ws_recent(), 0, "boşta 0");
+        let _ = h.on_ws_reconnect();
+        assert_eq!(h.ws_recent(), 1, "1 reconnect → 1 (mutant sabit 0/1)");
+        for _ in 0..11 {
+            let _ = h.on_ws_reconnect();
+        }
+        assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına → ExitsOnly");
+        h.on_cycle_ok();
+        assert_eq!(h.mode(), Mode::ExitsOnly, "fırtına window dolmadan normal'e DÖNÜLMEZ");
+        let h3 = Health::new(5);
+        assert!(h3.entries_allowed(), "temiz başlangıç girişler açık");
+    }
+}

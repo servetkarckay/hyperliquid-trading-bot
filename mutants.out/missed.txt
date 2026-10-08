@@ -1,0 +1,82 @@
+engine/src/risk_manager.rs:93:9: replace RiskManager::config -> &RiskConfig with Box::leak(Box::new(Default::default()))
+engine/src/risk_manager.rs:99:19: replace > with >= in RiskManager::update_equity
+engine/src/risk_manager.rs:102:29: replace > with >= in RiskManager::update_equity
+engine/src/risk_manager.rs:104:48: replace && with || in RiskManager::update_equity
+engine/src/risk_manager.rs:104:19: replace >= with < in RiskManager::update_equity
+engine/src/risk_manager.rs:211:19: replace < with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:211:19: replace < with <= in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:37: replace > with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:37: replace > with >= in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:33: replace + with * in RiskManager::pre_trade
+engine/src/risk_manager.rs:245:38: replace + with - in RiskManager::pre_trade
+engine/src/risk_manager.rs:245:38: replace + with * in RiskManager::pre_trade
+engine/src/state_machine.rs:144:48: replace match guard size.abs() > 1e-12 with true in PositionStateMachine::recover
+engine/src/state_machine.rs:144:59: replace > with >= in PositionStateMachine::recover
+engine/src/state_machine.rs:175:38: delete - in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:59: replace || with && in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:41: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:27: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with >= in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:83: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:68: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with > in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with <= in PositionStateMachine::on_decision
+engine/src/state_machine.rs:212:34: replace >= with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:213:28: replace != with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:51: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:65: delete - in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:45: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:30: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:56: replace >= with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:232:37: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:260:33: replace == with != in PositionStateMachine::force_exit
+engine/src/state_machine.rs:282:20: replace match guard *poid == oid with true in PositionStateMachine::on_rejected
+engine/src/state_machine.rs:300:47: replace match guard oid == pending_oid(&self.state).unwrap_or(0) with true in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:346:54: replace / with % in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:346:54: replace / with * in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:347:43: replace - with / in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:83: replace && with || in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:62: replace && with || in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:32: replace > with >= in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:27: replace - with + in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:75: replace > with >= in PositionStateMachine::on_price_tick
+engine/src/track.rs:45:19: replace > with == in tid_seen
+engine/src/track.rs:45:19: replace > with >= in tid_seen
+engine/src/track.rs:173:5: replace env_usize -> usize with 0
+engine/src/track.rs:173:5: replace env_usize -> usize with 1
+engine/src/track.rs:202:9: replace StratStats::record with ()
+engine/src/track.rs:202:49: delete - in StratStats::record
+engine/src/track.rs:212:35: replace > with >= in StratStats::record_r
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with None
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(0.0)
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(1.0)
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(-1.0)
+engine/src/track.rs:225:54: replace > with == in StratStats::profit_factor
+engine/src/track.rs:225:54: replace > with < in StratStats::profit_factor
+engine/src/track.rs:225:54: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with == in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with > in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with <= in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with == in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with < in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:228:17: replace / with % in StratStats::profit_factor
+engine/src/track.rs:228:17: replace / with * in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with == in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with < in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:238:26: replace < with == in StratStats::explore_verdict
+engine/src/track.rs:238:26: replace < with > in StratStats::explore_verdict
+engine/src/track.rs:238:26: replace < with <= in StratStats::explore_verdict
+engine/src/track.rs:243:37: replace && with || in StratStats::explore_verdict
+engine/src/track.rs:243:15: replace >= with < in StratStats::explore_verdict
+engine/src/track.rs:243:43: replace >= with < in StratStats::explore_verdict
+engine/src/track.rs:245:43: replace || with && in StratStats::explore_verdict
+engine/src/track.rs:245:22: replace <= with > in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with == in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with > in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with <= in StratStats::explore_verdict
+engine/src/track.rs:263:9: replace StratStats::kelly -> Option<f64> with Some(1.0)

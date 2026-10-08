@@ -1,0 +1,62 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::pre_trade -> Result<(), RiskViolation> with Ok(())
+@@ -200,58 +200,17 @@
+         &self,
+         equity: f64,
+         positions: &HashMap<String, Position>,
+         coin: &str,
+         order_notional_usd: f64,
+         leverage: f64,
+         open_orders_for_coin: usize,
+     ) -> Result<(), RiskViolation> {
+-        if let Some(r) = &self.halted {
+-            return Err(RiskViolation::Halted(r.clone()));
+-        }
+-        if equity < self.cfg.min_account_equity_usd {
+-            return Err(RiskViolation::EquityFloor(equity));
+-        }
+-        // MIN NOTIONAL: borsa $10 altını reddeder — emir hiç üretilmemeli
+-        if order_notional_usd < self.cfg.min_order_notional_usd {
+-            return Err(RiskViolation::TooSmall(order_notional_usd));
+-        }
+-        let dd = self.drawdown_pct(equity);
+-        if dd >= self.cfg.max_drawdown_pct {
+-            return Err(RiskViolation::Drawdown(dd));
+-        }
+-        let current = positions
+-            .get(coin)
+-            .map(|p| p.position_value.abs())
+-            .unwrap_or(0.0);
+-        let projected = current + order_notional_usd;
+-        if projected > self.cfg.max_position_notional_usd {
+-            return Err(RiskViolation::PositionLimit(
+-                projected,
+-                self.cfg.max_position_notional_usd,
+-            ));
+-        }
+-        let total = Self::total_exposure(positions) + order_notional_usd;
+-        if total > self.cfg.max_total_notional_usd {
+-            return Err(RiskViolation::TotalExposure(
+-                total,
+-                self.cfg.max_total_notional_usd,
+-            ));
+-        }
+-        if leverage > self.cfg.max_leverage {
+-            return Err(RiskViolation::Leverage(leverage, self.cfg.max_leverage));
+-        }
+-        if open_orders_for_coin + 1 > self.cfg.max_open_orders_per_coin {
+-            return Err(RiskViolation::OpenOrders(
+-                open_orders_for_coin + 1,
+-                self.cfg.max_open_orders_per_coin,
+-            ));
+-        }
+-        Ok(())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
+     // ── MİN NOTİONAL + DİNAMİK POZİSYON SAYISI ─────────────────────────────

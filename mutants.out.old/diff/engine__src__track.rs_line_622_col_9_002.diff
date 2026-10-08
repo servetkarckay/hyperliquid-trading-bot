@@ -1,0 +1,29 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::explore_queue -> Vec<String> with vec!["xyzzy".into()]
+@@ -614,25 +614,17 @@
+     ///
+     /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
+     /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
+     /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
+     ///
+     /// `n ≥ full_n` olan hiçbir strateji kuyruğa giremez — terfi/düşüş
+     /// normal tracker akışında yürür (§ kuralı).
+     pub fn explore_queue(&self, names: &[String], pol: &LearnPolicy) -> Vec<String> {
+-        let mut q: Vec<(usize, String)> = Vec::new();
+-        for name in names {
+-            let n = self.stats.get(name).map(|x| x.rs.len()).unwrap_or(0);
+-            if !pol.full(n) {
+-                q.push((n, name.clone()));
+-            }
+-        }
+-        q.sort();
+-        q.into_iter().map(|(_, n)| n).collect()
++        vec!["xyzzy".into()] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// I — stratejinin **ölçülebilir metrikleri** (gerçek fill R penceresi).
+     /// Kanıt yok → `trades=0` ve `None`'lar (uydurma sayı yok).
+     pub fn metrics(&self, name: &str) -> PerformanceMetrics {
+         let rs: Vec<f64> = self
+             .stats
+             .get(name)

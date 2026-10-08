@@ -1,0 +1,22 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::max_positions -> usize with 1
+@@ -182,18 +182,17 @@
+         self.peak_equity = self.current_equity;
+         self.halted = None;
+     }
+ 
+     /// SABİT pozisyon sayısı yerine bakiyeye göre dinamik üst sınır:
+     /// `min(cfg_max, floor(equity / equity_per_position))`.
+     /// $111 bakiyeyle 5 pozisyon açmak 5×$10'luk zorunlu minimuma takılırdı.
+     pub fn max_positions(&self, equity: f64, cfg_max: usize) -> usize {
+-        let by_equity = (equity / self.cfg.equity_per_position_usd.max(1.0)).floor();
+-        (by_equity as usize).min(cfg_max)
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     fn total_exposure(positions: &HashMap<String, Position>) -> f64 {
+         positions.values().map(|p| p.position_value.abs()).sum()
+     }
+ 
+     /// Emir öncesi kontrol. Ok: emir gönderilebilir.
+     pub fn pre_trade(

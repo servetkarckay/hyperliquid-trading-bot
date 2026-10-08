@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace += with *= in StrategyTracker::load_state
+@@ -857,17 +857,17 @@
+                     if let Some(arr) = entry.as_array() {
+                         if arr.len() == 2 {
+                             let ts = arr[0].as_u64().unwrap_or(0);
+                             let r = arr[1].as_f64().unwrap_or(0.0);
+                             st.record_r(ts, r);
+                         }
+                     }
+                 }
+-                loaded += 1;
++                loaded *= /* ~ changed by cargo-mutants ~ */ 1;
+                 continue;
+             }
+             // r_hist YOK → bu strateji YÜKLENMEZ (sentetik R yazmak, R hiç yazmamaktan kötüdür)
+             tracing::warn!("[LEARN] {name}: r_hist eksik — strateji ATLANIYOR (sentetik R YOK)");
+         }
+         // GERÇEK portfolio trade history — RESTART DUPLICATE YASAĞI:
+         // replace_all (append değil) → dosyadaki kayıt sayısı = kayıt
+         // sayısı (birebir; iki kez yükleme çoğaltamaz). Alan yoksa

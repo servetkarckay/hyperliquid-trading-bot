@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace += with *= in PerformanceMetrics::from_rs
+@@ -400,17 +400,17 @@
+         let win_sum: f64 = wins.iter().sum();
+         let loss_sum: f64 = losses.iter().copied().map(|r| r.abs()).sum();
+ 
+         // max drawdown: kümülatif R eğrisi
+         let mut cum = 0.0f64;
+         let mut peak = 0.0f64;
+         let mut mdd = 0.0f64;
+         for r in rs {
+-            cum += *r;
++            cum *= /* ~ changed by cargo-mutants ~ */ *r;
+             peak = peak.max(cum);
+             mdd = mdd.max(peak - cum);
+         }
+         // ardışık kayıp serisi
+         let mut streak = 0usize;
+         let mut worst = 0usize;
+         for r in rs {
+             if *r <= 0.0 {

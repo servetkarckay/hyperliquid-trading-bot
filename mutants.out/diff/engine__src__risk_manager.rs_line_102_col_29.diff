@@ -1,0 +1,21 @@
+--- engine/src/risk_manager.rs
++++ replace > with == in RiskManager::update_equity
+@@ -94,17 +94,17 @@
+     }
+ 
+     /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma
+     pub fn update_equity(&mut self, equity: f64) {
+         self.current_equity = equity;
+         if equity > self.peak_equity {
+             self.peak_equity = equity;
+         }
+-        if self.peak_equity > 0.0 {
++        if self.peak_equity == /* ~ changed by cargo-mutants ~ */ 0.0 {
+             let dd = self.drawdown_pct(equity);
+             if dd >= self.cfg.max_drawdown_pct && self.halted.is_none() {
+                 let msg = format!(
+                     "drawdown %{dd:.2} (peak={:.2}, now={equity:.2})",
+                     self.peak_equity
+                 );
+                 tracing::error!("{msg} — TRADING DURDURULDU");
+                 self.halted = Some(msg);

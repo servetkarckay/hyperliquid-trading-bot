@@ -1,0 +1,58 @@
+--- engine/src/track.rs
++++ replace classify -> ErrClass with Default::default()
+@@ -1394,54 +1394,17 @@
+ 
+ /// `anyhow::Error` mesajından sınıflandır (kaynak kod değişmeden).
+ ///
+ /// Neden mesajdan: hata türleri 5 ayrı modülde (`anyhow::bail!` ile) üretiliyor;
+ // her birine enum eklemek yerine **kalıcı bir sözleşme** (mesaj önekleri)
+ /// kuruyoruz. Yanlış sınıflama **güvenli** yöndedir: emin olunamayan →
+ /// `Critical` (fail-safe sınıflama).
+ pub fn classify(err: &str) -> ErrClass {
+-    let e = err.to_ascii_lowercase();
+-    // ── SAYILMAYANLAR (önce bakılır — daha spesifik) ──
+-    const TRANSIENT: &[&str] = &[
+-        "reconnect",
+-        "websocket",
+-        "502",
+-        "503",
+-        "429",
+-        "too many requests",
+-        "rate limit",
+-        "connection reset",
+-        "bad gateway",
+-        "stop kurulamadı",
+-        "borsa stop kurulamadı",
+-        "timeout",
+-        "timed out",
+-        "eof",
+-    ];
+-    if TRANSIENT.iter().any(|t| e.contains(t)) {
+-        return ErrClass::Transient;
+-    }
+-    // ── SAYILANLAR (karar-kritik) ──
+-    const CRITICAL: &[&str] = &[
+-        "clearinghousestate",
+-        "clearinghouse_state",
+-        "parse",
+-        "bilinmiyor",
+-        "unknown position",
+-        "flatten",
+-        "düzleş",
+-        "batch place",
+-        "batch_place",
+-    ];
+-    if CRITICAL.iter().any(|t| e.contains(t)) {
+-        return ErrClass::Critical;
+-    }
+-    // EMİN OLUNAMAZ → Critical (fail-safe: say)
+-    ErrClass::Critical
++    Default::default() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Kill-switch / StateMaintenance durumu.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+ pub enum Mode {
+     /// normal
+     #[default]
+     Normal,

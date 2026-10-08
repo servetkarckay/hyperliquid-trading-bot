@@ -1,0 +1,28 @@
+--- engine/src/state_machine.rs
++++ replace PositionStateMachine::link_recon_oid with ()
+@@ -394,24 +394,17 @@
+                 ts,
+                 attempts: 0,
+             };
+         }
+     }
+ 
+     /// Emir borsada BULUNDU: oid'le bağla (ReconciliationPending → Pending).
+     pub fn link_recon_oid(&mut self, oid: i64, remaining: f64) {
+-        if let PosState::ReconciliationPending { side, .. } = self.state.clone() {
+-            self.state = PosState::Pending {
+-                side,
+-                oid,
+-                remaining,
+-                ts: hyperliquid_api::now_ms() as u64,
+-            };
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// FILL kanıtı: pozisyon borsada var (ReconciliationPending → InPosition).
+     pub fn recon_to_position(&mut self, entry: f64, size: f64) {
+         if let PosState::ReconciliationPending { side, .. } = self.state.clone() {
+             self.state = PosState::InPosition {
+                 side,
+                 entry,

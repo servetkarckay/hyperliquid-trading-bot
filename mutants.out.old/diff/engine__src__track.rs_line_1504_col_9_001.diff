@@ -1,0 +1,36 @@
+--- engine/src/track.rs
++++ replace Health::on_error -> bool with false
+@@ -1496,32 +1496,17 @@
+     }
+ 
+     pub fn ws_recent(&self) -> usize {
+         self.ws_reconnects.len()
+     }
+ 
+     /// Döngü hatası. `true` dönerse → flatten + halt.
+     pub fn on_error(&mut self, err: &str) -> bool {
+-        match classify(err) {
+-            ErrClass::Transient => {
+-                // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
+-                // döngülerde sıfırlanır (aşağıda).
+-                false
+-            }
+-            ErrClass::Critical => {
+-                self.crit_streak += 1;
+-                if self.crit_streak >= self.critical_threshold && self.mode != Mode::Halted {
+-                    self.mode = Mode::Halted;
+-                    true
+-                } else {
+-                    false
+-                }
+-            }
+-        }
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn on_cycle_ok(&mut self) {
+         self.crit_streak = 0;
+         // WS fırtınası geçtiyse normale dön (reconnect'ler durulunca)
+         if self.mode == Mode::ExitsOnly && self.ws_reconnects.len() <= WS_STORM_COUNT {
+             self.mode = Mode::Normal;
+         }

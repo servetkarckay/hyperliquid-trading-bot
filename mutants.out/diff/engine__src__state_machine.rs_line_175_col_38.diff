@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ delete - in PositionStateMachine::on_decision
+@@ -167,17 +167,17 @@
+                     Action::Place(BotOrder {
+                         coin: self.coin.clone(),
+                         side: Side::Long,
+                         sz: 0.0,
+                         px: ask,
+                         post_only: true,
+                         reduce_only: false,
+                     })
+-                } else if d.score <= -self.cfg.entry_min_score {
++                } else if d.score <=  /* ~ changed by cargo-mutants ~ */self.cfg.entry_min_score {
+                     self.state = PosState::Pending {
+                         side: Side::Short,
+                         oid: 0,
+                         remaining: 0.0,
+                         ts: now_ms,
+                     };
+                     Action::Place(BotOrder {
+                         coin: self.coin.clone(),

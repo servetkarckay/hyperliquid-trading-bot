@@ -1,0 +1,38 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::portfolio_report -> String with String::new()
+@@ -666,34 +666,17 @@
+     pub fn portfolio_stats(&self) -> Option<(f64, f64)> {
+         let wr = self.portfolio.win_rate()?;
+         let wl = self.portfolio.wl_ratio()?;
+         Some((wr, wl))
+     }
+ 
+     /// Geniş portfolio raporu — GERÇEK trade-level kayıtlardan.
+     pub fn portfolio_report(&self) -> String {
+-        let n = self.portfolio.n();
+-        if n == 0 {
+-            return "portfolio: kayıt yok".into();
+-        }
+-        let wr = self.portfolio.win_rate().unwrap_or(0.0);
+-        let aw = self.portfolio.avg_win();
+-        let al = self.portfolio.avg_loss();
+-        let wl = self.portfolio.wl_ratio();
+-        let ex = self.portfolio.expectancy();
+-        let tr = self.portfolio.total_r();
+-        format!(
+-            "portfolio n={n}: win%={:.0} avgWin={} avgLoss={} k/z={} expectancy={} ΣR={tr:+.2}",
+-            wr * 100.0,
+-            aw.map(|x| format!("{x:+.2}")).unwrap_or("-".into()),
+-            al.map(|x| format!("{x:+.2}")).unwrap_or("-".into()),
+-            wl.map(|x| format!("{x:.2}")).unwrap_or("-".into()),
+-            ex.map(|x| format!("{x:+.3}")).unwrap_or("-".into()),
+-        )
++        String::new() /* ~ changed by cargo-mutants ~ */
+     }
+     /// Bir sonraki keşifçiyi seç: **round-robin**, sinyal üretenlerden.
+     ///
+     /// `cursor` döngü durumu (kalıcı değil — her döngüde sıradakine ilerler).
+     /// Kuyruk + `signaled` kesişiminden **tek** strateji seçilir → aynı döngüde
+     /// iki farklı keşifçiye sıra gelmez (kabul kriteri).
+     pub fn next_explorer(
+         &self,

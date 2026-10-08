@@ -1,0 +1,21 @@
+--- engine/src/risk_manager.rs
++++ replace < with == in RiskManager::pre_trade
+@@ -207,17 +207,17 @@
+     ) -> Result<(), RiskViolation> {
+         if let Some(r) = &self.halted {
+             return Err(RiskViolation::Halted(r.clone()));
+         }
+         if equity < self.cfg.min_account_equity_usd {
+             return Err(RiskViolation::EquityFloor(equity));
+         }
+         // MIN NOTIONAL: borsa $10 altını reddeder — emir hiç üretilmemeli
+-        if order_notional_usd < self.cfg.min_order_notional_usd {
++        if order_notional_usd == /* ~ changed by cargo-mutants ~ */ self.cfg.min_order_notional_usd {
+             return Err(RiskViolation::TooSmall(order_notional_usd));
+         }
+         let dd = self.drawdown_pct(equity);
+         if dd >= self.cfg.max_drawdown_pct {
+             return Err(RiskViolation::Drawdown(dd));
+         }
+         let current = positions
+             .get(coin)
