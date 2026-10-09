@@ -1,0 +1,21 @@
+--- engine/src/orderbook.rs
++++ replace + with - in LocalBook::mid
+@@ -125,17 +125,17 @@
+ 
+     pub fn best_bid(&self) -> Option<LevelF> {
+         self.bids.first().copied()
+     }
+     pub fn best_ask(&self) -> Option<LevelF> {
+         self.asks.first().copied()
+     }
+     pub fn mid(&self) -> Option<f64> {
+-        Some((self.best_bid()?.px + self.best_ask()?.px) / 2.0)
++        Some((self.best_bid()?.px - /* ~ changed by cargo-mutants ~ */ self.best_ask()?.px) / 2.0)
+     }
+     pub fn spread_bps(&self) -> Option<f64> {
+         let (b, a) = (self.best_bid()?.px, self.best_ask()?.px);
+         if b <= 0.0 {
+             return None;
+         }
+         Some((a - b) / ((a + b) / 2.0) * 10_000.0)
+     }

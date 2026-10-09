@@ -1,0 +1,26 @@
+--- engine/src/orderbook.rs
++++ replace LocalBook::imbalance -> Option<f64> with Some(0.0)
+@@ -137,22 +137,17 @@
+         if b <= 0.0 {
+             return None;
+         }
+         Some((a - b) / ((a + b) / 2.0) * 10_000.0)
+     }
+ 
+     /// Üst `depth` seviyedeki hacim dengesi: (bid-ask)/(bid+ask) ∈ [-1, 1]
+     pub fn imbalance(&self, depth: usize) -> Option<f64> {
+-        let sum = |lv: &[LevelF]| -> f64 { lv.iter().take(depth).map(|l| l.sz).sum() };
+-        let (b, a) = (sum(&self.bids), sum(&self.asks));
+-        if b + a <= 0.0 {
+-            return None;
+-        }
+-        Some((b - a) / (b + a))
++        Some(0.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Verilen miktarda doldurmanın VWAP'ı ve gerçekten doldurulan miktar.
+     /// side=Bid -> asks'ten alır, side=Ask -> bids'e (satış) vurur.
+     pub fn vwap_fill(&self, side: Side, qty: f64) -> Option<(f64, f64)> {
+         let lv = match side {
+             Side::Bid => &self.asks,
+             Side::Ask => &self.bids,

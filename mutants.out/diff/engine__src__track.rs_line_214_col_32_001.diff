@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace > with < in StratStats::record_r
+@@ -206,17 +206,17 @@
+     pub fn record_r(&mut self, ts: u64, r: f64) {
+         let r = if r.is_finite() {
+             r.clamp(-20.0, 20.0)
+         } else {
+             0.0
+         };
+         self.outcomes.push((ts, r > 0.0));
+         self.rs.push(r);
+-        if self.outcomes.len() > TRACK_WINDOW {
++        if self.outcomes.len() < /* ~ changed by cargo-mutants ~ */ TRACK_WINDOW {
+             self.outcomes.remove(0);
+             self.rs.remove(0);
+         }
+     }
+ 
+     /// kâr faktörü: toplam kazanç R / toplam kayıp |R| (pencere doluysa).
+     pub fn profit_factor(&self) -> Option<f64> {
+         if self.rs.is_empty() {

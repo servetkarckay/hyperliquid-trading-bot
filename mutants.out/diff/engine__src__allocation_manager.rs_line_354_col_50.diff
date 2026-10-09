@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace / with % in AllocationManager::allocate
+@@ -346,17 +346,17 @@
+ 
+         // 4) TAHSİS: conviction kare ağırlıklı (fractional Kelly dilimleri)
+         let sq: Vec<f64> = picked
+             .iter()
+             .map(|c| (c.conviction * c.conviction).max(1e-6))
+             .collect();
+         let total: f64 = sq.iter().sum();
+         for (i, c) in picked.iter_mut().enumerate() {
+-            c.allocated_usd = budget_usd * sq[i] / total.max(1e-6);
++            c.allocated_usd = budget_usd * sq[i] % /* ~ changed by cargo-mutants ~ */ total.max(1e-6);
+         }
+         // 5) KEŞİF SERMAYE TAVANI: bütçenin `explore_cap_frac`'i kadarını geçemez;
+         // saf keşif (tek başına keşif oyu) aday ayrıca mutlak tavana tabidir.
+         // Keşif havuzu borsanın $10 min notional'ına DÜŞEMEZ: bütçe $72 iken
+         // %5 = $3.60 → keşif adayı her zaman elenir, şerit matematiksel olarak
+         // ölü kalır.
+         //
+         // Taban POZİSYON BAŞINADIR: havuz iki keşifçiye bölününce her biri

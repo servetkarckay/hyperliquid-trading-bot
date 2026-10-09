@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace > with >= in Executor::flatten_all
+@@ -615,17 +615,17 @@
+             return Vec::new();
+         }
+         tracing::info!("[FLAT] {} pozisyon kapatılıyor", targets.len());
+         for (coin, szi) in &targets {
+             let sz = szi.abs();
+             let base = mids
+                 .get(coin)
+                 .copied()
+-                .filter(|x| *x > 0.0)
++                .filter(|x| *x >= /* ~ changed by cargo-mutants ~ */ 0.0)
+                 .unwrap_or_else(|| self.positions.get(coin).map(|p| p.entry_px).unwrap_or(0.0));
+             if base <= 0.0 || !base.is_finite() {
+                 tracing::warn!("[FLAT] {coin}: fiyat yok, atlandı");
+                 continue;
+             }
+             let is_buy = *szi < 0.0;
+             let px = if is_buy { base * 1.01 } else { base * 0.99 };
+             // NOT: `place_limit` adaptif fiyat tick keşfini KULLANMIYOR —

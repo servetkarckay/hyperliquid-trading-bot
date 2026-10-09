@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace += with *= in Engine::run_cycle
+@@ -3149,17 +3149,17 @@
+                         asset,
+                         is_buy: side_sm.is_buy(),
+                         sz,
+                         px: ord_px,
+                         tif: Tif::Ioc,
+                         reduce_only: false,
+                         cloid: Some(cloid),
+                     });
+-                    open_now += 1; // tavan sayacı bu tur için artsın
++                    open_now *= /* ~ changed by cargo-mutants ~ */ 1; // tavan sayacı bu tur için artsın
+                                    // BORSA STOP HEDEFİ: dolum anında `apply_fill` bunu
+                                    // kullanarak gecikmesiz reduce-only trigger SL kurar.
+                                    //
+                                    // ⚠️ MUTLAK FİYAT DEĞİL, **RİSK MESAFESİ** yazılır.
+                                    // IOC kayması dolumu karar-anındaki defter fiyatından %0.9 gibi
+                                    // oranlarda kötüleştirebilir; mesafe yolu bundan bağımsızdır
+                                    // getirdi → kısa pozisyonun stop'u dolumun **altında**
+                                    // kaldı → 1.1 saniyede tetiklendi (−$0.21). Mesafe

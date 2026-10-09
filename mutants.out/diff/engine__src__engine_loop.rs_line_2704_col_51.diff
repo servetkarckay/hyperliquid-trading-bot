@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace || with && in Engine::run_cycle
+@@ -2696,17 +2696,17 @@
+         // 3a) makine kararları (tek kısa ödünç alma aralığı)
+         // CYCLE-BAŞI ANLIK DURUM: hangi makineler bu cycle BAŞLAMADAN ÖNCE
+         // Pending/ReconPending idi. Aynı cycle'da evals'in yeni ürettiği
+         // kararla (Flat→Pending{oid:0}) karışmaması için AYRI TUTULUR —
+         // aksi halde ilk giriş kendi kararıyla kapıya takılır (ölü kilit).
+         let pre_pending: std::collections::HashSet<String> = self
+             .machines
+             .iter()
+-            .filter(|(_, m)| m.is_recon_pending() || m.oid_zero_pending())
++            .filter(|(_, m)| m.is_recon_pending() && /* ~ changed by cargo-mutants ~ */ m.oid_zero_pending())
+             .map(|(c, _)| c.clone())
+             .collect();
+         // ÖNCÜ temizlik: öncesinden beri oid=0 bekleyen ve ASLA batch'e
+         // girmemiş makine — kanıtsız kalıntıdır; cycle penceresi (2×cycle)
+         // aşılırsa geri Flat'a döner (bounded, sessiz kilit YOK).
+         let oid0_grace_ms = self.loop_cfg.cycle_secs.max(1) * 2 * 1000;
+         let now0 = hyperliquid_api::now_ms();
+         for (cn, m) in self.machines.iter_mut() {

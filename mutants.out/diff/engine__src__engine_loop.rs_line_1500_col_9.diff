@@ -1,0 +1,28 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::log_learn_table with ()
+@@ -1492,24 +1492,17 @@
+         }
+         // canlı ağırlık varken bu fonksiyon SESSİZ kalır:
+         // "[LEARN] nötr başlangıç" satırı yanlış olurdu. Doğru bilgiyi
+         // `apply_effective_weights` yayınlar (uygulandı / cold-start kullanılmadı).
+     }
+ 
+     /// [LEARN] tablosu (her 60 sn'de bir — 5 sn döngüde her tur BASILMAZ).
+     pub fn log_learn_table(&self) {
+-        let tbl = crate::track::learn_table(&self.tracker, &self.ensemble.cfg.weights);
+-        tracing::info!(
+-            "[LEARN] {} strateji | kuyruk={} | cursor={}\n{}",
+-            self.ensemble.cfg.weights.len(),
+-            self.explore_names.len(),
+-            self.explore_cursor,
+-            tbl
+-        );
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Etkin ağırlıkları ensemble'a bas — **iki kaynak, açık öncelik**:
+     ///
+     /// 1. **Tracker kanıtı varsa** (`n >= LEARN_MIN_N`) → tracker'ın türettiği
+     ///    ağırlık KAZANIR (yeni gerçek kanıt snapshot'ın üstüne yazar).
+     /// 2. **Tracker kanıtı yoksa** → kaydedilmiş canlı snapshot (`live_weights`)
+     ///    **korunur**; o da yoksa nötr `1.0`.

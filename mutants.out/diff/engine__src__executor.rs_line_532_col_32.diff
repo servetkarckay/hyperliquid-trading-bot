@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::ensure_leverage
+@@ -524,17 +524,17 @@
+             Some(m) => leverage.min(m).max(1),
+             None => leverage,
+         };
+         let v = self.ex.update_leverage(asset, true, lev).await?;
+         let good = v
+             .get("response")
+             .and_then(|r| r.get("type"))
+             .and_then(|t| t.as_str())
+-            .is_some_and(|t| t == "ok" || t == "default");
++            .is_some_and(|t| t != /* ~ changed by cargo-mutants ~ */ "ok" || t == "default");
+         if !good {
+             tracing::warn!("{coin}: kaldıraç reddedildi {v}");
+             return Ok(()); // emir yine de gitsin; emir değeri kaldıraçtan bağımsız
+         }
+         self.lev_done.insert(coin.to_string());
+         tracing::info!("{coin}: kaldıraç {lev}x cross ayarlandı");
+         Ok(())
+     }

@@ -1,0 +1,21 @@
+--- engine/src/epoch.rs
++++ delete ! in fresh_start_decision
+@@ -92,17 +92,17 @@
+ pub fn fresh_start_decision(
+     fresh_env: bool,
+     epoch_exists: bool,
+     is_testnet: bool,
+ ) -> FreshDecision {
+     if !fresh_env {
+         return FreshDecision::KeepExisting;
+     }
+-    if !is_testnet {
++    if  /* ~ changed by cargo-mutants ~ */is_testnet {
+         return FreshDecision::Invalid;
+     }
+     if epoch_exists {
+         return FreshDecision::KeepExisting;
+     }
+     FreshDecision::Wipe
+ }
+ 

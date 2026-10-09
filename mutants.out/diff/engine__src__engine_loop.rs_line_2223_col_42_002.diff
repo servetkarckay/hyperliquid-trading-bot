@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::run_cycle
+@@ -2215,17 +2215,17 @@
+             ),
+         }
+         // `trail` haritasını da pozisyonlarla senkronla: kapanmış coinin
+         // MFE/MAE kaydı kalırsa sonraki girişte yanlış tepe ile başlar.
+         let open_now_coins: std::collections::HashSet<String> = self
+             .executor
+             .positions()
+             .iter()
+-            .filter(|(_, p)| p.szi.abs() > 1e-12)
++            .filter(|(_, p)| p.szi.abs() >= /* ~ changed by cargo-mutants ~ */ 1e-12)
+             .map(|(c, _)| c.clone())
+             .collect();
+         self.trail.retain(|c, _| open_now_coins.contains(c));
+ 
+         // Risk lock auto-unlock — 2 ardışık **doğrulanmış** flat döngüsü.
+         // `entries_allowed` YAZILMAZ; kilit açılsa bile `health_ok=false`
+         // ise giriş kapalı kalır (denklem `EntryGate`de tek yerde).
+         // `verified`: bu döngüde pozisyon haritası gerçek REST

@@ -1,0 +1,25 @@
+--- engine/src/track.rs
++++ replace StratStats::win_rate -> Option<f64> with Some(0.0)
+@@ -246,21 +246,17 @@
+             ExploreVerdict::Demote
+         } else {
+             ExploreVerdict::Hold
+         }
+     }
+ 
+     /// pencere win-oranı; min_trades altında None
+     pub fn win_rate(&self, min_trades: usize) -> Option<f64> {
+-        if self.outcomes.len() < min_trades {
+-            return None;
+-        }
+-        let wins = self.outcomes.iter().filter(|(_, w)| *w).count();
+-        Some(wins as f64 / self.outcomes.len() as f64)
++        Some(0.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// binary Kelly (f*), pencere doluyken Some
+     pub fn kelly(&self, b: f64, min_trades: usize) -> Option<f64> {
+         let p = self.win_rate(min_trades)?;
+         Some(p - (1.0 - p) / b)
+     }
+ }

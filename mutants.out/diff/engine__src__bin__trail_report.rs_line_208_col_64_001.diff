@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace > with < in main
+@@ -200,17 +200,17 @@
+         let first_stop_pct = first_stop as f64 / n as f64 * 100.0;
+         if first_stop_pct > 70.0 {
+             println!(
+                 "İlk-stop oranı {:.1}% > 70% → trailing değerlendirilemez (sorun giriş/EV floor)",
+                 first_stop_pct
+             );
+         } else if !mfe_ge_1.is_empty() {
+             let giveback_med = median(mfe_ge_1.clone()).unwrap_or(0.0);
+-            let giveback_gt60 = mfe_ge_1.iter().filter(|x| **x > 0.6).count() as f64
++            let giveback_gt60 = mfe_ge_1.iter().filter(|x| **x < /* ~ changed by cargo-mutants ~ */ 0.6).count() as f64
+                 / mfe_ge_1.len() as f64
+                 * 100.0;
+             let tp_pct = tp_count as f64 / n as f64 * 100.0;
+             if giveback_med > 0.6 {
+                 println!(
+                     "Geri-verme median {:.1}% > 60% → k -0.25 önerisi",
+                     giveback_med * 100.0
+                 );

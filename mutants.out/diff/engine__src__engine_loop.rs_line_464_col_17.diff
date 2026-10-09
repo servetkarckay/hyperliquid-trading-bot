@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace || with && in should_finalize_on_ws
+@@ -456,17 +456,17 @@
+ /// (`position_open=true`) finalize ÜRETMEZ — pozisyon sürüyor.
+ /// (borsada kapanış, motor haritasında kapalıysa WS'ten gelir;
+ pub fn should_finalize_on_ws(
+     is_sl_fill: bool,
+     is_tp_fill: bool,
+     position_open: bool,
+     has_entry_attr: bool,
+ ) -> bool {
+-    (is_sl_fill || is_tp_fill) && !position_open && has_entry_attr
++    (is_sl_fill && /* ~ changed by cargo-mutants ~ */ is_tp_fill) && !position_open && has_entry_attr
+ }
+ 
+ /// **devralınan pozisyon için sentetik EntryAttr** (restart recovery).
+ ///
+ /// Neden zorunlu: `entry_attr` RAM'dedir; FLATTEN=0 devralan restart'ta
+ /// pozisyona ait attr YOK → kapanışı `should_finalize_on_ws` finalize
+ /// EDEMEZ → gerçek kapanış sayılmaz. Attr sentetik kurulur ki
+ /// devralınan pozisyonun kapanışı tam sayım üretsin.

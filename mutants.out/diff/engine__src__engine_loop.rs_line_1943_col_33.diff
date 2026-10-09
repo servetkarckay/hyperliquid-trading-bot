@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace || with && in Engine::sync_exchange_sl
+@@ -1935,17 +1935,17 @@
+                 None => {
+                     // restart sonrası devralınan pozisyon: girişten %2×2 mesafe
+                     let e = self
+                         .executor
+                         .positions()
+                         .get(coin)
+                         .map(|p| p.entry_px)
+                         .unwrap_or(0.0);
+-                    if e <= 0.0 || !e.is_finite() {
++                    if e <= 0.0 && /* ~ changed by cargo-mutants ~ */ !e.is_finite() {
+                         continue;
+                     }
+                     if *szi > 0.0 {
+                         e * 1.04
+                     } else {
+                         e * 0.96
+                     }
+                 }

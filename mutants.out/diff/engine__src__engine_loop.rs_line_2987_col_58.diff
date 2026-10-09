@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with + in Engine::run_cycle
+@@ -2979,17 +2979,17 @@
+                     } else {
+                         e.closes.last().copied().unwrap_or(0.0)
+                     };
+                     // ATR=0 / bozuk SL koruması (min %0.25 mesafe)
+                     let min_dist = entry_px * 0.0025;
+                     let (sl_ok, tp_ok) = if cand.dir == Dir::Long {
+                         (entry_px - cand.sl_px, cand.tp_px - entry_px)
+                     } else {
+-                        (cand.sl_px - entry_px, entry_px - cand.tp_px)
++                        (cand.sl_px - entry_px, entry_px + /* ~ changed by cargo-mutants ~ */ cand.tp_px)
+                     };
+                     // KONTRAT KAPISI: negatif SL/TP fiyatı (ATR girişin
+                     // katları) borsada "invalid price" olur → korumasız pozisyon.
+                     if !entry_contract_ok(
+                         matches!(cand.dir, Dir::Long),
+                         entry_px,
+                         cand.sl_px,
+                         cand.tp_px,

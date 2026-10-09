@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace * with + in Executor::apply_fill
+@@ -1583,17 +1583,17 @@
+             if self.cached_asset(&coin).is_some() {
+                 match self.positions.get_mut(&coin) {
+                     Some(e) => {
+                         if is_buy {
+                             e.szi += sz;
+                         } else {
+                             e.szi -= sz;
+                         }
+-                        e.position_value = px * e.szi.abs();
++                        e.position_value = px + /* ~ changed by cargo-mutants ~ */ e.szi.abs();
+                     }
+                     None => {
+                         self.positions.insert(
+                             coin.clone(),
+                             Position {
+                                 coin: coin.clone(),
+                                 szi: if is_buy { sz } else { -sz },
+                                 entry_px: px,

@@ -1,0 +1,23 @@
+--- engine/src/engine_loop.rs
++++ replace find_by_cloid -> Option<i64> with Some(-1)
+@@ -3486,19 +3486,17 @@
+ ///
+ /// Ayrı fonksiyon olmasının sebebi: test ağ olmadan çalışabilmeli. Emrin
+ /// borsadaki `oid`'sini döndürür, yoksa `None`.
+ pub fn find_by_cloid(
+     rows: &[crate::executor::OpenOrderRow],
+     coin: &str,
+     cloid: &str,
+ ) -> Option<i64> {
+-    rows.iter()
+-        .find(|r| r.coin == coin && r.cloid.as_deref() == Some(cloid))
+-        .map(|r| r.oid)
++    Some(-1) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Konsol özeti
+ pub fn fmt_signals(out: &[(String, String)]) -> String {
+     out.iter()
+         .map(|(c, s)| format!("{c}: {s}"))
+         .collect::<Vec<_>>()
+         .join(" || ")

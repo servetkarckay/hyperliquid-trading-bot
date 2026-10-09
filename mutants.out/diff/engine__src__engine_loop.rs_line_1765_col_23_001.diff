@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::sync_exchange_sl
+@@ -1757,17 +1757,17 @@
+                         peak_px: px.max(entry_px),
+                         worst_px: px.min(entry_px),
+                         last_px: px,
+                         cur_sl_px: cur_sl_init,
+                         opened_ms: hyperliquid_api::now_ms(),
+                         ratchets: 0,
+                     });
+                 t.is_long = is_long;
+-                if px > 0.0 {
++                if px < /* ~ changed by cargo-mutants ~ */ 0.0 {
+                     if is_long {
+                         t.peak_px = t.peak_px.max(px);
+                         t.worst_px = t.worst_px.min(px);
+                     } else {
+                         t.peak_px = t.peak_px.min(px);
+                         t.worst_px = t.worst_px.max(px);
+                     }
+                     t.last_px = px;

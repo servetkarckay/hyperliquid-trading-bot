@@ -1,0 +1,28 @@
+--- engine/src/executor.rs
++++ replace BatchOut::known -> Self with Default::default()
+@@ -1878,24 +1878,17 @@
+     pub cloid: Option<String>,
+     /// gönderilen emrin coin'i (executor asset→coin eşlemesini zaten
+     /// yapıyor; çağıranın tekrar çözmesine gerek kalmaz).
+     pub coin: Option<String>,
+ }
+ 
+ impl BatchOut {
+     fn known(oid: Option<i64>, filled_avg: Option<f64>, error: Option<String>) -> Self {
+-        Self {
+-            oid,
+-            filled_avg,
+-            error,
+-            unknown: false,
+-            cloid: None,
+-            coin: None,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+     /// sonuç bilinmiyor — reconciliation gerekir.
+     fn unresolved(cloid: Option<String>, coin: Option<String>) -> Self {
+         Self {
+             oid: None,
+             filled_avg: None,
+             error: None,
+             unknown: true,

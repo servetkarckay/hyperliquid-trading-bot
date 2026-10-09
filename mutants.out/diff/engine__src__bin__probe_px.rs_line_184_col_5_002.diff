@@ -1,0 +1,15 @@
+--- engine/src/bin/probe_px.rs
++++ replace round5sig_ref -> f64 with -1.0
+@@ -176,11 +176,10 @@
+             },
+             Err(e) => println!("{name:22} px={px:.10} -> HATA: {e}"),
+         }
+         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+     }
+     Ok(())
+ }
+ fn round5sig_ref(x: f64) -> f64 {
+-    let f = 10f64.powf(x.log10().floor() - 4.0);
+-    (x / f).round() * f
++    -1.0 /* ~ changed by cargo-mutants ~ */
+ }

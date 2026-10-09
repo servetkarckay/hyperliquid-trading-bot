@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete match arm crate::track::ExploreVerdict::Promote in Engine::apply_effective_weights
+@@ -1523,17 +1523,17 @@
+     /// düşmez** — uyarıyla loglanır.
+     pub fn apply_effective_weights(&mut self) {
+         let (tracker_w, explorers, events) = self
+             .tracker
+             .effective_weights(&self.strategy_names, &self.learn_pol);
+         self.explore_names = explorers.clone();
+         for e in &events {
+             let v = match e.verdict {
+-                crate::track::ExploreVerdict::Promote => "TERFİ",
++                 /* ~ changed by cargo-mutants ~ */
+                 crate::track::ExploreVerdict::Demote => "SUSTUR",
+                 _ => "—",
+             };
+             tracing::warn!(
+                 "[LEARN] {v}: {} {:.2}→{:.2} (n={} wr={:.2} pf={:.2})",
+                 e.strategy,
+                 e.from,
+                 e.to,

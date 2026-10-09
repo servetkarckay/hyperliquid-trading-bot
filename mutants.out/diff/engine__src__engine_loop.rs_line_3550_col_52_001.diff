@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace + with * in CycleProjection::check_and_commit
+@@ -3542,17 +3542,17 @@
+         }
+         risk.pre_trade(equity, &merged, coin, notional, leverage, 0)?;
+         let cur = self.per_coin.get(coin).copied().unwrap_or_else(|| {
+             self.base
+                 .get(coin)
+                 .map(|p| p.position_value.abs())
+                 .unwrap_or(0.0)
+         });
+-        self.per_coin.insert(coin.to_string(), cur + notional);
++        self.per_coin.insert(coin.to_string(), cur * /* ~ changed by cargo-mutants ~ */ notional);
+         Ok(())
+     }
+ }
+ #[cfg(test)]
+ impl CycleProjection {
+     /// Bileşik maruziyet (base + proje) — yalnız test kullanır.
+     pub(crate) fn total(&self) -> f64 {
+         let base_total: f64 = self.base.values().map(|p| p.position_value.abs()).sum();

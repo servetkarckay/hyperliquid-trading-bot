@@ -1,0 +1,1285 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![(String::new(), String::new())])
+@@ -2018,1281 +2018,17 @@
+             .collect();
+         let left = self.executor.flatten_all(&mids).await;
+         if !left.is_empty() {
+             tracing::error!("[KILL] {} pozisyon kapanamadı!", left.len());
+         }
+     }
+ 
+     pub async fn run_cycle(&mut self) -> anyhow::Result<Vec<(String, String)>> {
+-        self.n_cycles += 1;
+-        // Bu döngüde pozisyon haritası henüz tazelenmedi: risk-lock
+-        // auto-unlock sayacı ilerlememeli (bayat harita "flat" görünebilir).
+-        self.rest_sync_verified = false;
+-        if let Err(e) = self.rest_snapshot().await {
+-            tracing::warn!("rest tarama: {e}");
+-        }
+-        match self.info.clearinghouse_state(self.executor.user()).await {
+-            Ok(st) => {
+-            if let Some(eq) = st["marginSummary"]["accountValue"]
+-                .as_str()
+-                .and_then(|s| s.parse::<f64>().ok())
+-            {
+-                self.equity = eq;
+-            }
+- // POZİSYON HARİTASI = BORSANIN KENDİ VERİSİ. WS dolumları
+- // haritayı güncelliyor ama bir WS olayı kaçırılırsa harita bayatlar
+- // (açılış haritası boş kalırsa `open_now` tavanı hiç
+- // tetiklenmiyordu, 3 açık pozisyon varken 4. giriş açıldı).
+- // Aynı REST yanıtı zaten çekildi → buradan bedava senkron.
+-            if let Some(arr) = st["assetPositions"].as_array() {
+-                let mut closed = self.executor.sync_positions_from(arr);
+- // REST delta TEK BAŞINA YETMEZ: `apply_fill` kapanan
+- // pozisyonu haritadan düştüğü için 'gone' delta kapanışları
+- // YUTAR — SL tetiklenip kayıt düşmeyen kapanış öğrenmeye DOKUNUZ.
+- // Gerçek WS işareti: closed_pnl haritasındaki closing fill'ler
+- // → union; ikisi de aynı bloktan TEK kayıt + TEK sayım alır
+- // (entry_attr remove tek-yazım garantisi).
+-                for c in self.executor.closed_pnl_coins() {
+-                    if !closed.contains(&c) {
+-                        closed.push(c);
+-                    }
+-                }
+- // harita bu döngüde BORSADAN tazelendi → auto-unlock
+- // flat doğrulaması sayacı ilerleyebilir.
+-                self.rest_sync_verified = true;
+- // RECON: borsa kapanışlarını durum makinesine UYGULA
+- // (TP/SL/external close makineye oid üzerinden gelmez).
+-                {
+-                    let gone_machines = {
+-                        let positions = self.executor.positions().clone();
+-                        reconcile_machines_to_exchange(&mut self.machines, &positions)
+-                    };
+-                    for c in &gone_machines {
+-                        tracing::info!("[RECON] {c} borsa kapanışı → machine Flat");
+- // break-even/kaçan-fill kapanışı: işlem GERÇEKTEN kapandı —
+- // kaydı R=0 ile düşür (sessiz düşürme = ters seçim bias).
+-                        if let Some(attr) = self.entry_attr.remove(c) {
+-                            self.tracker.record_outcome_r(
+-                                attr.voters.clone(),
+-                                hyperliquid_api::now_ms(),
+-                                0.0,
+-                            );
+-                            let excursion = self.trail.remove(c).map(|t| {
+-                                let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+-                                let fav = if t.is_long { (t.peak_px - t.entry_px) / risk }
+-                                    else { (t.entry_px - t.peak_px) / risk };
+-                                let adv = if t.is_long { (t.worst_px - t.entry_px) / risk }
+-                                    else { (t.entry_px - t.worst_px) / risk };
+-                                (fav, adv, t)
+-                            });
+-                            self.write_ws_exit_record(c, &attr, 0.0, excursion, false);
+-                        }
+-                        self.executor.pending_tp.remove(c);
+-                    }
+-                }
+- // entry_attr: 24h SABİT RETENTION SESSİZ BİAS ÜRETİYOR.
+- // (a) `sync_exchange_sl` SL fiyatını `risk_px`'ten alıyor; kayıt
+- // düşünce %2'lik çok gevşek kurtarma stop'u kuruluyor → 24 saatten
+- // uzun swing pozisyonunun risk profili sessizce değişiyor.
+- // (b) Pozisyon kapanınca R-çarpanı hesaplanamıyor → uzun/kârlı
+- // işlemler PF tabanlı terfi matematiğinden düşüyor, yani
+- // SISTEMATİK TERS SEÇİM BİAS'ı (kazanmayan işlemler kalıyor).
+- // Gerçek kural: kayıt pozisyon kapanınca düşer (aşağıda).
+- // `entry_attr.entry_px` karar anındaki **defter** fiyatıdır;
+- // IOC kaymasıyla dolum farklı gelir (%0.9 gibi oranlar). Bu değer
+- // hem `sync_exchange_sl`'in stop'unu hem R-çarpanını hem
+- // MFE/MAE'yi besler → REST `entryPx` (otoriter) ile
+- // üzerine yazılır. AKSI halde stop yan tarafa kurulur
+- // (anında tetiklenme).
+- // dolum kalibrasyonu analytical TP'yi de yeniden türetir —
+- // dolum-öncesi fiyatta kalan TP, short'ta dolumdan sonra
+- // **zarar tarafına** düşebilirdi.
+-                let am_cfg = self.am.cfg.clone();
+-                let rest_entries: Vec<(String, f64)> = self
+-                    .executor
+-                    .positions()
+-                    .iter()
+-                    .map(|(cn, p)| (cn.clone(), p.entry_px))
+-                    .collect();
+-                for (cn, rest_entry) in rest_entries {
+-                    if rest_entry <= 0.0 {
+-                        continue;
+-                    }
+-                    if let Some(a) = self.entry_attr.get_mut(&cn) {
+-                        a.apply_real_fill(rest_entry, &am_cfg);
+-                    }
+-                }
+-                for c in closed {
+- // MFE/MAE (excursion) GÖSTERGESİ — TRAİLİNG'İN FAYDASINI
+- // ÖLÇMEK İÇİN. Soru: "stop daha yukarı çekilseydi bu işlem
+- // kârlı kapanır mıydı?" MFE = lehli yönde görülen en iyi
+- // fiyat, MAE = aleyhli yönde görülen en kötü fiyat. R cinsinden
+- // yazılır (risk = giriş stop mesafesi × boyut).
+- //
+- // MFE/MAE izlenimi olmadan trailing'in etkinliği ölçülebilir
+- // değildir; kayıp örneklerinin MFE ≈ 0 profili trailing'in
+- // savunmadığını gösterir. Bu log, bir sonraki kararı VERİYE
+- // dayandırır.
+-                    let excursion = self.trail.remove(&c).map(|t| {
+-                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+-                        let fav = if t.is_long {
+-                            (t.peak_px - t.entry_px) / risk
+-                        } else {
+-                            (t.entry_px - t.peak_px) / risk
+-                        };
+- // MAE **negatif** işaretli (aleyhli yön = zarar).
+- // long: dip girişin altında → (worst - entry) < 0
+-                        let adv = if t.is_long {
+-                            (t.worst_px - t.entry_px) / risk
+-                        } else {
+-                            (t.entry_px - t.worst_px) / risk
+-                        };
+-                        (fav, adv, t)
+-                    });
+-                    if let Some((fav, adv, t)) = &excursion {
+-                        tracing::info!(
+-                            "[MFE] {c} {} MFE={:+.2}R MAE={:+.2}R süre={}sn ratchet={} son_mark={:.8}",
+-                            if t.is_long { "LONG" } else { "SHORT" },
+-                            fav,
+-                            adv,
+-                            (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
+-                            t.ratchets,
+-                            t.last_px,
+-                        );
+-                    }
+- // ÇIKIŞ SEBEBİ: trail state'ten belirle (ratchets > 0 = TrailingStop)
+- // first-write-wins: zaten atanmışsa (SignalExit/EmergencyFlatten) DOKUNMA
+-                    let inferred = if let Some((_, _, t)) = &excursion {
+-                        if t.ratchets > 0 { ExitReason::TrailingStop } else { ExitReason::StopLoss }
+-                    } else {
+-                        ExitReason::StopLoss
+-                    };
+-                    let Some(mut attr) = self.entry_attr.remove(&c) else {
+-                        continue;
+-                    };
+-                    attr.exit_reason = attr.exit_reason.or(Some(inferred));
+- // R = net PnL / giriş riski. Pozisyon adedini bildiğimiz
+- // için risk_usd = risk_px × |szi|; `closed_pnl_by_coin`
+- // `user` dolumundaki `closedPnl` toplamıdır.
+-                    let sz = attr
+-                        .size
+-                        .abs()
+-                        .max(f64::EPSILON);
+-                    let risk_usd = attr.risk_px * sz;
+-                    let pnl = self.executor.take_closed_pnl(&c);
+- // TEK KAPANIŞ = TEK KAYIT = TEK SAYIM:
+- // TradeExit her kapanışta BİR KEZ yazılır (excursion
+- // yoksa sentetik boş kayıt — `write_ws_exit_record`),
+- // sayaç da tam bir kez artar (trade_exits.jsonl ile
+- // birebir tutarlı; restart'ta kalıcı).
+-                    match pnl {
+-                        Some(p) => {
+-                            let r = p / risk_usd.max(f64::EPSILON);
+-                            self.tracker.record_outcome_r(
+-                                attr.voters.clone(),
+-                                hyperliquid_api::now_ms(),
+-                                r,
+-                            );
+-                            self.write_ws_exit_record(&c, &attr, r, excursion, true);
+-                        }
+- // WS dolumu kaçtıysa/break-even: işlem GERÇEKTEN
+- // kapandı → kayıt R=0 ile düşer (sessiz düşürme =
+- // ters seçim bias; yanlış R yazmaktan iyidir).
+-                        None => {
+-                            // PnL ÇÖZÜMLENEMEDİ ≠ break-even: bilinmeyen R
+-                            // ÖĞRENME VERİSİ OLAMAZ (0R yazmak = +2R ve −1R
+-                            // kaçmalarını 0'a eşitleyip tracker'da bias
+-                            // üretir). Kapanış TradeExit + sayaç olarak
+-                            // kayda geçer; tracker'a KATKI YAZILMAZ.
+-                            tracing::warn!("[R] {c} kapandı, PnL çözülemedi — öğrenmeye yazılmadı (kayıt+sayaç normal)");
+-                            self.write_ws_exit_record(&c, &attr, 0.0, excursion, false);
+-                        }
+-                    }
+-                }
+-            }
+-            }
+-            Err(e) => tracing::warn!(
+-                "[PZ] clearinghouseState çekilemedi: {e} — pozisyon haritası/öğrenme kaydı bu döngüde ertelendi (bayat veriyle karar YOK)"
+-            ),
+-        }
+-        // `trail` haritasını da pozisyonlarla senkronla: kapanmış coinin
+-        // MFE/MAE kaydı kalırsa sonraki girişte yanlış tepe ile başlar.
+-        let open_now_coins: std::collections::HashSet<String> = self
+-            .executor
+-            .positions()
+-            .iter()
+-            .filter(|(_, p)| p.szi.abs() > 1e-12)
+-            .map(|(c, _)| c.clone())
+-            .collect();
+-        self.trail.retain(|c, _| open_now_coins.contains(c));
+-
+-        // Risk lock auto-unlock — 2 ardışık **doğrulanmış** flat döngüsü.
+-        // `entries_allowed` YAZILMAZ; kilit açılsa bile `health_ok=false`
+-        // ise giriş kapalı kalır (denklem `EntryGate`de tek yerde).
+-        // `verified`: bu döngüde pozisyon haritası gerçek REST
+-        // `sync_positions_from` ile tazelendi mi? Taranamadıysa sayaç
+-        // ilerlemez — bayat harita "flat" görünüp kilidi erken açardı.
+-        if self.gate.is_locked() {
+-            let any_position = self
+-                .executor
+-                .positions()
+-                .values()
+-                .any(|p| p.szi.abs() > 1e-12);
+-            if self
+-                .gate
+-                .risk_lock_step(any_position, self.rest_sync_verified)
+-            {
+-                tracing::warn!(
+-                    "[RISK-LOCK] açıldı (flat doğrulandı, döngü {})",
+-                    self.n_cycles
+-                );
+-            }
+-        }
+-
+-        // Zaman filtresi YALNIZ pozisyonsuz artıkları toparlar: 24 saati
+-        // aşan ama hâlâ tutulan pozisyonun kaydı KORUNUR (aksi halde SL
+-        // %2'ye düşer ve R-çarpanı kaybolur).
+-        {
+-            let now0 = hyperliquid_api::now_ms();
+-            let stale: Vec<String> = self
+-                .entry_attr
+-                .iter()
+-                .filter(|(c, a)| {
+-                    (now0 as i64 - a.ts as i64).unsigned_abs() >= 86_400_000
+-                        && self
+-                            .executor
+-                            .positions()
+-                            .get(*c)
+-                            .map(|p| p.szi.abs() <= 1e-12)
+-                            .unwrap_or(true)
+-                })
+-                .map(|(c, _)| c.clone())
+-                .collect();
+-            for c in stale {
+-                self.entry_attr.remove(&c);
+-            }
+-        }
+-        self.dyn_weights();
+-
+-        // == PERİYODİK RECON (30 sn) — cycle-sayacı yerine zaman
+-        // Mutex guard'ı await ÖNCESİNE serbest bırak (engine field kullan)
+-        let now_ms = hyperliquid_api::now_ms();
+-        let mut recon_notes: Vec<String> = Vec::new();
+-        if now_ms.saturating_sub(self.last_recon_ms) >= 30_000 {
+-            self.last_recon_ms = now_ms;
+-            // DEDUPE ÖNCESİ DRAIN ZORUNLU: recon, spawn kanallarını
+-            // tük-etmeden dedupe çalıştırırsa `sl_last_px` boş kalır →
+-            // TP "yetim stop" sayılıp İPTAL EDİLEBİLİR. Drain sınıflamayı
+-            // besler; dedupe ancak sonrasında güvenlidir.
+-            self.executor.drain_sl_results();
+-            self.executor.drain_tp_results();
+-            let cands = self.executor.refresh_orders().await;
+-            let cands = match cands {
+-                Ok(c) => c,
+-                Err(e) => {
+-                    tracing::warn!("[RECON] refresh_orders: {e}");
+-                    Vec::new()
+-                }
+-            };
+-            let n = self.executor.dedupe_sl(cands).await;
+-            if n > 0 {
+-                tracing::info!("[RECON] {n} artık stop temizlendi");
+-            }
+-        }
+-        // Yetim emir temizliği : makineye bağlı olmayan açık emirleri iptal
+-        for (cn, oid) in self.executor.open_orders_view() {
+-            let known = self.machines.get(&cn).map(|m| {
+-                matches!(m.state, PosState::Pending { oid: k, .. } | PosState::PendingExit { oid: k, .. } if k == oid)
+-            }).unwrap_or(false);
+-            // BORSA STOP'U yetim DEĞİLDİR: `machines` yalnız botun kendi
+-            // giriş/çıkış emirlerini bilir, `sl_orders` stop'ları
+-            // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
+-            // pozisyonunu borsada korumasız bırakırdı.
+-            // TP trigger da bot'un KORUMA çiftidir — "yetim" sayıp
+-            // iptal etmek, kâr hedefini borsadan SİLER.
+-            let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid)
+-                || self.executor.tp_orders.get(&cn) == Some(&oid);
+-            if !known && !is_sl {
+-                if let Err(e2) = self.executor.cancel(&cn, oid).await {
+-                    tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
+-                } else {
+-                    recon_notes.push(format!("[RECON] yetim emir iptal: {cn}/{oid}"));
+-                }
+-            }
+-        }
+-        for a in recon_notes {
+-            tracing::info!("{a}");
+-        }
+-
+-        let universe_returns: Vec<(String, f64)> = self
+-            .ctx
+-            .all()
+-            .filter(|c| c.prev_day_px > 0.0 && c.mark_px > 0.0)
+-            .map(|c| (c.coin.clone(), c.mark_px / c.prev_day_px - 1.0))
+-            .collect();
+-
+-        // ===== FAZ 1 — TARAMA =====
+-        let mut evals: Vec<CycleEval> = Vec::new();
+-        let mut summaries: Vec<(String, String)> = Vec::new();
+-        for coin in self.loop_cfg.coins.clone() {
+-            let mut candles: Vec<data::Candle> = self
+-                .agg
+-                .history(&coin, self.loop_cfg.interval_secs)
+-                .to_vec();
+-            if let Some(cur) = self.agg.current(&coin, self.loop_cfg.interval_secs) {
+-                candles.push(cur);
+-            }
+-            if candles.len() < 60 {
+-                summaries.push((coin.clone(), "SKIP: mum yetersiz".into()));
+-                continue;
+-            }
+-            // STALE-SKIP — verisi donmuş coin sinyali öğrenmeye karışmasın
+-            if self.agg.is_stale(&coin, self.loop_cfg.interval_secs, None) {
+-                summaries.push((coin.clone(), "STALE: veri donmuş".into()));
+-                continue;
+-            }
+-            // STALE-PROTECT: makineye kapanış tiki (trailing/timeout — WS kopsa bile döngü işler)
+-            {
+-                let mid_c = candles.last().map(|c| c.c).unwrap_or(0.0);
+-                if let Some(m) = self.machines.get_mut(&coin) {
+-                    let _ = m.on_price_tick(mid_c, hyperliquid_api::now_ms());
+-                }
+-            }
+-            let ctx = self.ctx.get(&coin).cloned();
+-            // DEFTER KONTRATI: yoksa None (Some(0.0) DEĞİL) —
+-            // "defter gerçekten 0" ile "defter hiç yok" AYRI bilgiler;
+-            // strateji kuralı: veri yok → Skip.
+-            let book = self.books.get(&coin).cloned();
+-            let (bid, ask, _imb) = book.unwrap_or((0.0, 0.0, 0.0));
+-            let taker = self.agg.taker_balance(&coin).map(|(_, _, r)| r);
+-
+-            let rejim_input = MarketInput {
+-                coin: coin.clone(),
+-                candles: candles.clone(),
+-                ctx: ctx.clone(),
+-                ..MarketInput::default()
+-            };
+-            let gate = classify(&rejim_input)
+-                .map(|(lbl, _)| lbl.gate())
+-                .unwrap_or(RegimeGate::Open);
+-
+-            let input = MarketInput {
+-                coin: coin.clone(),
+-                candles: candles.clone(),
+-                ctx: ctx.clone(),
+-                oi_delta: self.ctx.delta_oi(&coin),
+-                taker_ratio: taker,
+-                book_imbalance: book.map(|(_, _, i)| i),
+-                best_bid: (bid > 1e-9).then_some(bid),
+-                best_ask: (ask > 1e-9).then_some(ask),
+-                universe_returns: universe_returns.clone(),
+-                iv: None, // IV feed bağlı DEĞİL → sahte IV üretme (VolArbitraj=DATA-MISSING)
+-                equity: self.equity,
+-                // D: gerçek pozisyon (USD, ±) — türetilmiş veri değil
+-                inventory_usd: self
+-                    .executor
+-                    .positions()
+-                    .get(&coin)
+-                    .filter(|p| p.szi.abs() > 1e-12)
+-                    .map(|p| p.szi * p.entry_px)
+-                    .unwrap_or(0.0),
+-                // order_size_usd: parent emir planı tahsisden SONRA oluşur →
+-                // strategy evaluation'a beslenemez (0.0).
+-                order_size_usd: 0.0,
+-                // E: Kelly için tracker'ın GERÇEK canlı kanıtı
+-                portfolio_win_rate: self.tracker.portfolio_stats().map(|s| s.0),
+-                portfolio_wl_ratio: self.tracker.portfolio_stats().map(|s| s.1),
+-            };
+-
+-            // KIYAMET KORUMASI strateji panik → Skip (bot ölmez)
+-            let input_ref = &input;
+-            let signals: Vec<(String, Signal)> = self
+-                .strategies
+-                .iter()
+-                .map(|s| {
+-                    let name = s.name().to_string();
+-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+-                        s.evaluate(input_ref)
+-                    })) {
+-                        Ok(sig) => (name, sig),
+-                        Err(_) => (
+-                            name,
+-                            Signal::Skip {
+-                                reason: "strateji panik — izole".into(),
+-                            },
+-                        ),
+-                    }
+-                })
+-                .collect();
+-            let cs = self.ensemble.combine(signals);
+-            let cs = self.ensemble.apply_regime(cs, gate);
+-            summaries.push((
+-                coin.clone(),
+-                format!("{:?} skor={:+.2} | {}", cs.dir, cs.score, cs.note),
+-            ));
+-
+-            let h: Vec<f64> = candles.iter().map(|c| c.h).collect();
+-            let l: Vec<f64> = candles.iter().map(|c| c.l).collect();
+-            let cc: Vec<f64> = candles.iter().map(|c| c.c).collect();
+-            let atr_pct = {
+-                let a = math::indicators::atr(&h, &l, &cc, 14)
+-                    .last()
+-                    .and_then(|x| *x)
+-                    .unwrap_or(0.0);
+-                let mid = cc.last().copied().unwrap_or(0.0);
+-                if mid > 0.0 {
+-                    a / mid
+-                } else {
+-                    0.0
+-                }
+-            };
+-            let closes200: Vec<f64> = cc.iter().rev().take(200).rev().copied().collect();
+-            // Mutlak ATR: trailing stop mesafesi fiyat biriminde gerekiyor
+-            // (`atr_pct` yüzde, stop için kullanılamaz).
+-            let atr_abs = math::indicators::atr(&h, &l, &cc, 14)
+-                .last()
+-                .and_then(|x| *x)
+-                .unwrap_or(0.0);
+-            if atr_abs > 0.0 {
+-                self.atr_px.insert(coin.clone(), atr_abs);
+-            }
+-
+-            evals.push(CycleEval {
+-                coin: coin.clone(),
+-                cs,
+-                bid,
+-                ask,
+-                atr_pct,
+-                closes: closes200,
+-                candles_tail: candles.iter().rev().take(200).rev().cloned().collect(),
+-            });
+-        }
+-
+-        // ===== FAZ 2 — TAHSİS =====
+-        // funding anomalisi: EMA + spike→cooldown (15 dk)
+-        {
+-            let now_f = hyperliquid_api::now_ms();
+-            for ee in &evals {
+-                let Some(f) = self.ctx.get(&ee.coin).map(|c| c.funding) else {
+-                    continue;
+-                };
+-                let ema = match self.funding_ema.get(&ee.coin) {
+-                    Some(v) => v * (2.0 / 3.0) + f * (1.0 / 3.0),
+-                    None => f, // ilk gözlem: freeze yok
+-                };
+-                self.funding_ema.insert(ee.coin.clone(), ema);
+-                if self.funding_ema.len() > 1 && ema.abs() > 1e-12 {
+-                    let rel = (f - ema).abs() / ema.abs().max(1e-12);
+-                    if rel > 4.0 {
+-                        self.funding_freeze_until
+-                            .insert(ee.coin.clone(), now_f + 900_000);
+-                        tracing::warn!("{}: funding anomali (+{:.1}x) — 15dk freeze", ee.coin, rel);
+-                    }
+-                }
+-            }
+-        }
+-        // KRÌZ TESPİTİ: ort. |getiri| >
+-        {
+-            let mut sgn_acc = 0.0;
+-            for e2 in &universe_returns {
+-                sgn_acc += e2.1;
+-            }
+-            let s = (
+-                sgn_acc / universe_returns.len().max(1) as f64,
+-                universe_returns.len(),
+-            );
+-            let crisis = universe_returns.iter().map(|e2| e2.1.abs()).sum::<f64>()
+-                / universe_returns.len().max(1) as f64
+-                > 0.05;
+-            self.am.cfg.max_correlation = if crisis {
+-                0.35
+-            } else {
+-                crate::allocation_manager::LOOSE_CORR
+-            };
+-            // black-swan: işaretli ort < −%15 → TÜM pozisyonları KAPAT (gerçek flatten)
+-            if !universe_returns.is_empty() && s.0 < -0.15 {
+-                tracing::error!(
+-                    "BLACK SWAN: evren ort {:+.1}% — TÜM pozisyonlar kapatılıyor (gerçek flatten)",
+-                    s.0 * 100.0
+-                );
+-                // Sadece internal state değil, BORSADA kapat (kill-switch ile aynı mekanizma)
+-                let mids: HashMap<String, f64> = self
+-                    .info
+-                    .all_mids()
+-                    .await
+-                    .unwrap_or_default()
+-                    .into_iter()
+-                    .filter_map(|(k, v)| v.parse::<f64>().ok().map(|x| (k, x)))
+-                    .collect();
+-                let left = self.executor.flatten_all(&mids).await;
+-                if left.is_empty() {
+-                    // Flatten başarılı → internal state Flat
+-                    for m in self.machines.values_mut() {
+-                        m.state = PosState::Flat;
+-                    }
+-                } else {
+-                    // Flatten BAŞARISIZ → RISK LOCK AKTİF
+-                    // `entries_allowed` elle yazılmaz: `gate.lock` yalnız
+-                    // kilit bitini set eder, denklem `false` verir
+-                    // (health_ok=false ise zaten kapalıydı).
+-                    // makineler DOKUNULMAZ, recovery: sync_positions_from ile borsa-temelli
+-                    self.gate.lock();
+-                    tracing::error!(
+-                        "[RISK-LOCK] AKTİF — flatten başarısız, kalan pozisyon: {}",
+-                        risk_lock_positions_left(&left)
+-                    );
+-                }
+-            }
+-        }
+-
+-        let mut votes: Vec<Vote> = Vec::new();
+-        let (mut n_skip_neutral, mut n_skip_novoter, mut n_skip_nobook) = (0usize, 0usize, 0usize);
+-        let mut closes_map: HashMap<String, Vec<f64>> = HashMap::new();
+-        // bu döngüde sinyal üreten stratejiler (keşif kuyruğuyla kesişim
+-        // için). Sinyal üretmeyene zorla işlem AÇILMAZ.
+-        let mut signaled: std::collections::HashSet<String> = std::collections::HashSet::new();
+-        for e in &evals {
+-            // Defter (L2) gelmemişse oy TAMAMEN atlanıyordu: 178 coin'in 173'ü
+-            // elendi, oy≈0 kalıyordu. Son mum kapanışı geçerli fiyattır.
+-            let has_book = e.bid > 1e-6 && e.ask > 1e-6;
+-            let last_c = e.closes.last().copied().unwrap_or(0.0);
+-            if !has_book && last_c <= 0.0 {
+-                n_skip_nobook += 1;
+-                continue; // ne defter ne mum — fiyat yok
+-            }
+-            let already_on = self
+-                .machines
+-                .get(&e.coin)
+-                .map(|m| !matches!(m.state, PosState::Flat))
+-                // makine yoksa pozisyon da yoktur → FLAT say (`true`
+-                // bilinmeyen coini "zaten pozisyonda" sanıyordu)
+-                .unwrap_or(false);
+-            if already_on || e.cs.dir == Dir::Neutral {
+-                n_skip_neutral += 1;
+-                continue;
+-            }
+-            let side_sign = if e.cs.dir == Dir::Long { 1.0 } else { -1.0 };
+-            let voters: Vec<String> =
+-                e.cs.contributors
+-                    .iter()
+-                    .filter(|(_, contrib)| contrib.signum() == side_sign)
+-                    .map(|(n, _)| n.clone())
+-                    .collect();
+-            if voters.is_empty() {
+-                n_skip_novoter += 1;
+-                continue;
+-            }
+-            signaled.extend(voters.iter().cloned());
+-            closes_map.insert(e.coin.clone(), e.closes.clone());
+-            // Emir defteri boşsa (dry-run'da L2 kapalıyken) mid = 0.0 olurdu
+-            // ve `mid > 0` filtresi TÜM oyları düşürürdü → hiç pozisyon yok.
+-            // Son mum kapanışına düş.
+-            let px = if e.cs.dir == Dir::Long { e.ask } else { e.bid };
+-            let mid = if px > 0.0 {
+-                px
+-            } else {
+-                e.closes.last().copied().unwrap_or(0.0)
+-            };
+-            votes.push(Vote {
+-                coin: e.coin.clone(),
+-                dir: e.cs.dir,
+-                score: e.cs.score,
+-                voters,
+-                weights: self.ensemble.cfg.weights.clone(),
+-                explore: self.explore_set(),
+-                atr_pct: e.atr_pct,
+-                mid,
+-            });
+-        }
+-
+-        // KEŞİF KUYRUĞU (round-robin, döngüde en fazla BİR keşifçi):
+-        // sıradaki keşifçi sinyaller içinde `signaled` ise min_conviction
+-        // bypass + $10 taban kazanır. Kuyruk = veri açlığı (`n < full_n`).
+-        self.advance_explore_cursor(&signaled);
+-
+-        let pair_corr = |c1: &str, c2: &str| -> f64 {
+-            match (closes_map.get(c1), closes_map.get(c2)) {
+-                (Some(a), Some(b)) => {
+-                    let n = a.len().min(b.len());
+-                    if n < 30 {
+-                        return 0.0;
+-                    }
+-                    let (a, b) = (&a[a.len() - n..], &b[b.len() - n..]);
+-                    let (ma, mb) = (
+-                        a.iter().sum::<f64>() / n as f64,
+-                        b.iter().sum::<f64>() / n as f64,
+-                    );
+-                    let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+-                    for i in 0..n {
+-                        let da = a[i] - ma;
+-                        let db = b[i] - mb;
+-                        sab += da * db;
+-                        saa += da * da;
+-                        sbb += db * db;
+-                    }
+-                    if saa > 0.0 && sbb > 0.0 {
+-                        sab / (saa.sqrt() * sbb.sqrt())
+-                    } else {
+-                        0.0
+-                    }
+-                }
+-                _ => 0.0,
+-            }
+-        };
+-
+-        // sistem raporu: strateji durumları (ACTIVE/AUXILIARY/DATA-MISSING).
+-        // Sessiz ölü strateji yasağı: hangi strateji neden skor ÜRETEMİYOR?
+-        if self.n_cycles % 12 == 1 {
+-            tracing::info!(
+-                "[STRAT] durum raporu (döngü {})
+-{}",
+-                self.n_cycles,
+-                self.strategy_status_lines()
+-            );
+-        }
+-        let budget = self.budget_usd();
+-
+-        // DİNAMİK pozisyon sayısı: sabit top_n yerine bakiyeye göre —
+-        // her pozisyona en az `equity_per_position` ($15) düşmeli, yoksa zorunlu
+-        // $10 min notional altına düşüp hiç emir üretilemez.
+-        let cap_positions = self.risk.max_positions(self.equity, self.loop_cfg.top_n);
+-        let n_votes = votes.len();
+-        let mut selected: Vec<Candidate> = self.am.allocate(votes, &pair_corr, budget);
+-        if selected.len() > cap_positions {
+-            tracing::info!(
+-                "pozisyon sayısı {}→{} (equity ${:.0}, en az ${:.0}/pozisyon)",
+-                selected.len(),
+-                cap_positions,
+-                self.equity,
+-                self.risk.cfg.equity_per_position_usd
+-            );
+-            selected.truncate(cap_positions);
+-        }
+-        let sel_names: std::collections::HashSet<String> =
+-            selected.iter().map(|c| c.coin.clone()).collect();
+-        // AÇIK POZİSYON TAVANI: `cap_positions` BU DÖNGÜDE seçilen adayları
+-        // VE açık pozisyonları birlikte sınırlar; açık pozisyonlar sayılmazsa
+-        // bot her turda yeni adaylar açar ve liste sınırsız büyür.
+-        let mut open_now = self
+-            .executor
+-            .positions()
+-            .values()
+-            .filter(|p| p.szi.abs() > 1e-12)
+-            .count();
+-        tracing::info!(
+-            "[SEL] budget=${:.0} oy={} nötr={} oysuz={} defter yok={} selected={} ({}), keşif payı izleniyor",
+-                budget,
+-                n_votes,
+-                n_skip_neutral,
+-                n_skip_novoter,
+-                n_skip_nobook,
+-                selected.len(),
+-            selected.iter().map(|c| format!("{}:${:.0}(sh={:.1}%)", c.coin, c.allocated_usd, c.explorer_share * 100.0)).collect::<Vec<_>>().join(", ")
+-        );
+-
+-        // ===== FAZ 3 — YÜRÜTME (iki aşama) =====
+-        let mut places: Vec<WireOrder> = Vec::new();
+-        let mut cancels: Vec<(u32, i64)> = Vec::new();
+-
+-        // 3a) makine kararları (tek kısa ödünç alma aralığı)
+-        // CYCLE-BAŞI ANLIK DURUM: hangi makineler bu cycle BAŞLAMADAN ÖNCE
+-        // Pending/ReconPending idi. Aynı cycle'da evals'in yeni ürettiği
+-        // kararla (Flat→Pending{oid:0}) karışmaması için AYRI TUTULUR —
+-        // aksi halde ilk giriş kendi kararıyla kapıya takılır (ölü kilit).
+-        let pre_pending: std::collections::HashSet<String> = self
+-            .machines
+-            .iter()
+-            .filter(|(_, m)| m.is_recon_pending() || m.oid_zero_pending())
+-            .map(|(c, _)| c.clone())
+-            .collect();
+-        // ÖNCÜ temizlik: öncesinden beri oid=0 bekleyen ve ASLA batch'e
+-        // girmemiş makine — kanıtsız kalıntıdır; cycle penceresi (2×cycle)
+-        // aşılırsa geri Flat'a döner (bounded, sessiz kilit YOK).
+-        let oid0_grace_ms = self.loop_cfg.cycle_secs.max(1) * 2 * 1000;
+-        let now0 = hyperliquid_api::now_ms();
+-        for (cn, m) in self.machines.iter_mut() {
+-            if let PosState::Pending { oid: 0, ts, .. } = m.state.clone() {
+-                let süresi = now0.saturating_sub(ts);
+-                if süresi > oid0_grace_ms {
+-                    m.state = PosState::Flat;
+-                    tracing::warn!(
+-                        "[RECON] {cn} oid=0 bekleyen sıfırlandı (batch'e hiç girmedi, {} sn) — Flat",
+-                        süresi / 1000
+-                    );
+-                }
+-            }
+-        }
+-
+-        let mut acts: Vec<(usize, Action, u32, u32)> = Vec::new();
+-        for (idx, e) in evals.iter().enumerate() {
+-            if let Some((asset, szd)) = self.executor.cached_asset(&e.coin) {
+-                // Makine kararı da defter zorunluydu → defter yoksa HİÇ giriş
+-                // olmuyordu (dry-run'da 0 emir). Kapanış fiyatına düş.
+-                let last_c = e.closes.last().copied().unwrap_or(0.0);
+-                let (px_b, px_a) = if e.bid > 1e-6 && e.ask > 1e-6 {
+-                    (e.bid, e.ask)
+-                } else if last_c > 0.0 {
+-                    (last_c, last_c)
+-                } else {
+-                    (0.0, 0.0)
+-                };
+-                let now_ms = hyperliquid_api::now_ms();
+-                let mut act = if px_b > 0.0 && px_a > 0.0 {
+-                    self.machines
+-                        .get_mut(&e.coin)
+-                        .map(|m| m.on_decision(Decision { score: e.cs.score }, px_b, px_a, now_ms))
+-                        .unwrap_or(Action::Nothing)
+-                } else {
+-                    Action::Nothing
+-                };
+-                // ── B + C — ÇIKIŞ KANALLARI (yalnız AÇIK pozisyonda emir) ──
+-                let open = self
+-                    .machines
+-                    .get(&e.coin)
+-                    .map(|m| !matches!(m.state, PosState::Flat))
+-                    .unwrap_or(false);
+-                if open && matches!(act, Action::Nothing) {
+-                    let position = self.machines.get(&e.coin).and_then(|m| {
+-                        m.in_position()
+-                            .map(|(s, _, sz)| strategy::ExitPositionInfo {
+-                                is_long: s == SmSide::Long,
+-                                size: sz,
+-                                entry_px: self
+-                                    .executor
+-                                    .positions()
+-                                    .get(&e.coin)
+-                                    .map(|p| p.entry_px)
+-                                    .unwrap_or(0.0),
+-                            })
+-                    });
+-                    let ctx = strategy::ExitCtx {
+-                        coin: e.coin.clone(),
+-                        candles: e.candles_tail.clone(),
+-                        universe_returns: universe_returns.clone(),
+-                        position,
+-                    };
+-                    // Motor KURAL BİLMEZ: çıkış kuralları stratejilerin
+-                    // `exit_intent` API'sinde (durum dahil); motor yalnız
+-                    // pozisyon state'ini verir ve niyeti YÖNLENDİRİR.
+-                    let mut rule_note: Option<String> = None;
+-                    for s in &self.strategies {
+-                        if let Some(intent) = s.exit_intent(&ctx) {
+-                            rule_note = Some(intent.note);
+-                            break;
+-                        }
+-                    }
+-                    let sig_exit = e.cs.exit_requested;
+-                    if rule_note.is_some() || sig_exit {
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            act = m.force_exit(px_b, px_a);
+-                        }
+-                        if matches!(act, Action::ExitNow(_)) {
+-                            tracing::info!(
+-                                "[EXIT] {} çıkış kanalı: {} (contributor={:?})",
+-                                e.coin,
+-                                rule_note.unwrap_or_else(|| "Signal::Exit".into()),
+-                                e.cs.exit_contributors
+-                            );
+-                        }
+-                    }
+-                }
+-                acts.push((idx, act, asset, szd));
+-            } else {
+-                summaries.push((e.coin.clone(), "SKIP: asset çözülemedi".into()));
+-            }
+-        }
+-
+-        // risk kapısı ön güncelleme (korelasyon çöküşü + likidite denetimi)
+-        let mut pmap: HashMap<String, crate::executor::Position> = HashMap::new();
+-        for (c, m) in self.machines.iter() {
+-            if let Some((_s, en, size)) = m.in_position() {
+-                pmap.insert(
+-                    c.clone(),
+-                    crate::executor::Position {
+-                        position_value: (size * en).abs(),
+-                        ..Default::default()
+-                    },
+-                );
+-            }
+-        }
+-        // ── DÖNGÜ PROJEKSİYONU (borsa state'inden AÇIK AYRI) ──────────
+-        // pmap = döngü başındaki mevcut pozisyon anlık görüntüsü; cycle
+-        // içinde KABUL EDİLEN girişler borsaya düşmeden önce buraya
+-        // eklenir → sonraki entry risk kontrolü önceki bu-cycle girişleri
+-        // de görür (tek cycle'da toplam notional tavanı AŞILAMAZ).
+-        // Kabul edilmeyen aday projeksiyona girmemli; Exit emirleri
+-        // maruziyet EKLEMEZ.
+-        let mut projection = CycleProjection::seeded(&pmap);
+-        self.risk.update_equity(self.equity);
+-        // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
+-        // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
+-        if let Err(e) = self.risk.save_state(&self.risk_state_path) {
+-            tracing::error!("risk hafızası yazılamadı ({}): {e}", self.risk_state_path);
+-        }
+-
+-        // oracle/mark referansı: emir fiyatı oracle bandının dışına kaçmasın
+-        let mark_map: HashMap<String, f64> = self
+-            .ctx
+-            .all()
+-            .map(|c| (c.coin.clone(), c.mark_px))
+-            .collect();
+-        // 3b) izin → tahsis/dağıtma → yürütme (makine borçlanması kısa kısa)
+-        for (idx, act, asset, szd) in acts {
+-            let e = &evals[idx];
+-            match act {
+-                Action::Place(_o) => {
+-                    // ── DUPLICATE YASAĞI: reconciliation bekleyen (UNKNOWN) emir varsa
+-                    // aynı coine ikinci GERÇEK entry YOLLANMAZ — cloid tek kimlik;
+-                    // farklı fiyattan yeni cloid üretimi çift maruziyet doğururdu.
+-                    //
+-                    // ÖLÜ-KİLİT FİKSİ: kapı yalnız CYCLE-BAŞI bekleyenlere uygulanır
+-                    // (`pre_pending` anlık görüntüsü). Aynı cycle'da evals'in yeni
+-                    // ürettiği karar (Flat→Pending{oid:0}) İLK GİRİŞTİR — engelli
+-                    // değildir; engellenseydi batch ASLA gönderilmez, makine
+-                    // oid=0'da sonsuz beklerdi (canlı kanıt: 51 coin kilit).
+-                    if place_arm_gate(pre_pending.contains(&e.coin), self.machines.get(&e.coin)) {
+-                        tracing::info!(
+-                            "{}: cycle-başı bekleyen emir var — bu cycle'da ikinci entry atlandı",
+-                            e.coin
+-                        );
+-                        continue;
+-                    }
+-                    // EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
+-                    // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
+-                    if !self.entries_allowed() {
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // GERÇEK değerler: 0.0 notional + 1.0 kaldıraç geçiliyordu →
+-                    // pozisyon/toplam maruziyet limitleri hiç uygulanmıyordu.
+-                    if !sel_names.contains(&e.coin) {
+-                        // tahsise giremedi (korelasyon/conviction) — revert
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!("{}: tahsis dışı — bekletildi", e.coin);
+-                        continue;
+-                    }
+-                    // AYNI COİNE TEKRAR GİRİŞ (piramitleme) YOK: pozisyon
+-                    // zaten varsa yeni emir üretilmez.
+-                    // `pmap` state machine'lerden kuruluyor ve yalnız `position_value`
+-                    // taşıyor — `szi` `Default` = 0.0. Burada `szi`'ye
+-                    // bakmak "zaten tutmuyorum" kontrolünü DAİMA false
+-                    // yapıyordu — açık pozisyonda ikinci girişe
+-                    // ters yönde giriş yapıldı, pozisyon ikiye katlandı).
+-                    // Doğru kaynak: borsadan gelen `executor.positions`.
+-                    // ── FEE-FARKINDALIKLI EV KAPISI ──────────────────
+-                    // Tahsisten SONRA ama yürütmeden ÖNCE: `1.5×ATR < maliyet
+-                    // tabanı` → SKIP. Clamp DEĞİL — clamp stop'u daraltıp
+-                    // EV'yi daha da bozardı.
+-                    //
+-                    // Sayılarla: round-trip ≈ 19 bps. 1.5×ATR = %0.25 (alt
+-                    // sınır) → R ≈ 1.3, 2:1 TP'de başabaş WR ≈ %59 → **yapısal
+-                    // negatif EV**. Taban = max(75 bps, 3×round_trip) = %0.75.
+-                    {
+-                        let spread_bps = {
+-                            // ask−bid / mid, ondalık → bps
+-                            let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                                (e.ask + e.bid) / 2.0
+-                            } else {
+-                                0.0
+-                            };
+-                            if mid2 > 0.0 {
+-                                (e.ask - e.bid).abs() / mid2 * 10_000.0
+-                            } else {
+-                                0.0
+-                            }
+-                        };
+-                        let (ok, risk_bps, floor_bps) =
+-                            self.am
+-                                .cfg
+-                                .cost
+-                                .ev_ok(e.atr_pct, self.am.cfg.sl_atr_mult, spread_bps);
+-                        if !ok {
+-                            tracing::info!(
+-                                "[EV] {} ATR {:.0}bps → risk {:.0}bps < maliyet flooru {:.0}bps → SKIP \
+-                                 (round-trip {:.0}bps; işlem sayısının düşmesi BEKLENEN davranış)",
+-                                e.coin,
+-                                e.atr_pct * 10_000.0,
+-                                risk_bps,
+-                                floor_bps,
+-                                self.am.cfg.cost.round_trip_cost_bps(spread_bps)
+-                            );
+-                            if let Some(m) = self.machines.get_mut(&e.coin) {
+-                                if m.oid_zero_pending() {
+-                                    m.state = PosState::Flat;
+-                                }
+-                            }
+-                            continue;
+-                        }
+-                    }
+-                    let already_held = self
+-                        .executor
+-                        .positions()
+-                        .get(&e.coin)
+-                        .map(|p| p.szi.abs() > 1e-12)
+-                        .unwrap_or(false);
+-                    // TAVAN DOLUYSA yeni giriş yapılmaz (çıkışlar serbest).
+-                    if already_held || open_now >= cap_positions {
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!(
+-                            "{}: yeni giriş elendi ({} pozisyon/tavan {})",
+-                            e.coin,
+-                            open_now,
+-                            cap_positions
+-                        );
+-                        continue;
+-                    }
+-                    let cand_opt = selected.iter().find(|c| c.coin == e.coin);
+-                    let notional = cand_opt.map(|c| c.allocated_usd).unwrap_or(0.0);
+-                    let lev = pmap
+-                        .get(&e.coin)
+-                        .map(|p| p.leverage)
+-                        .unwrap_or(self.leverage)
+-                        .max(self.leverage);
+-                    // risk kontrolü: mevcut + bu-cycle kabul edilmiş maruziyet
+-                    if let Err(risk_err) =
+-                        projection.check_and_commit(&self.risk, self.equity, &e.coin, notional, lev)
+-                    {
+-                        tracing::warn!("{}: RİSK KAPISI reddi: {risk_err}", e.coin);
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!("{}: risk kapısı reddi — {risk_err}", e.coin);
+-                        continue;
+-                    }
+-                    let cand = selected.iter().find(|c| c.coin == e.coin).unwrap();
+-                    let book_px = if cand.dir == Dir::Long { e.ask } else { e.bid };
+-                    let entry_px = if book_px > 1e-6 {
+-                        book_px
+-                    } else {
+-                        e.closes.last().copied().unwrap_or(0.0)
+-                    };
+-                    // ATR=0 / bozuk SL koruması (min %0.25 mesafe)
+-                    let min_dist = entry_px * 0.0025;
+-                    let (sl_ok, tp_ok) = if cand.dir == Dir::Long {
+-                        (entry_px - cand.sl_px, cand.tp_px - entry_px)
+-                    } else {
+-                        (cand.sl_px - entry_px, entry_px - cand.tp_px)
+-                    };
+-                    // KONTRAT KAPISI: negatif SL/TP fiyatı (ATR girişin
+-                    // katları) borsada "invalid price" olur → korumasız pozisyon.
+-                    if !entry_contract_ok(
+-                        matches!(cand.dir, Dir::Long),
+-                        entry_px,
+-                        cand.sl_px,
+-                        cand.tp_px,
+-                    ) || sl_ok < min_dist
+-                        || tp_ok < min_dist
+-                    {
+-                        tracing::warn!(
+-                            "{}: SL/TP kontrat/mesafe koruması (ATR âm) — emir atlandı",
+-                            e.coin
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // GHOST ORDER + MIN NOTIONAL kapısı: `round_sz_up`'a GİRMEDEN ele.
+-                    // ($8 tahsis → lot 0.0000 → borsada 0-lot emir = hayalet emir)
+-                    if cand.allocated_usd < crate::allocation_manager::MIN_NOTIONAL_USD {
+-                        tracing::info!(
+-                            "{}: tahsis çok küçük (${:.2} < ${:.0}) — atlandı",
+-                            e.coin,
+-                            cand.allocated_usd,
+-                            crate::allocation_manager::MIN_NOTIONAL_USD
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    let sz = hyperliquid_api::round_sz_up(cand.allocated_usd / entry_px, szd);
+-                    if sz <= 0.0 || !sz.is_finite() {
+-                        tracing::info!(
+-                            "{}: lot yuvarlaması 0 (${:.2}/@${:.2}) — hayalet emir koruması, atlandı",
+-                            e.coin, cand.allocated_usd, entry_px
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    let side_sm = if cand.dir == Dir::Long {
+-                        SmSide::Long
+-                    } else {
+-                        SmSide::Short
+-                    };
+-                    // KALDIRAÇ tembel: gerçek emirden hemen önce, bir kez.
+-                    // (Açılışta 178 istek atmak hız sınırını patlatıyordu.)
+-                    let lev = self.leverage as u32;
+-                    let coin_lv = e.coin.clone();
+-                    if let Err(err) = self.executor.ensure_leverage(&coin_lv, lev).await {
+-                        tracing::warn!("{coin_lv}: kaldıraç ayarlanamadı ({err})");
+-                    }
+-                    let mut attr = EntryAttr {
+-                        coin: e.coin.clone(),
+-                        ts: hyperliquid_api::now_ms(),
+-                        voters: selected
+-                            .iter()
+-                            .find(|c| c.coin == e.coin)
+-                            .map(|c| c.voters.clone())
+-                            .unwrap_or_default(),
+-                        side: side_sm,
+-                        entry_px,
+-                        risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
+-                        size: sz,
+-                        // Analytical TP, tahsis anında karar fiyatından türetilir
+-                        tp_px: None,
+-                        exit_reason: None,
+-                    };
+-                    // TP formülü ÜRETİMDE de aynı fonksiyondan gelir.
+-                    // Buradaki değer PLAN (henüz dolum yok); `apply_real_fill`
+-                    // gelince gerçek dolumla YENİDEN türetilir.
+-                    if let Some(tp) = attr.set_analytical_tp(&self.am.cfg) {
+-                        tracing::info!(
+-                            "[TP] {} analytical hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
+-                            e.coin,
+-                            entry_px,
+-                            attr.risk_px,
+-                            tp
+-                        );
+-                    }
+-                    // EMİR FİYATI: ALO(post-only) KALDIRILDI. Long'da ask'a,
+-                    // short'ta bid'e post-only yazmak spread'i kestiği için
+-                    // borsa reddediyordu ("Post only order would have
+-                    // immediately matched", status=badAloPxRejected) → 11
+-                    // emrin 4'ü hiç girmiyordu. Şimdi IOC + %0.2 kayma kapağı.
+-                    // Testnet defteri çok ince: ask/bid tabanlı dar kapağa hiç erişilemiyor
+-                    // ("could not immediately match against any resting orders").
+-                    // TEK MALİYET MODELİ: band `CostModel::execution_band_bps`
+-                    // (EV kapısıyla AYNI fee+slippage+spread). Ad-hoc ±%0.5/±%0.2
+-                    // ikinci maliyet modeli KALDIRILDI; operasyonel taban
+-                    // (EXECUTION_BAND_FLOOR_BPS=50 bps) ince testnet defterinde
+-                    // dolum kaçışını önler (ince defterde agresif fiyat).
+-                    let spread_bps_band = {
+-                        let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                            (e.ask + e.bid) / 2.0
+-                        } else {
+-                            0.0
+-                        };
+-                        if mid2 > 0.0 {
+-                            (e.ask - e.bid).abs() / mid2 * 10_000.0
+-                        } else {
+-                            0.0
+-                        }
+-                    };
+-                    let band = self.am.cfg.cost.execution_band_bps(spread_bps_band);
+-                    let ord_px = match mark_map.get(&e.coin) {
+-                        Some(mk) if *mk > 0.0 => {
+-                            let f = band / 10_000.0;
+-                            if side_sm.is_buy() {
+-                                *mk * (1.0 + f)
+-                            } else {
+-                                *mk * (1.0 - f)
+-                            }
+-                        }
+-                        _ => {
+-                            let f = band / 10_000.0;
+-                            let raw = if side_sm.is_buy() {
+-                                entry_px * (1.0 + f)
+-                            } else {
+-                                entry_px * (1.0 - f)
+-                            };
+-                            raw.clamp(entry_px * 0.97, entry_px * 1.03)
+-                        }
+-                    };
+-                    // Fiyat kapısı: kitap/closure olmayan yeni listelenmiş
+-                    // coinlerde entry_px=0 çıkıyor ve borsa "Order has invalid
+-                    // price." diyordu. Sıfır/NaN fiyatla emir ATILMAZ.
+-                    if ord_px <= 1e-9 || !ord_px.is_finite() {
+-                        tracing::warn!("{}: fiyat geçersiz ({:.8}) — emir atlandı", e.coin, ord_px);
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // CLOID: `signing::post` 5xx'te isteği yeniden
+-                    // yollar. İstek borsada işlendi ama yanıt kaybolduysa
+-                    // aynı emir İKİNCİ kez yollanır ve pozisyon ikiye
+-                    // katlanırdı. Deterministik anahtar aynı emri retry'de
+-                    // aynı kılar → borsa ikinciyi "duplicate" diye reddeder.
+-                    // `salt = n_cycles<<16 | batch_index`: aynı döngüde aynı coin+px+sz
+-                    // iki kez geçerse cloid çakışmasın.
+-                    let cloid = crate::executor::make_cloid(
+-                        &e.coin,
+-                        ord_px,
+-                        sz,
+-                        (self.n_cycles << 16) | (places.len() as u64 & 0xffff),
+-                    );
+-                    places.push(WireOrder {
+-                        asset,
+-                        is_buy: side_sm.is_buy(),
+-                        sz,
+-                        px: ord_px,
+-                        tif: Tif::Ioc,
+-                        reduce_only: false,
+-                        cloid: Some(cloid),
+-                    });
+-                    open_now += 1; // tavan sayacı bu tur için artsın
+-                                   // BORSA STOP HEDEFİ: dolum anında `apply_fill` bunu
+-                                   // kullanarak gecikmesiz reduce-only trigger SL kurar.
+-                                   //
+-                                   // ⚠️ MUTLAK FİYAT DEĞİL, **RİSK MESAFESİ** yazılır.
+-                                   // IOC kayması dolumu karar-anındaki defter fiyatından %0.9 gibi
+-                                   // oranlarda kötüleştirebilir; mesafe yolu bundan bağımsızdır
+-                                   // getirdi → kısa pozisyonun stop'u dolumun **altında**
+-                                   // kaldı → 1.1 saniyede tetiklendi (−$0.21). Mesafe
+-                                   // taşınınca stop `dolum_px ± mesafe` olur ve kayma stop'u
+-                                   // yan tarafa taşıyamaz.
+-                    if attr.risk_px > 0.0 {
+-                        let now_ms = hyperliquid_api::now_ms();
+-                        self.executor
+-                            .pending_sl
+-                            .insert(e.coin.clone(), (attr.risk_px, now_ms));
+-                        // GERÇEK TP: mesafe `tp_from_entry` (tek formül)
+-                        // ile karar fiyatından; mesafe girişten bağımsız
+-                        // olduğu için dolum anına taşınır. Dolum gelince
+-                        // TP = dolum ± mesafe reduce-only asılır.
+-                        if let Some(tp) = attr.tp_px {
+-                            let dist = if attr.side.is_buy() {
+-                                tp - entry_px
+-                            } else {
+-                                entry_px - tp
+-                            };
+-                            if dist > 0.0 && dist.is_finite() {
+-                                self.executor
+-                                    .pending_tp
+-                                    .insert(e.coin.clone(), (dist, now_ms));
+-                            }
+-                        }
+-                    }
+-                    self.entry_attr.insert(e.coin.clone(), attr);
+-                }
+-                Action::ExitNow(o) => {
+-                    // ÇIKIŞ SEBEBİ: SignalExit olarak işaretle (entry_attr'a yazılacak)
+-                    if let Some(attr) = self.entry_attr.get_mut(&e.coin) {
+-                        attr.exit_reason = Some(ExitReason::SignalExit);
+-                    }
+-                    // HAYALET EMİR KORUMASI (çıkış yolu da): makine boyutu
+-                    // bilmiyorsa pozisyonun kendisinden al; 0 kalırsa emir
+-                    // GÖNDERİLMEZ (borsada reduce-only 0-lot = kapatılmayan
+-                    // ya da tümünü kapatan belirsiz emir).
+-                    let exit_sz = if o.sz > 0.0 {
+-                        o.sz
+-                    } else {
+-                        // makine -> borsa sırasıyla dene
+-                        self.machines
+-                            .get(&e.coin)
+-                            .and_then(|m| m.in_position())
+-                            .map(|(_, _, sz)| sz)
+-                            .filter(|x| *x > 0.0)
+-                            .or_else(|| {
+-                                self.executor
+-                                    .positions()
+-                                    .get(&e.coin)
+-                                    .map(|p| p.szi.abs())
+-                                    .filter(|x| *x > 0.0)
+-                            })
+-                            .unwrap_or(0.0)
+-                    };
+-                    let xsz = hyperliquid_api::round_sz_up(exit_sz, szd);
+-                    if xsz <= 0.0 || !xsz.is_finite() {
+-                        tracing::warn!(
+-                            "{}: çıkış boyutu 0 (pozisyon yok?) — kapatma emri atlandı",
+-                            e.coin
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            m.state = PosState::Flat;
+-                        }
+-                        continue;
+-                    }
+-                    // çıkış bandı da TEK modelden (IOC exit IOC ile aynı
+-                    // maliyet gerçekliği)
+-                    let xband = self.am.cfg.cost.execution_band_bps(0.0) / 10_000.0;
+-                    let xpx = o.px
+-                        * if o.side.is_buy() {
+-                            1.0 + xband
+-                        } else {
+-                            1.0 - xband
+-                        };
+-                    if xpx <= 1e-9 || !xpx.is_finite() {
+-                        tracing::warn!("{}: çıkış fiyatı geçersiz — atlandı", e.coin);
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            m.state = PosState::Flat;
+-                        }
+-                        continue;
+-                    }
+-                    places.push(WireOrder {
+-                        asset,
+-                        is_buy: o.side.is_buy(),
+-                        sz: xsz,
+-                        px: xpx,
+-                        tif: Tif::Ioc,
+-                        reduce_only: true,
+-                        cloid: Some(crate::executor::make_cloid(
+-                            &e.coin,
+-                            xpx,
+-                            xsz,
+-                            (self.n_cycles << 16) | 0x7000 | (places.len() as u64 & 0x0fff),
+-                        )),
+-                    });
+-                }
+-                Action::Cancel(oid) => {
+-                    cancels.push((asset, oid));
+-                }
+-                _ => {}
+-            }
+-        }
+-
+-        // ===== FAZ 4 — TEK ÇAĞRI YÜRÜT =====
+-        if !places.is_empty() || !cancels.is_empty() {
+-            let res = self.executor.batch_execute(&places, &cancels).await?;
+-            // Exchange UNKNOWN (5xx/timeout) -> GERÇEK reconciliation.
+-            // Kontrol `error` string'i üzerinden DEĞİL, `BatchOut::unknown`
+-            // bayrağı üzerinden yapılır (string parsing ile kontrol yok).
+-            // Eşleşme `coin`e değil `cloid`e yapılır: aynı coin için birden
+-            // fazla giriş emri olabilir, coin tek başına yanlış emri bağlar.
+-            for r in res.iter().filter(|r| r.unknown) {
+-                let Some(cloid) = r.cloid.clone() else {
+-                    // cloid'siz emir UNKNOWN sonrası eşleştirilemez. Loglanır,
+-                    // machine'e dokunulmaz (pozisyon zaten borsada olabilir).
+-                    tracing::error!("[RECON] UNKNOWN emir cloid taşımıyor — eşleştirme yapılamadı");
+-                    continue;
+-                };
+-                let coin = r.coin.clone().unwrap_or_default();
+-                self.reconcile_unknown_cloid(&cloid, &coin).await?;
+-            }
+-        }
+-        // BORSA STOP SENKRONU: her döngü sonunda (açılışta devralınan
+-        // pozisyonlar dahil) her açık pozisyonun borsada SL'si var mı?
+-        self.sync_exchange_sl().await;
+-        Ok(summaries)
++        Ok(vec![(String::new(), String::new())]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// UNKNOWN sonrası GERÇEK reconciliation.
+     ///
+     /// 1. `refresh_open_orders_all` — TÜM dinlenen emirler (giriş dahil)
+     /// 2. aynı coin **VE aynı cloid**
+     /// 3. varsa `link_pending_oid(oid)`
+     /// 4. yoksa machine pending → Flat

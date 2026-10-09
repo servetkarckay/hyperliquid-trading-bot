@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace += with *= in Health::on_error
+@@ -1503,17 +1503,17 @@
+     pub fn on_error(&mut self, err: &str) -> bool {
+         match classify(err) {
+             ErrClass::Transient => {
+                 // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
+                 // döngülerde sıfırlanır (aşağıda).
+                 false
+             }
+             ErrClass::Critical => {
+-                self.crit_streak += 1;
++                self.crit_streak *= /* ~ changed by cargo-mutants ~ */ 1;
+                 if self.crit_streak >= self.critical_threshold && self.mode != Mode::Halted {
+                     self.mode = Mode::Halted;
+                     true
+                 } else {
+                     false
+                 }
+             }
+         }

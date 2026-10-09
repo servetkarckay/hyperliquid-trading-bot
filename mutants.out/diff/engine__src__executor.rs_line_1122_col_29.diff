@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace += with -= in Executor::cancel_all
+@@ -1114,17 +1114,17 @@
+             .open_orders
+             .values()
+             .filter(|o| o.coin == coin)
+             .map(|o| o.oid)
+             .collect();
+         let mut n = 0;
+         for oid in oids {
+             match self.cancel(coin, oid).await {
+-                Ok(()) => n += 1,
++                Ok(()) => n -= /* ~ changed by cargo-mutants ~ */ 1,
+                 Err(e) => tracing::warn!(coin, oid, "iptal hatası: {e}"),
+             }
+         }
+         Ok(n)
+     }
+ 
+     /// REST'ten açık emirleri yenile (ws kopması sonrası toparlama).
+     /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.

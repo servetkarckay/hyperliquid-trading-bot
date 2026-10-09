@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace < with > in Executor::place_limit
+@@ -1021,17 +1021,17 @@
+         }
+         if !limit_px.is_finite() || limit_px <= 0.0 {
+             tracing::warn!("[executor] fiyat geçersiz ({limit_px}) — emir iptal: {coin}");
+             return Ok(None);
+         }
+         // borsa minimumu: $10 altı reddedilir, API çağrısı YAPILMAZ
+         if !reduce_only {
+             let notional = sz * limit_px;
+-            if notional < crate::allocation_manager::MIN_NOTIONAL_USD {
++            if notional > /* ~ changed by cargo-mutants ~ */ crate::allocation_manager::MIN_NOTIONAL_USD {
+                 tracing::warn!("[executor] tahsis çok küçük (${notional:.2}) — {coin} atlandı");
+                 return Ok(None);
+             }
+         }
+         let (asset, sz_decimals) = self.asset_of(coin)?;
+         if sz <= 0.0 {
+             bail!("boyut pozitif olmalı");
+         }

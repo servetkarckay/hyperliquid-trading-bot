@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace == with != in PositionStateMachine::on_decision
+@@ -215,17 +215,17 @@
+                     }
+                     return Action::Nothing;
+                 }
+                 Action::Nothing
+             }
+             PosState::InPosition { side, size, .. } => {
+                 // ters taraf güçlü -> kapat
+                 let against = (side == Side::Long && d.score <= -self.cfg.reversal_min_score)
+-                    || (side == Side::Short && d.score >= self.cfg.reversal_min_score);
++                    || (side != /* ~ changed by cargo-mutants ~ */ Side::Short && d.score >= self.cfg.reversal_min_score);
+                 if against {
+                     self.state = PosState::PendingExit { oid: 0, side };
+                     Action::ExitNow(BotOrder {
+                         // GERÇEK pozisyon boyutu — `sz: 0.0` placeholder borsaya
+                         // 0-lot (hayalet) emir gönderiyordu.
+                         coin: self.coin.clone(),
+                         side: side.flip(),
+                         sz: size,

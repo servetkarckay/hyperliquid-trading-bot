@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with / in Engine::ingest_oe
+@@ -1148,17 +1148,17 @@
+                 if stt == "filled" && filled > 0.0 {
+                     // F: oid eşleşmesi — bu dolum bizim TP/SL trigger'dan mı?
+                     let is_tp = self.executor.tp_orders.get(&coin) == Some(&oid);
+                     let is_sl = self.executor.sl_orders.get(&coin) == Some(&oid);
+                     evs.push((
+                         oid,
+                         coin,
+                         filled,
+-                        (orig - filled).max(0.0),
++                        (orig / /* ~ changed by cargo-mutants ~ */ filled).max(0.0),
+                         avg,
+                         false,
+                         is_tp,
+                         is_sl,
+                         0.0,
+                     ));
+                 } else if rejected {
+                     evs.push((oid, coin, 0.0, 0.0, 0.0, true, false, false, 0.0));

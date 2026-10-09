@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in Executor::sync_positions_from
+@@ -438,17 +438,17 @@
+         // borsa pozisyon yok diyor, biz de kabul etmeliyiz.
+         //
+         // Yalnız istisna: **hiç açılmamış** hesapta yerel harita zaten boş
+         // olduğu için `next.is_empty` normaldir — o ayrım zaten `positions`
+         // boş olduğu için kendiliğinden geçerli.
+         let gone: Vec<String> = self
+             .positions
+             .keys()
+-            .filter(|c| !next.contains_key(*c))
++            .filter(|c|  /* ~ changed by cargo-mutants ~ */next.contains_key(*c))
+             .cloned()
+             .collect();
+         self.positions = next;
+         // Pozisyonu borsada kapanmış coin'in stop kaydı da düşmeli: kalsaydı
+         // sonraki döngüde "stop hâlâ emirdir" deyip yeniden kullanırdı.
+         for c in gone.iter() {
+             self.sl_orders.remove(c);
+             self.sl_armed_at.remove(c);

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace match guard *mk > 0.0 with false in Engine::run_cycle
+@@ -3097,17 +3097,17 @@
+                         if mid2 > 0.0 {
+                             (e.ask - e.bid).abs() / mid2 * 10_000.0
+                         } else {
+                             0.0
+                         }
+                     };
+                     let band = self.am.cfg.cost.execution_band_bps(spread_bps_band);
+                     let ord_px = match mark_map.get(&e.coin) {
+-                        Some(mk) if *mk > 0.0 => {
++                        Some(mk) if false /* ~ changed by cargo-mutants ~ */ => {
+                             let f = band / 10_000.0;
+                             if side_sm.is_buy() {
+                                 *mk * (1.0 + f)
+                             } else {
+                                 *mk * (1.0 - f)
+                             }
+                         }
+                         _ => {

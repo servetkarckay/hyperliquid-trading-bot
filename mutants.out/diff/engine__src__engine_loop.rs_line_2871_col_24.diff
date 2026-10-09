@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::run_cycle
+@@ -2863,17 +2863,17 @@
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         continue;
+                     }
+                     // GERÇEK değerler: 0.0 notional + 1.0 kaldıraç geçiliyordu →
+                     // pozisyon/toplam maruziyet limitleri hiç uygulanmıyordu.
+-                    if !sel_names.contains(&e.coin) {
++                    if  /* ~ changed by cargo-mutants ~ */sel_names.contains(&e.coin) {
+                         // tahsise giremedi (korelasyon/conviction) — revert
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         tracing::info!("{}: tahsis dışı — bekletildi", e.coin);
+                         continue;

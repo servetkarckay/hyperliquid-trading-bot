@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::apply_fill
+@@ -1569,17 +1569,17 @@
+         // Açılış fill'lerinde closedPnl zaten 0'dır ve pozisyon açılır —
+         // ayrım `dir` ile yapılır.
+         if !coin.is_empty() && !is_open_fill(dir_field) && !closing_counted.contains(&coin) {
+             *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;
+             closing_counted.insert(coin.clone());
+         }
+         tracing::info!(oid, coin = %coin, sz, px, closed, "fill(user)");
+         if !coin.is_empty() && sz > 0.0 {
+-            let is_buy = f["side"].as_str().unwrap_or("B") == "B";
++            let is_buy = f["side"].as_str().unwrap_or("B") != /* ~ changed by cargo-mutants ~ */ "B";
+             // POZİSYON HARİTASINI GÜNCELLE. `refresh_positions` yalnız açılışta
+             // çağrılıyordu; WS dolumu haritaya yazılmadığı için motorun
+             // gördüğü `positions` açılıştan beri BOŞ kaldı → `open_now` tavanı
+             // hiç tetiklenmiyor, `pz`/PnL/risk hepsi yanlış sayıyordu
+             // (Not: 3 açık pozisyon varken 4. giriş açıldı).
+             if self.cached_asset(&coin).is_some() {
+                 match self.positions.get_mut(&coin) {
+                     Some(e) => {

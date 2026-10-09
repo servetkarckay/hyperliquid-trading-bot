@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace += with *= in Executor::restore_tp_orders
+@@ -899,17 +899,17 @@
+                 continue;
+             }
+             let Some(&want) = tp_px_by_coin.get(&row.coin) else {
+                 continue;
+             };
+             if want > 0.0 && (row.px - want).abs() / want <= 0.001 {
+                 self.tp_orders.insert(row.coin.clone(), row.oid);
+                 self.tp_last_px.insert(row.coin.clone(), want);
+-                n += 1;
++                n *= /* ~ changed by cargo-mutants ~ */ 1;
+                 tracing::info!(
+                     "[TP] {coin} TP oid GERİ YÜKLENDİ (oid={oid} px={px:.6}) — yeni emir atılmadı",
+                     coin = row.coin,
+                     oid = row.oid,
+                     px = row.px
+                 );
+             }
+         }

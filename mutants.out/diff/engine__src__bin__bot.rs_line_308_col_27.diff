@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace && with || in main
+@@ -300,17 +300,17 @@
+         let _ = std::fs::create_dir_all(par);
+     }
+     // Öğrenilen tick hassasiyeti (coin'e özel, meta'da yok) — restart'ta unutulmasın
+     let tick_cache_out = std::env::var("ENGINE_TICK_CACHE")
+         .unwrap_or_else(|_| "/root/hyperliquid/config/tick_cache.json".into());
+     engine.executor.load_px_dec(&tick_cache_out);
+     // keşif şeridi: 0'a düşen stratejiler küçük lotla canlıda sınanır
+     let explore_on = std::env::var("ENGINE_EXPLORE")
+-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("off"))
++        .map(|v| v != "0" || /* ~ changed by cargo-mutants ~ */ !v.eq_ignore_ascii_case("off"))
+         .unwrap_or(true);
+     // ORIGİN KAPISI: backtest çıktısı (`origin != "live"`) **reddedilir**.
+     // Neden: o ağırlıklar look-ahead biased motordan geliyordu . Motor
+     // kaldırıldı; yine de bayat dosya sessizce yüklenirse sistem "eğitilmiş"
+     // görünür ama veri biaslı olur — en kötü durum (görünmez yanlış).
+     // Dosya VARSA doğrulanır; geçersizse **AÇILIŞ BAŞARISIZ** (sessiz
+     // cold-start = öğrenilmiş ağırlıkların sessizce kaybı; 'deki
+     // "universe uyuşmazlığı açılışı durdurur" disipliniyle aynı).

@@ -1,0 +1,27 @@
+--- engine/src/allocation_manager.rs
++++ replace AllocationManager::sl_tp -> (f64, f64) with (1.0, 0.0)
+@@ -202,23 +202,17 @@
+     /// TP **ayrı formülle hesaplanmaz**; `tp_from_entry` çağrılır, yani
+     /// tahsis anındaki `mid` üzerinden **planlanan** (henüz dolum olmamış)
+     /// hedef verilir. Gerçek dolum sonrası TP yeniden türetilir
+     /// (`EntryAttr::set_analytical_tp`). `sl_atr_mult·ATR` risk mesafesi
+     /// verildiği için iki yol **matematiksel olarak aynı** sonucu üretir —
+     /// fark yalnız `entry` kaymasında görünür, ki o zaten ikinci yolda
+     /// düzeltilir.
+     pub fn sl_tp(&self, dir: Dir, mid: f64, atr_usd: f64) -> (f64, f64) {
+-        let risk = self.cfg.sl_atr_mult * atr_usd;
+-        let sl = match dir {
+-            Dir::Long => mid - risk,
+-            Dir::Short => mid + risk,
+-            Dir::Neutral => mid,
+-        };
+-        (sl, self.tp_from_entry(dir, mid, risk))
++        (1.0, 0.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Gerçek TP hedefi: `AllocationConfig::tp_from_entry` (tek formül).
+     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+         self.cfg.tp_from_entry(dir, entry_eff, risk_mesafesi)
+     }
+ 
+     /// TAM KANAT: sırala → korelasyonla ele → tahsis.

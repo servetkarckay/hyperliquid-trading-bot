@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace > with == in AllocationManager::allocate
+@@ -370,17 +370,17 @@
+         // taban matematiksel olarak finansman dışıdır.)
+         // Havuz asla %5'i aşmaz, taban asla havuzu aşamaz.
+         let cap_usd = budget_usd * self.cfg.explore_cap_frac;
+         let max_funded = if cap_usd >= MIN_NOTIONAL_USD {
+             ((cap_usd / MIN_NOTIONAL_USD).floor() as usize).max(1)
+         } else {
+             0
+         };
+-        if n_explore > 0 && max_funded == 0 {
++        if n_explore == /* ~ changed by cargo-mutants ~ */ 0 && max_funded == 0 {
+             tracing::warn!(
+                 "[AL] keşif havuzu ${cap_usd:.2} < ${MIN_NOTIONAL_USD:.0} — bu döngü keşif şeridi KAPALI"
+             );
+         }
+         // Havuz = %5 tavanı (sert üst sınır). Taban ($10/kişi) havuzu
+         // AŞAMAZ: `max_funded` bunu zaten garanti eder, çünkü
+         // max_funded = ⌊havuz/$10⌋ → havuz ≥ max_funded × $10.
+         let explore_budget = cap_usd;

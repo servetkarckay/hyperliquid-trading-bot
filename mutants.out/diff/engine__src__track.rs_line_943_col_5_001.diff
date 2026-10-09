@@ -1,0 +1,45 @@
+--- engine/src/track.rs
++++ replace learn_table -> String with "xyzzy".into()
+@@ -935,41 +935,17 @@
+ /// tanımlı ki `origin` alanı yanlışlıkla taşınmasın.
+ #[deprecated(note = "backtest kaldırıldı; canlı formatı `live_weights_json`")]
+ pub fn weights_json(weights: &HashMap<String, f64>) -> String {
+     live_weights_json(weights, 0)
+ }
+ 
+ /// **[LEARN] tablosu**: strateji | w | n | win% | PF | ΣR.
+ pub fn learn_table(tracker: &StrategyTracker, weights: &HashMap<String, f64>) -> String {
+-    let mut names: Vec<&String> = weights.keys().collect();
+-    names.sort();
+-    let mut lines = Vec::with_capacity(names.len());
+-    for k in names {
+-        let w = weights.get(k).copied().unwrap_or(0.0);
+-        let (n, wr, pf, sr) = tracker.summary(k);
+-        lines.push(format!(
+-            "{:<24} w={:.2} n={:<4} win={:<5} pf={:<5} ΣR={:+.2}",
+-            k,
+-            w,
+-            n,
+-            if n > 0 {
+-                format!("{:.0}%", wr * 100.0)
+-            } else {
+-                "-".into()
+-            },
+-            if n > 0 {
+-                format!("{:.2}", pf)
+-            } else {
+-                "-".into()
+-            },
+-            sr
+-        ));
+-    }
+-    lines.join("\n")
++    "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
+     fn names(n: &[&str]) -> Vec<String> {
+         n.iter().map(|x| x.to_string()).collect()

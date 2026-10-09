@@ -1,0 +1,21 @@
+--- engine/src/epoch.rs
++++ replace < with > in LearningEpoch::load
+@@ -173,17 +173,17 @@
+             )
+         })?;
+         if e.environment != "testnet" {
+             anyhow::bail!(
+                 "öğrenme dönemi dosyası environment=\"{}\" — yalnız \"testnet\" geçerli ({path})",
+                 e.environment
+             );
+         }
+-        if e.completed_trade_count < e.starting_trade_count {
++        if e.completed_trade_count > /* ~ changed by cargo-mutants ~ */ e.starting_trade_count {
+             anyhow::bail!(
+                 "öğrenme dönemi dosyası tutarsız: completed={} < starting={} ({path})",
+                 e.completed_trade_count,
+                 e.starting_trade_count
+             );
+         }
+         Ok(Some(e))
+     }

@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace - with / in Executor::apply_one_order_update
+@@ -1479,17 +1479,17 @@
+             let sz: f64 = ord["origSz"]
+                 .as_str()
+                 .and_then(|s| s.parse().ok())
+                 .unwrap_or(0.0);
+             let filled: f64 = ord["sz"]
+                 .as_str()
+                 .and_then(|s| s.parse().ok())
+                 .unwrap_or(0.0);
+-            let remaining = sz - filled;
++            let remaining = sz / /* ~ changed by cargo-mutants ~ */ filled;
+             let asset_id = self.cached_asset(&coin).map(|(a, _)| a).unwrap_or(0);
+             self.open_orders
+                 .entry(oid)
+                 .and_modify(|e| e.sz = remaining)
+                 .or_insert(OrderInfo {
+                     oid,
+                     coin: coin.clone(),
+                     asset: asset_id,

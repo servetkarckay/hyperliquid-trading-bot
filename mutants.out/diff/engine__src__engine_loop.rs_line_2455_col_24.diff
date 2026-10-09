@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with == in Engine::run_cycle
+@@ -2447,17 +2447,17 @@
+             };
+             let closes200: Vec<f64> = cc.iter().rev().take(200).rev().copied().collect();
+             // Mutlak ATR: trailing stop mesafesi fiyat biriminde gerekiyor
+             // (`atr_pct` yüzde, stop için kullanılamaz).
+             let atr_abs = math::indicators::atr(&h, &l, &cc, 14)
+                 .last()
+                 .and_then(|x| *x)
+                 .unwrap_or(0.0);
+-            if atr_abs > 0.0 {
++            if atr_abs == /* ~ changed by cargo-mutants ~ */ 0.0 {
+                 self.atr_px.insert(coin.clone(), atr_abs);
+             }
+ 
+             evals.push(CycleEval {
+                 coin: coin.clone(),
+                 cs,
+                 bid,
+                 ask,

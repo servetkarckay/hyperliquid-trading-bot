@@ -1,0 +1,23 @@
+--- engine/src/executor.rs
++++ delete match arm (Some(_), _) in Executor::place_limit
+@@ -1058,19 +1058,17 @@
+             is_buy,
+             sz,
+             px: limit_px,
+             tif,
+             reduce_only,
+             ts: now_ms(),
+         };
+         match (statuses.resting_oid(0), statuses.filled(0)) {
+-            (Some(_), _) => {
+-                self.open_orders.insert(info.oid, info.clone());
+-            }
++             /* ~ changed by cargo-mutants ~ */
+             (None, Some((total_sz, avg_px, _))) => {
+                 tracing::info!(coin, total_sz, avg_px, "emir anında doldu");
+                 self.fill_count += 1;
+             }
+             _ => {}
+         }
+         Ok(Some(info))
+     }

@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace > with < in main
+@@ -62,17 +62,17 @@
+             continue;
+         }
+         if let Ok(e) = serde_json::from_str::<TradeExit>(&line) {
+             if epoch_filter.as_ref().map(|f| f == &e.epoch).unwrap_or(true) {
+                 // ŞEMA DENETİMİ: tüm alanlar gerçekten okunur — kuyruk
+                 // alanları bu raporda görünmese bile bozuk/yarım satır
+                 // sessiz yarı-veri olamaz (finite/boşluk-dayanıklılık).
+                 let _schema_check = (
+-                    e.ts > 0,
++                    e.ts < /* ~ changed by cargo-mutants ~ */ 0,
+                     !e.epoch.is_empty(),
+                     !e.git.is_empty(),
+                     !e.coin.is_empty(),
+                     !e.side.is_empty(),
+                     !e.strategies.is_empty(),
+                     e.atr_bps.is_finite(),
+                 );
+                 exits.push(e);

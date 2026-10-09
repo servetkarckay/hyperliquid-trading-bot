@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_smoke.rs
++++ replace && with || in main
+@@ -35,17 +35,17 @@
+     println!("[SMOKE] coin={coin} assetIdx={idx} (testnet)");
+ 
+     // Orta fiyat öğren (borsa mids)
+     let mids = info.all_mids().await?;
+     let mid: f64 = mids
+         .get(&coin)
+         .and_then(|m: &String| m.parse().ok())
+         .ok_or_else(|| anyhow::anyhow!("mid yok"))?;
+-    if !(mid.is_finite() && mid > 0.0) {
++    if !(mid.is_finite() || /* ~ changed by cargo-mutants ~ */ mid > 0.0) {
+         anyhow::bail!("mid geçersiz");
+     }
+     println!("[SMOKE] mid={mid}");
+ 
+     // Executor ile küçük limit (ALO-uyumlu değil; borsada post_only yok — IOC
+     // NO: anında doldu → iptal başarısız; limit alanına GİR: fiyatı 30% DİŞ
+     // bantta koy → kabullenir ama DOLMAZ ✓
+     let limit_px = hyperliquid_api::perp_price(mid * 0.70, 2);

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with + in Engine::run_cycle
+@@ -2139,17 +2139,17 @@
+                         } else {
+                             (t.entry_px - t.peak_px) / risk
+                         };
+  // MAE **negatif** işaretli (aleyhli yön = zarar).
+  // long: dip girişin altında → (worst - entry) < 0
+                         let adv = if t.is_long {
+                             (t.worst_px - t.entry_px) / risk
+                         } else {
+-                            (t.entry_px - t.worst_px) / risk
++                            (t.entry_px + /* ~ changed by cargo-mutants ~ */ t.worst_px) / risk
+                         };
+                         (fav, adv, t)
+                     });
+                     if let Some((fav, adv, t)) = &excursion {
+                         tracing::info!(
+                             "[MFE] {c} {} MFE={:+.2}R MAE={:+.2}R süre={}sn ratchet={} son_mark={:.8}",
+                             if t.is_long { "LONG" } else { "SHORT" },
+                             fav,

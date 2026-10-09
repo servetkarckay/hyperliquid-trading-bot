@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace * with / in AllocationManager::conviction
+@@ -188,17 +188,17 @@
+         // güçlü?"); tahsisin `share`'i TÜM strateji ağırlıklarını
+         // denominator yapar ("sermayenin yüzde kaçı bu yönde?").
+         // İki farklı SORU — kasıtlı katman ayrımı.
+         // ensemble sermayesinin ne kadarı bu yöne oy veriyor (0..1)
+         let share = (w_sum / w_total.max(1e-9)).clamp(0.0, 1.0);
+         // kaç strateji katılıyor: tek güçlü oy = 1.0, 6+ oyuncu = 1.5 (tavan)
+         let breadth = (1.0 + 0.1 * (n_voters as f64 - 1.0)).clamp(0.5, 1.5);
+         let strength = 0.6 + 0.4 * score_abs.clamp(0.0, 1.0);
+-        let risk = 1.0 + atr_pct * 20.0; // %5 ATR ≈ 2× marj → yarıma düşer
++        let risk = 1.0 + atr_pct / /* ~ changed by cargo-mutants ~ */ 20.0; // %5 ATR ≈ 2× marj → yarıma düşer
+         (share * breadth * strength / risk).clamp(0.0, 1.0)
+     }
+ 
+     /// SL fiyatı: long → mid−slA·ATR / short → mid+slA·ATR.
+     ///
+     /// TP **ayrı formülle hesaplanmaz**; `tp_from_entry` çağrılır, yani
+     /// tahsis anındaki `mid` üzerinden **planlanan** (henüz dolum olmamış)
+     /// hedef verilir. Gerçek dolum sonrası TP yeniden türetilir

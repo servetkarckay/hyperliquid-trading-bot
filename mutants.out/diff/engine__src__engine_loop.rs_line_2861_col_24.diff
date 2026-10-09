@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::run_cycle
+@@ -2853,17 +2853,17 @@
+                         tracing::info!(
+                             "{}: cycle-başı bekleyen emir var — bu cycle'da ikinci entry atlandı",
+                             e.coin
+                         );
+                         continue;
+                     }
+                     // EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
+                     // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
+-                    if !self.entries_allowed() {
++                    if  /* ~ changed by cargo-mutants ~ */self.entries_allowed() {
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         continue;
+                     }
+                     // GERÇEK değerler: 0.0 notional + 1.0 kaldıraç geçiliyordu →

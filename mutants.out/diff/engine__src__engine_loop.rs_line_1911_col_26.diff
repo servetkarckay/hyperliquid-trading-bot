@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with == in Engine::sync_exchange_sl
+@@ -1903,17 +1903,17 @@
+             match self.executor.fetch_open_order_rows().await {
+                 Ok(rows) => {
+                     let want: HashMap<String, f64> = self
+                         .entry_attr
+                         .iter()
+                         .filter_map(|(c, a)| a.tp_px.filter(|t| *t > 0.0).map(|t| (c.clone(), t)))
+                         .collect();
+                     let n = self.executor.restore_tp_orders(&rows, &want);
+-                    if n > 0 {
++                    if n == /* ~ changed by cargo-mutants ~ */ 0 {
+                         tracing::info!("[TP] {n} TP oid borsadan geri yüklendi");
+                     }
+                 }
+                 Err(e) => tracing::warn!("[TP] openOrders taraması başarısız: {e}"),
+             }
+         }
+         for (coin, szi) in &open_pos_tp {
+             let tp_px = match self.entry_attr.get(coin) {

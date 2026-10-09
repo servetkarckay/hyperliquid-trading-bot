@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace < with <= in LearnPolicy::frozen
+@@ -156,17 +156,17 @@
+             full_n: env_usize("LEARN_FULL_N", DEFAULT_LEARN_FULL_N),
+         }
+     }
+ }
+ 
+ impl LearnPolicy {
+     /// Ağırlık değiştirilebilir mi? (2-3 rastgele işlem ağırlığı öldürmesin)
+     pub fn frozen(&self, n: usize) -> bool {
+-        n < self.min_n
++        n <= /* ~ changed by cargo-mutants ~ */ self.min_n
+     }
+     /// Tam kurallar (win<%35 → 0) devreye girdi mi?
+     pub fn full(&self, n: usize) -> bool {
+         n >= self.full_n
+     }
+ }
+ 
+ fn env_usize(k: &str, d: usize) -> usize {

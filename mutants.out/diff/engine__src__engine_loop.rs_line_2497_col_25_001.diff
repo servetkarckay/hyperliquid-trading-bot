@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace += with *= in Engine::run_cycle
+@@ -2489,17 +2489,17 @@
+                     }
+                 }
+             }
+         }
+         // KRÌZ TESPİTİ: ort. |getiri| >
+         {
+             let mut sgn_acc = 0.0;
+             for e2 in &universe_returns {
+-                sgn_acc += e2.1;
++                sgn_acc *= /* ~ changed by cargo-mutants ~ */ e2.1;
+             }
+             let s = (
+                 sgn_acc / universe_returns.len().max(1) as f64,
+                 universe_returns.len(),
+             );
+             let crisis = universe_returns.iter().map(|e2| e2.1.abs()).sum::<f64>()
+                 / universe_returns.len().max(1) as f64
+                 > 0.05;

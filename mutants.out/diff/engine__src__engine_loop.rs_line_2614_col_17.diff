@@ -1,0 +1,44 @@
+--- engine/src/engine_loop.rs
++++ delete match arm (Some(a), Some(b)) in Engine::run_cycle
+@@ -2606,40 +2606,17 @@
+ 
+         // KEŞİF KUYRUĞU (round-robin, döngüde en fazla BİR keşifçi):
+         // sıradaki keşifçi sinyaller içinde `signaled` ise min_conviction
+         // bypass + $10 taban kazanır. Kuyruk = veri açlığı (`n < full_n`).
+         self.advance_explore_cursor(&signaled);
+ 
+         let pair_corr = |c1: &str, c2: &str| -> f64 {
+             match (closes_map.get(c1), closes_map.get(c2)) {
+-                (Some(a), Some(b)) => {
+-                    let n = a.len().min(b.len());
+-                    if n < 30 {
+-                        return 0.0;
+-                    }
+-                    let (a, b) = (&a[a.len() - n..], &b[b.len() - n..]);
+-                    let (ma, mb) = (
+-                        a.iter().sum::<f64>() / n as f64,
+-                        b.iter().sum::<f64>() / n as f64,
+-                    );
+-                    let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+-                    for i in 0..n {
+-                        let da = a[i] - ma;
+-                        let db = b[i] - mb;
+-                        sab += da * db;
+-                        saa += da * da;
+-                        sbb += db * db;
+-                    }
+-                    if saa > 0.0 && sbb > 0.0 {
+-                        sab / (saa.sqrt() * sbb.sqrt())
+-                    } else {
+-                        0.0
+-                    }
+-                }
++                 /* ~ changed by cargo-mutants ~ */
+                 _ => 0.0,
+             }
+         };
+ 
+         // sistem raporu: strateji durumları (ACTIVE/AUXILIARY/DATA-MISSING).
+         // Sessiz ölü strateji yasağı: hangi strateji neden skor ÜRETEMİYOR?
+         if self.n_cycles % 12 == 1 {
+             tracing::info!(

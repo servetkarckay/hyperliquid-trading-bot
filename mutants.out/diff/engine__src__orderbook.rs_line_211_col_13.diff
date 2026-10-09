@@ -1,0 +1,17 @@
+--- engine/src/orderbook.rs
++++ delete match arm (Some(b), Some(a)) in LocalBook::is_sane
+@@ -203,13 +203,13 @@
+                 let bid_sorted = self.bids.windows(2).all(|w| w[0].px > w[1].px);
+                 let ask_sorted = self.asks.windows(2).all(|w| w[0].px < w[1].px);
+                 if bid_sorted && ask_sorted {
+                     Ok(())
+                 } else {
+                     bail!("book siralamasi bozuk")
+                 }
+             }
+-            (Some(b), Some(a)) => bail!("crossed book: bid {b:?} >= ask {a:?}"),
++             /* ~ changed by cargo-mutants ~ */
+             _ => bail!("book bos"),
+         }
+     }
+ }

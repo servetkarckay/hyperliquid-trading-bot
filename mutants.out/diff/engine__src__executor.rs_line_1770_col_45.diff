@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace || with && in Executor::apply_fill
+@@ -1762,17 +1762,17 @@
+                                 });
+                             } else {
+                                 tracing::warn!(
+                                     "[TP] {coin} TP mesafesi dolumun kâr tarafında değil (dist={dist:.6}) — TP kurulmadı, döngüde yeniden türetilecek"
+                                 );
+                             }
+                         }
+                         tokio::spawn(async move {
+-                            if qty.is_nan() || sl.is_nan() || qty <= 0.0 || sl <= 0.0 {
++                            if qty.is_nan() && /* ~ changed by cargo-mutants ~ */ sl.is_nan() || qty <= 0.0 || sl <= 0.0 {
+                                 return; // hayalet koruması
+                             }
+                             match place_sl_grid(&ex, asset, !is_buy, qty, sl, dec, &c).await {
+                                 Ok(oid) => {
+                                     tracing::info!(
+                                         "[SL] {c} borsa stop kuruldu oid={oid} px={sl} \
+                                          (hane={dec}) sz={qty} dolum={px} risk={risk} \
+                                          ({} taraf, {:+.3}% dolumdan)",

@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace < with == in StrategyTracker::effective_weights
+@@ -554,17 +554,17 @@
+                 .stats
+                 .get(&name)
+                 .map(|x| x.rs.iter().sum())
+                 .unwrap_or(0.0);
+ 
+             // nötr cold-start: kanıt yok → 1.0
+             if pol.frozen(n) {
+                 out.insert(name.clone(), COLD_START_WEIGHT);
+-                if n < pol.full_n {
++                if n == /* ~ changed by cargo-mutants ~ */ pol.full_n {
+                     explorers.insert(name);
+                 }
+                 continue;
+             }
+ 
+             // f* = p − (1−p)/b, b = 1.8 varsayılan pay
+             let f = self
+                 .stats

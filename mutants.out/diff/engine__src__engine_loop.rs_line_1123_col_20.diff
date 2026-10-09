@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace == with != in Engine::ingest_oe
+@@ -1115,17 +1115,17 @@
+     /// WS ingest — EMİR DURUM OLAYLARI (orderUpdates/userEvents):
+     /// dolum → makine; REDD → makine Flat; pozisyon kapanışı → tracker
+     pub fn ingest_oe(&mut self, channel: &str, data: &serde_json::Value) {
+         self.executor.handle_ws_event(channel, data);
+         // (oid, coin, dolan, kalan, ort.fiyat, red mi)
+         // (oid, coin, dolan, kalan, ort.fiyat, red mi, tp fill mi, sl fill mi, closedPnl)
+         type FillEvent = (i64, String, f64, f64, f64, bool, bool, bool, f64);
+         let mut evs: Vec<FillEvent> = Vec::new();
+-        if channel == "orderUpdates" {
++        if channel != /* ~ changed by cargo-mutants ~ */ "orderUpdates" {
+             for o in data.as_array().cloned().unwrap_or_default() {
+                 let oid = o["order"]["oid"].as_i64().unwrap_or(0);
+                 let coin = o["order"]["coin"].as_str().unwrap_or("").to_string();
+                 if coin.is_empty() {
+                     continue;
+                 }
+                 let filled: f64 = o["order"]["sz"]
+                     .as_str()

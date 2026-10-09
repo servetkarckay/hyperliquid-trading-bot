@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::sync_exchange_sl
+@@ -1725,17 +1725,17 @@
+                 // ve tepe başlangıcı gerçek girişten olmalı.
+                 let pos_entry = self
+                     .executor
+                     .positions()
+                     .get(coin)
+                     .map(|p| p.entry_px)
+                     .unwrap_or(0.0);
+                 let attr_entry = self.entry_attr.get(coin).map(|a| a.entry_px).unwrap_or(0.0);
+-                let entry_px = if pos_entry > 0.0 {
++                let entry_px = if pos_entry >= /* ~ changed by cargo-mutants ~ */ 0.0 {
+                     pos_entry
+                 } else {
+                     attr_entry
+                 };
+                 // RESTART KURTARMASI: `trail` haritası RAM'de, restart'ta
+                 // boş. `cur_sl_px` tahminle (giriş ± ATR) dolarsa stop ilk
+                 // döngüde **gereksiz yere** aşağı çekilir ve koruma zayıflar.
+                 // `sl_last_px` borsadaki GERÇEK stop seviyesini tutar

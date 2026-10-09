@@ -1,0 +1,1414 @@
+engine/src/allocation_manager.rs:112:9: replace AllocationConfig::tp_from_entry -> f64 with 0.0
+engine/src/allocation_manager.rs:112:9: replace AllocationConfig::tp_from_entry -> f64 with 1.0
+engine/src/allocation_manager.rs:112:9: replace AllocationConfig::tp_from_entry -> f64 with -1.0
+engine/src/allocation_manager.rs:113:61: replace <= with > in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:113:76: replace <= with > in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:116:32: replace * with + in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:116:32: replace * with / in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:117:62: replace * with + in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:117:62: replace * with / in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:117:42: replace / with % in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:117:42: replace / with * in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:119:36: replace + with - in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:119:36: replace + with * in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:120:37: replace - with + in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:120:37: replace - with / in AllocationConfig::tp_from_entry
+engine/src/allocation_manager.rs:192:9: replace AllocationManager::conviction -> f64 with 0.0
+engine/src/allocation_manager.rs:192:9: replace AllocationManager::conviction -> f64 with 1.0
+engine/src/allocation_manager.rs:192:9: replace AllocationManager::conviction -> f64 with -1.0
+engine/src/allocation_manager.rs:192:28: replace / with % in AllocationManager::conviction
+engine/src/allocation_manager.rs:194:28: replace + with - in AllocationManager::conviction
+engine/src/allocation_manager.rs:194:28: replace + with * in AllocationManager::conviction
+engine/src/allocation_manager.rs:194:34: replace * with / in AllocationManager::conviction
+engine/src/allocation_manager.rs:195:28: replace + with - in AllocationManager::conviction
+engine/src/allocation_manager.rs:195:28: replace + with * in AllocationManager::conviction
+engine/src/allocation_manager.rs:195:34: replace * with + in AllocationManager::conviction
+engine/src/allocation_manager.rs:195:34: replace * with / in AllocationManager::conviction
+engine/src/allocation_manager.rs:196:24: replace + with - in AllocationManager::conviction
+engine/src/allocation_manager.rs:196:24: replace + with * in AllocationManager::conviction
+engine/src/allocation_manager.rs:196:34: replace * with + in AllocationManager::conviction
+engine/src/allocation_manager.rs:196:34: replace * with / in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:37: replace / with % in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:37: replace / with * in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:26: replace * with + in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:26: replace * with / in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:16: replace * with + in AllocationManager::conviction
+engine/src/allocation_manager.rs:197:16: replace * with / in AllocationManager::conviction
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (0.0, 0.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (0.0, 1.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (0.0, -1.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (1.0, 0.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (1.0, 1.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (1.0, -1.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (-1.0, 0.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (-1.0, 1.0)
+engine/src/allocation_manager.rs:210:9: replace AllocationManager::sl_tp -> (f64, f64) with (-1.0, -1.0)
+engine/src/allocation_manager.rs:212:30: replace - with + in AllocationManager::sl_tp
+engine/src/allocation_manager.rs:212:30: replace - with / in AllocationManager::sl_tp
+engine/src/allocation_manager.rs:213:31: replace + with - in AllocationManager::sl_tp
+engine/src/allocation_manager.rs:213:31: replace + with * in AllocationManager::sl_tp
+engine/src/allocation_manager.rs:221:9: replace AllocationManager::tp_from_entry -> f64 with 0.0
+engine/src/allocation_manager.rs:221:9: replace AllocationManager::tp_from_entry -> f64 with 1.0
+engine/src/allocation_manager.rs:221:9: replace AllocationManager::tp_from_entry -> f64 with -1.0
+engine/src/allocation_manager.rs:233:9: replace AllocationManager::allocate -> Vec<Candidate> with vec![]
+engine/src/allocation_manager.rs:236:31: replace != with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:236:56: replace > with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:236:56: replace > with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:255:35: replace += with -= in AllocationManager::allocate
+engine/src/allocation_manager.rs:255:35: replace += with *= in AllocationManager::allocate
+engine/src/allocation_manager.rs:257:28: replace += with -= in AllocationManager::allocate
+engine/src/allocation_manager.rs:257:28: replace += with *= in AllocationManager::allocate
+engine/src/allocation_manager.rs:264:55: replace / with % in AllocationManager::allocate
+engine/src/allocation_manager.rs:264:55: replace / with * in AllocationManager::allocate
+engine/src/allocation_manager.rs:269:29: replace - with / in AllocationManager::allocate
+engine/src/allocation_manager.rs:269:57: replace * with / in AllocationManager::allocate
+engine/src/allocation_manager.rs:270:41: replace * with + in AllocationManager::allocate
+engine/src/allocation_manager.rs:299:17: replace || with && in AllocationManager::allocate
+engine/src/allocation_manager.rs:298:26: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:336:29: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:341:58: replace > with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:341:58: replace > with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:342:16: delete ! in AllocationManager::allocate
+engine/src/allocation_manager.rs:350:36: replace * with / in AllocationManager::allocate
+engine/src/allocation_manager.rs:354:50: replace / with % in AllocationManager::allocate
+engine/src/allocation_manager.rs:354:50: replace / with * in AllocationManager::allocate
+engine/src/allocation_manager.rs:354:42: replace * with + in AllocationManager::allocate
+engine/src/allocation_manager.rs:354:42: replace * with / in AllocationManager::allocate
+engine/src/allocation_manager.rs:372:34: replace * with + in AllocationManager::allocate
+engine/src/allocation_manager.rs:372:34: replace * with / in AllocationManager::allocate
+engine/src/allocation_manager.rs:373:37: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:390:33: replace <= with > in AllocationManager::allocate
+engine/src/allocation_manager.rs:393:23: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:404:43: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:411:20: replace < with > in AllocationManager::allocate
+engine/src/allocation_manager.rs:417:20: replace < with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:417:20: replace < with > in AllocationManager::allocate
+engine/src/allocation_manager.rs:422:20: replace += with -= in AllocationManager::allocate
+engine/src/allocation_manager.rs:430:17: replace > with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:430:17: replace > with >= in AllocationManager::allocate
+engine/src/allocation_manager.rs:446:32: replace > with == in AllocationManager::allocate
+engine/src/allocation_manager.rs:446:32: replace > with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:459:43: replace >= with < in AllocationManager::allocate
+engine/src/allocation_manager.rs:799:9: replace CostModel::from_env -> Self with Default::default()
+engine/src/allocation_manager.rs:818:9: replace CostModel::expected_slippage_bps -> f64 with 0.0
+engine/src/allocation_manager.rs:818:9: replace CostModel::expected_slippage_bps -> f64 with 1.0
+engine/src/allocation_manager.rs:818:9: replace CostModel::expected_slippage_bps -> f64 with -1.0
+engine/src/allocation_manager.rs:818:28: replace + with - in CostModel::expected_slippage_bps
+engine/src/allocation_manager.rs:818:28: replace + with * in CostModel::expected_slippage_bps
+engine/src/allocation_manager.rs:818:34: replace * with + in CostModel::expected_slippage_bps
+engine/src/allocation_manager.rs:818:34: replace * with / in CostModel::expected_slippage_bps
+engine/src/allocation_manager.rs:823:9: replace CostModel::execution_cost_bps -> f64 with 0.0
+engine/src/allocation_manager.rs:823:9: replace CostModel::execution_cost_bps -> f64 with 1.0
+engine/src/allocation_manager.rs:823:9: replace CostModel::execution_cost_bps -> f64 with -1.0
+engine/src/allocation_manager.rs:823:63: replace + with - in CostModel::execution_cost_bps
+engine/src/allocation_manager.rs:823:63: replace + with * in CostModel::execution_cost_bps
+engine/src/allocation_manager.rs:823:22: replace + with - in CostModel::execution_cost_bps
+engine/src/allocation_manager.rs:823:22: replace + with * in CostModel::execution_cost_bps
+engine/src/allocation_manager.rs:828:9: replace CostModel::round_trip_cost_bps -> f64 with 0.0
+engine/src/allocation_manager.rs:828:9: replace CostModel::round_trip_cost_bps -> f64 with 1.0
+engine/src/allocation_manager.rs:828:9: replace CostModel::round_trip_cost_bps -> f64 with -1.0
+engine/src/allocation_manager.rs:828:13: replace * with + in CostModel::round_trip_cost_bps
+engine/src/allocation_manager.rs:828:13: replace * with / in CostModel::round_trip_cost_bps
+engine/src/allocation_manager.rs:833:9: replace CostModel::min_risk_dist_bps -> f64 with 0.0
+engine/src/allocation_manager.rs:833:9: replace CostModel::min_risk_dist_bps -> f64 with 1.0
+engine/src/allocation_manager.rs:833:9: replace CostModel::min_risk_dist_bps -> f64 with -1.0
+engine/src/allocation_manager.rs:834:22: replace * with + in CostModel::min_risk_dist_bps
+engine/src/allocation_manager.rs:834:22: replace * with / in CostModel::min_risk_dist_bps
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 0.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 0.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 0.0, -1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 1.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 1.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, 1.0, -1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, -1.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, -1.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (true, -1.0, -1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 0.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 0.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 0.0, -1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 1.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 1.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, 1.0, -1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, -1.0, 0.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, -1.0, 1.0)
+engine/src/allocation_manager.rs:841:9: replace CostModel::ev_ok -> (bool, f64, f64) with (false, -1.0, -1.0)
+engine/src/allocation_manager.rs:841:31: replace * with + in CostModel::ev_ok
+engine/src/allocation_manager.rs:841:31: replace * with / in CostModel::ev_ok
+engine/src/allocation_manager.rs:842:32: replace * with + in CostModel::ev_ok
+engine/src/allocation_manager.rs:842:32: replace * with / in CostModel::ev_ok
+engine/src/allocation_manager.rs:844:19: replace >= with < in CostModel::ev_ok
+engine/src/allocation_manager.rs:853:9: replace CostModel::execution_band_bps -> f64 with 0.0
+engine/src/allocation_manager.rs:853:9: replace CostModel::execution_band_bps -> f64 with 1.0
+engine/src/allocation_manager.rs:853:9: replace CostModel::execution_band_bps -> f64 with -1.0
+engine/src/engine_loop.rs:153:9: replace EntryAttr::set_analytical_tp -> Option<f64> with None
+engine/src/engine_loop.rs:153:9: replace EntryAttr::set_analytical_tp -> Option<f64> with Some(0.0)
+engine/src/engine_loop.rs:153:9: replace EntryAttr::set_analytical_tp -> Option<f64> with Some(1.0)
+engine/src/engine_loop.rs:153:9: replace EntryAttr::set_analytical_tp -> Option<f64> with Some(-1.0)
+engine/src/engine_loop.rs:159:15: replace <= with > in EntryAttr::set_analytical_tp
+engine/src/engine_loop.rs:159:25: delete ! in EntryAttr::set_analytical_tp
+engine/src/engine_loop.rs:175:9: replace EntryAttr::apply_real_fill -> bool with true
+engine/src/engine_loop.rs:175:9: replace EntryAttr::apply_real_fill -> bool with false
+engine/src/engine_loop.rs:175:30: replace || with && in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:175:23: replace <= with > in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:175:33: delete ! in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:178:31: replace - with + in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:178:31: replace - with / in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:179:22: replace <= with > in EntryAttr::apply_real_fill
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::new())
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([(String::new(), 0.0)]))
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([(String::new(), 1.0)]))
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([(String::new(), -1.0)]))
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([("xyzzy".into(), 0.0)]))
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([("xyzzy".into(), 1.0)]))
+engine/src/engine_loop.rs:307:5: replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([("xyzzy".into(), -1.0)]))
+engine/src/engine_loop.rs:331:12: delete ! in parse_live_weights
+engine/src/engine_loop.rs:334:14: replace < with == in parse_live_weights
+engine/src/engine_loop.rs:334:14: replace < with > in parse_live_weights
+engine/src/engine_loop.rs:334:14: replace < with <= in parse_live_weights
+engine/src/engine_loop.rs:356:5: replace place_arm_gate -> bool with true
+engine/src/engine_loop.rs:356:5: replace place_arm_gate -> bool with false
+engine/src/engine_loop.rs:356:69: replace && with || in place_arm_gate
+engine/src/engine_loop.rs:356:44: replace || with && in place_arm_gate
+engine/src/engine_loop.rs:360:5: replace risk_lock_positions_left -> String with String::new()
+engine/src/engine_loop.rs:360:5: replace risk_lock_positions_left -> String with "xyzzy".into()
+engine/src/engine_loop.rs:379:5: replace missing_live_strategies -> Vec<String> with vec![]
+engine/src/engine_loop.rs:379:5: replace missing_live_strategies -> Vec<String> with vec![String::new()]
+engine/src/engine_loop.rs:379:5: replace missing_live_strategies -> Vec<String> with vec!["xyzzy".into()]
+engine/src/engine_loop.rs:381:21: delete ! in missing_live_strategies
+engine/src/engine_loop.rs:416:5: replace merge_effective_weights -> LiveWeightsMerge with Default::default()
+engine/src/engine_loop.rs:417:9: delete field ensemble_weights from struct LiveWeightsMerge expression in merge_effective_weights
+engine/src/engine_loop.rs:421:12: delete ! in merge_effective_weights
+engine/src/engine_loop.rs:425:29: replace < with == in merge_effective_weights
+engine/src/engine_loop.rs:425:29: replace < with > in merge_effective_weights
+engine/src/engine_loop.rs:464:5: replace should_finalize_on_ws -> bool with true
+engine/src/engine_loop.rs:464:5: replace should_finalize_on_ws -> bool with false
+engine/src/engine_loop.rs:464:50: replace && with || in should_finalize_on_ws
+engine/src/engine_loop.rs:464:32: replace && with || in should_finalize_on_ws
+engine/src/engine_loop.rs:464:17: replace || with && in should_finalize_on_ws
+engine/src/engine_loop.rs:464:35: delete ! in should_finalize_on_ws
+engine/src/engine_loop.rs:491:28: replace * with + in synth_recovered_attr
+engine/src/engine_loop.rs:491:28: replace * with / in synth_recovered_attr
+engine/src/engine_loop.rs:491:49: replace * with + in synth_recovered_attr
+engine/src/engine_loop.rs:491:49: replace * with / in synth_recovered_attr
+engine/src/engine_loop.rs:525:24: replace < with == in recon_decide
+engine/src/engine_loop.rs:525:24: replace < with > in recon_decide
+engine/src/engine_loop.rs:525:24: replace < with <= in recon_decide
+engine/src/engine_loop.rs:550:5: replace reconcile_machines_to_exchange -> Vec<String> with vec![]
+engine/src/engine_loop.rs:550:5: replace reconcile_machines_to_exchange -> Vec<String> with vec![String::new()]
+engine/src/engine_loop.rs:550:5: replace reconcile_machines_to_exchange -> Vec<String> with vec!["xyzzy".into()]
+engine/src/engine_loop.rs:554:34: replace > with == in reconcile_machines_to_exchange
+engine/src/engine_loop.rs:554:34: replace > with < in reconcile_machines_to_exchange
+engine/src/engine_loop.rs:557:13: replace && with || in reconcile_machines_to_exchange
+engine/src/engine_loop.rs:556:12: delete ! in reconcile_machines_to_exchange
+engine/src/engine_loop.rs:591:5: replace plan_tp_order -> Option<TpOrderPlan> with None
+engine/src/engine_loop.rs:596:9: replace || with && in plan_tp_order
+engine/src/engine_loop.rs:595:9: replace || with && in plan_tp_order
+engine/src/engine_loop.rs:594:9: replace || with && in plan_tp_order
+engine/src/engine_loop.rs:592:9: replace || with && in plan_tp_order
+engine/src/engine_loop.rs:591:8: delete ! in plan_tp_order
+engine/src/engine_loop.rs:594:15: replace <= with > in plan_tp_order
+engine/src/engine_loop.rs:595:18: replace <= with > in plan_tp_order
+engine/src/engine_loop.rs:596:12: delete ! in plan_tp_order
+engine/src/engine_loop.rs:612:5: replace entry_contract_ok -> bool with true
+engine/src/engine_loop.rs:612:5: replace entry_contract_ok -> bool with false
+engine/src/engine_loop.rs:612:18: replace <= with > in entry_contract_ok
+engine/src/engine_loop.rs:612:28: delete ! in entry_contract_ok
+engine/src/engine_loop.rs:615:59: replace || with && in entry_contract_ok
+engine/src/engine_loop.rs:615:43: replace || with && in entry_contract_ok
+engine/src/engine_loop.rs:615:21: replace || with && in entry_contract_ok
+engine/src/engine_loop.rs:615:14: replace <= with > in entry_contract_ok
+engine/src/engine_loop.rs:615:24: delete ! in entry_contract_ok
+engine/src/engine_loop.rs:615:52: replace <= with > in entry_contract_ok
+engine/src/engine_loop.rs:615:62: delete ! in entry_contract_ok
+engine/src/engine_loop.rs:619:15: replace < with == in entry_contract_ok
+engine/src/engine_loop.rs:619:15: replace < with > in entry_contract_ok
+engine/src/engine_loop.rs:619:36: replace > with == in entry_contract_ok
+engine/src/engine_loop.rs:619:36: replace > with < in entry_contract_ok
+engine/src/engine_loop.rs:621:15: replace < with == in entry_contract_ok
+engine/src/engine_loop.rs:621:15: replace < with > in entry_contract_ok
+engine/src/engine_loop.rs:621:36: replace > with == in entry_contract_ok
+engine/src/engine_loop.rs:621:36: replace > with < in entry_contract_ok
+engine/src/engine_loop.rs:627:5: replace tp_side_ok -> bool with true
+engine/src/engine_loop.rs:627:5: replace tp_side_ok -> bool with false
+engine/src/engine_loop.rs:627:54: replace <= with > in tp_side_ok
+engine/src/engine_loop.rs:627:74: replace <= with > in tp_side_ok
+engine/src/engine_loop.rs:631:15: replace > with == in tp_side_ok
+engine/src/engine_loop.rs:631:15: replace > with < in tp_side_ok
+engine/src/engine_loop.rs:633:15: replace < with == in tp_side_ok
+engine/src/engine_loop.rs:633:15: replace < with > in tp_side_ok
+engine/src/engine_loop.rs:646:5: replace should_place_tp -> bool with true
+engine/src/engine_loop.rs:646:5: replace should_place_tp -> bool with false
+engine/src/engine_loop.rs:646:50: replace || with && in should_place_tp
+engine/src/engine_loop.rs:646:27: replace || with && in should_place_tp
+engine/src/engine_loop.rs:671:5: replace exit_reason_from_fill -> Option<ExitReason> with None
+engine/src/engine_loop.rs:671:5: replace exit_reason_from_fill -> Option<ExitReason> with Some(Default::default())
+engine/src/engine_loop.rs:678:42: replace > with == in exit_reason_from_fill
+engine/src/engine_loop.rs:678:42: replace > with < in exit_reason_from_fill
+engine/src/engine_loop.rs:678:42: replace > with >= in exit_reason_from_fill
+engine/src/engine_loop.rs:692:5: replace apply_exit_reason with ()
+engine/src/engine_loop.rs:733:9: replace EntryGate::entries_allowed -> bool with true
+engine/src/engine_loop.rs:733:9: replace EntryGate::entries_allowed -> bool with false
+engine/src/engine_loop.rs:737:9: replace EntryGate::health_ok -> bool with false
+engine/src/engine_loop.rs:741:9: replace EntryGate::is_locked -> bool with true
+engine/src/engine_loop.rs:741:9: replace EntryGate::is_locked -> bool with false
+engine/src/engine_loop.rs:745:9: replace EntryGate::flat_count -> u32 with 0
+engine/src/engine_loop.rs:745:9: replace EntryGate::flat_count -> u32 with 1
+engine/src/engine_loop.rs:750:9: replace EntryGate::set_health_ok with ()
+engine/src/engine_loop.rs:756:9: replace EntryGate::lock -> bool with true
+engine/src/engine_loop.rs:756:9: replace EntryGate::lock -> bool with false
+engine/src/engine_loop.rs:759:9: delete ! in EntryGate::lock
+engine/src/engine_loop.rs:764:9: replace EntryGate::unlock_manual -> bool with true
+engine/src/engine_loop.rs:764:9: replace EntryGate::unlock_manual -> bool with false
+engine/src/engine_loop.rs:764:12: delete ! in EntryGate::unlock_manual
+engine/src/engine_loop.rs:784:9: replace EntryGate::risk_lock_step -> bool with true
+engine/src/engine_loop.rs:784:9: replace EntryGate::risk_lock_step -> bool with false
+engine/src/engine_loop.rs:784:12: delete ! in EntryGate::risk_lock_step
+engine/src/engine_loop.rs:791:12: delete ! in EntryGate::risk_lock_step
+engine/src/engine_loop.rs:794:25: replace += with -= in EntryGate::risk_lock_step
+engine/src/engine_loop.rs:794:25: replace += with *= in EntryGate::risk_lock_step
+engine/src/engine_loop.rs:795:28: replace >= with < in EntryGate::risk_lock_step
+engine/src/engine_loop.rs:1118:9: replace Engine::ingest_oe with ()
+engine/src/engine_loop.rs:1324:9: replace Engine::write_ws_exit_record with ()
+engine/src/engine_loop.rs:2026:9: replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![])
+engine/src/engine_loop.rs:2026:9: replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![(String::new(), String::new())])
+engine/src/engine_loop.rs:2026:9: replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![(String::new(), "xyzzy".into())])
+engine/src/engine_loop.rs:2026:9: replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![("xyzzy".into(), String::new())])
+engine/src/engine_loop.rs:2026:9: replace Engine::run_cycle -> anyhow::Result<Vec<(String, String)>> with Ok(vec![("xyzzy".into(), "xyzzy".into())])
+engine/src/engine_loop.rs:2842:17: delete match arm Action::Place(_o) in Engine::run_cycle
+engine/src/engine_loop.rs:3310:9: replace Engine::reconcile_unknown_cloid -> anyhow::Result<()> with Ok(())
+engine/src/engine_loop.rs:3440:9: replace Engine::entries_allowed_of -> bool with true
+engine/src/engine_loop.rs:3440:9: replace Engine::entries_allowed_of -> bool with false
+engine/src/engine_loop.rs:3440:19: replace && with || in Engine::entries_allowed_of
+engine/src/engine_loop.rs:3440:22: delete ! in Engine::entries_allowed_of
+engine/src/engine_loop.rs:3494:5: replace find_by_cloid -> Option<i64> with None
+engine/src/engine_loop.rs:3494:5: replace find_by_cloid -> Option<i64> with Some(0)
+engine/src/engine_loop.rs:3494:5: replace find_by_cloid -> Option<i64> with Some(1)
+engine/src/engine_loop.rs:3494:5: replace find_by_cloid -> Option<i64> with Some(-1)
+engine/src/engine_loop.rs:3495:34: replace && with || in find_by_cloid
+engine/src/engine_loop.rs:3495:26: replace == with != in find_by_cloid
+engine/src/engine_loop.rs:3495:56: replace == with != in find_by_cloid
+engine/src/engine_loop.rs:3539:9: replace CycleProjection::check_and_commit -> Result<(), crate::risk_manager::RiskViolation> with Ok(())
+engine/src/engine_loop.rs:3550:52: replace + with - in CycleProjection::check_and_commit
+engine/src/engine_loop.rs:3550:52: replace + with * in CycleProjection::check_and_commit
+engine/src/epoch.rs:69:5: replace assert_testnet_endpoint -> Result<()> with Ok(())
+engine/src/epoch.rs:69:20: replace != with == in assert_testnet_endpoint
+engine/src/epoch.rs:72:16: replace != with == in assert_testnet_endpoint
+engine/src/epoch.rs:78:36: replace || with && in assert_testnet_endpoint
+engine/src/epoch.rs:97:8: delete ! in fresh_start_decision
+engine/src/epoch.rs:100:8: delete ! in fresh_start_decision
+engine/src/epoch.rs:129:9: replace LearningEpoch::record_completed_trade -> (u64, bool) with (0, true)
+engine/src/epoch.rs:129:9: replace LearningEpoch::record_completed_trade -> (u64, bool) with (0, false)
+engine/src/epoch.rs:129:9: replace LearningEpoch::record_completed_trade -> (u64, bool) with (1, true)
+engine/src/epoch.rs:129:9: replace LearningEpoch::record_completed_trade -> (u64, bool) with (1, false)
+engine/src/epoch.rs:129:36: replace += with -= in LearningEpoch::record_completed_trade
+engine/src/epoch.rs:129:36: replace += with *= in LearningEpoch::record_completed_trade
+engine/src/epoch.rs:132:13: replace && with || in LearningEpoch::record_completed_trade
+engine/src/epoch.rs:131:39: replace >= with < in LearningEpoch::record_completed_trade
+engine/src/epoch.rs:132:28: replace == with != in LearningEpoch::record_completed_trade
+engine/src/epoch.rs:143:9: replace LearningEpoch::save -> Result<()> with Ok(())
+engine/src/epoch.rs:165:9: replace LearningEpoch::load -> anyhow::Result<Option<Self>> with Ok(None)
+engine/src/epoch.rs:167:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in LearningEpoch::load
+engine/src/epoch.rs:167:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with false in LearningEpoch::load
+engine/src/epoch.rs:167:32: replace == with != in LearningEpoch::load
+engine/src/epoch.rs:175:26: replace != with == in LearningEpoch::load
+engine/src/epoch.rs:181:36: replace < with == in LearningEpoch::load
+engine/src/epoch.rs:181:36: replace < with > in LearningEpoch::load
+engine/src/epoch.rs:181:36: replace < with <= in LearningEpoch::load
+engine/src/executor.rs:44:5: replace make_cloid -> String with String::new()
+engine/src/executor.rs:44:5: replace make_cloid -> String with "xyzzy".into()
+engine/src/executor.rs:48:15: replace ^= with |= in make_cloid
+engine/src/executor.rs:48:15: replace ^= with &= in make_cloid
+engine/src/executor.rs:55:34: replace ^ with | in make_cloid
+engine/src/executor.rs:55:34: replace ^ with & in make_cloid
+engine/src/executor.rs:60:39: replace ^ with | in make_cloid
+engine/src/executor.rs:60:39: replace ^ with & in make_cloid
+engine/src/executor.rs:74:5: replace cloid_is_tp -> bool with true
+engine/src/executor.rs:74:5: replace cloid_is_tp -> bool with false
+engine/src/executor.rs:75:68: replace || with && in cloid_is_tp
+engine/src/executor.rs:75:51: replace || with && in cloid_is_tp
+engine/src/executor.rs:75:28: replace || with && in cloid_is_tp
+engine/src/executor.rs:75:8: delete ! in cloid_is_tp
+engine/src/executor.rs:75:31: delete ! in cloid_is_tp
+engine/src/executor.rs:75:61: replace <= with > in cloid_is_tp
+engine/src/executor.rs:75:78: replace <= with > in cloid_is_tp
+engine/src/executor.rs:90:5: replace is_our_tp_row -> bool with true
+engine/src/executor.rs:90:5: replace is_our_tp_row -> bool with false
+engine/src/executor.rs:91:47: replace && with || in is_our_tp_row
+engine/src/executor.rs:91:31: replace && with || in is_our_tp_row
+engine/src/executor.rs:91:17: replace && with || in is_our_tp_row
+engine/src/executor.rs:91:25: replace > with == in is_our_tp_row
+engine/src/executor.rs:91:25: replace > with < in is_our_tp_row
+engine/src/executor.rs:91:25: replace > with >= in is_our_tp_row
+engine/src/executor.rs:91:41: replace > with == in is_our_tp_row
+engine/src/executor.rs:91:41: replace > with < in is_our_tp_row
+engine/src/executor.rs:91:41: replace > with >= in is_our_tp_row
+engine/src/executor.rs:91:79: replace <= with > in is_our_tp_row
+engine/src/executor.rs:91:72: replace / with % in is_our_tp_row
+engine/src/executor.rs:91:72: replace / with * in is_our_tp_row
+engine/src/executor.rs:91:58: replace - with + in is_our_tp_row
+engine/src/executor.rs:91:58: replace - with / in is_our_tp_row
+engine/src/executor.rs:120:5: replace is_open_fill -> bool with true
+engine/src/executor.rs:120:5: replace is_open_fill -> bool with false
+engine/src/executor.rs:120:35: replace || with && in is_open_fill
+engine/src/executor.rs:136:5: replace place_sl_grid -> Result<i64> with Ok(0)
+engine/src/executor.rs:136:5: replace place_sl_grid -> Result<i64> with Ok(1)
+engine/src/executor.rs:136:5: replace place_sl_grid -> Result<i64> with Ok(-1)
+engine/src/executor.rs:137:15: replace >= with < in place_sl_grid
+engine/src/executor.rs:156:23: replace match guard st.error(0).is_none() with true in place_sl_grid
+engine/src/executor.rs:156:23: replace match guard st.error(0).is_none() with false in place_sl_grid
+engine/src/executor.rs:159:20: delete ! in place_sl_grid
+engine/src/executor.rs:162:21: replace -= with += in place_sl_grid
+engine/src/executor.rs:162:21: replace -= with /= in place_sl_grid
+engine/src/executor.rs:189:5: replace place_tp_grid -> Result<i64> with Ok(0)
+engine/src/executor.rs:189:5: replace place_tp_grid -> Result<i64> with Ok(1)
+engine/src/executor.rs:189:5: replace place_tp_grid -> Result<i64> with Ok(-1)
+engine/src/executor.rs:190:15: replace >= with < in place_tp_grid
+engine/src/executor.rs:206:23: replace match guard st.error(0).is_none() with true in place_tp_grid
+engine/src/executor.rs:206:23: replace match guard st.error(0).is_none() with false in place_tp_grid
+engine/src/executor.rs:209:20: delete ! in place_tp_grid
+engine/src/executor.rs:212:21: replace -= with += in place_tp_grid
+engine/src/executor.rs:212:21: replace -= with /= in place_tp_grid
+engine/src/executor.rs:388:9: replace Executor::parse_positions -> HashMap<String, Position> with HashMap::new()
+engine/src/executor.rs:388:9: replace Executor::parse_positions -> HashMap<String, Position> with HashMap::from_iter([(String::new(), Default::default())])
+engine/src/executor.rs:388:9: replace Executor::parse_positions -> HashMap<String, Position> with HashMap::from_iter([("xyzzy".into(), Default::default())])
+engine/src/executor.rs:391:60: delete ! in Executor::parse_positions
+engine/src/executor.rs:427:9: replace Executor::sync_positions_from -> Vec<String> with vec![]
+engine/src/executor.rs:427:9: replace Executor::sync_positions_from -> Vec<String> with vec![String::new()]
+engine/src/executor.rs:427:9: replace Executor::sync_positions_from -> Vec<String> with vec!["xyzzy".into()]
+engine/src/executor.rs:446:25: delete ! in Executor::sync_positions_from
+engine/src/executor.rs:467:9: replace Executor::set_leverage_all -> Vec<String> with vec![]
+engine/src/executor.rs:467:9: replace Executor::set_leverage_all -> Vec<String> with vec![String::new()]
+engine/src/executor.rs:467:9: replace Executor::set_leverage_all -> Vec<String> with vec!["xyzzy".into()]
+engine/src/executor.rs:492:33: replace == with != in Executor::set_leverage_all
+engine/src/executor.rs:493:32: delete ! in Executor::set_leverage_all
+engine/src/executor.rs:517:9: replace Executor::ensure_leverage -> Result<()> with Ok(())
+engine/src/executor.rs:532:40: replace || with && in Executor::ensure_leverage
+engine/src/executor.rs:532:32: replace == with != in Executor::ensure_leverage
+engine/src/executor.rs:532:45: replace == with != in Executor::ensure_leverage
+engine/src/executor.rs:533:12: delete ! in Executor::ensure_leverage
+engine/src/executor.rs:544:9: replace Executor::px_dec_for -> u32 with 0
+engine/src/executor.rs:544:9: replace Executor::px_dec_for -> u32 with 1
+engine/src/executor.rs:552:9: replace Executor::save_px_dec -> std::io::Result<()> with Ok(())
+engine/src/executor.rs:567:9: replace Executor::load_px_dec with ()
+engine/src/executor.rs:577:19: replace += with -= in Executor::load_px_dec
+engine/src/executor.rs:577:19: replace += with *= in Executor::load_px_dec
+engine/src/executor.rs:580:14: replace > with == in Executor::load_px_dec
+engine/src/executor.rs:580:14: replace > with < in Executor::load_px_dec
+engine/src/executor.rs:580:14: replace > with >= in Executor::load_px_dec
+engine/src/executor.rs:586:9: replace Executor::asset_of -> Result<(u32, u32)> with Ok((0, 0))
+engine/src/executor.rs:586:9: replace Executor::asset_of -> Result<(u32, u32)> with Ok((0, 1))
+engine/src/executor.rs:586:9: replace Executor::asset_of -> Result<(u32, u32)> with Ok((1, 0))
+engine/src/executor.rs:586:9: replace Executor::asset_of -> Result<(u32, u32)> with Ok((1, 1))
+engine/src/executor.rs:594:9: replace Executor::max_leverage_of -> Option<u32> with None
+engine/src/executor.rs:594:9: replace Executor::max_leverage_of -> Option<u32> with Some(0)
+engine/src/executor.rs:594:9: replace Executor::max_leverage_of -> Option<u32> with Some(1)
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![(String::new(), 0.0)]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![(String::new(), 1.0)]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![(String::new(), -1.0)]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![("xyzzy".into(), 0.0)]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![("xyzzy".into(), 1.0)]
+engine/src/executor.rs:603:9: replace Executor::flatten_all -> Vec<(String, f64)> with vec![("xyzzy".into(), -1.0)]
+engine/src/executor.rs:610:42: replace > with == in Executor::flatten_all
+engine/src/executor.rs:610:42: replace > with < in Executor::flatten_all
+engine/src/executor.rs:610:42: replace > with >= in Executor::flatten_all
+engine/src/executor.rs:623:32: replace > with == in Executor::flatten_all
+engine/src/executor.rs:623:32: replace > with < in Executor::flatten_all
+engine/src/executor.rs:623:32: replace > with >= in Executor::flatten_all
+engine/src/executor.rs:625:28: replace || with && in Executor::flatten_all
+engine/src/executor.rs:625:21: replace <= with > in Executor::flatten_all
+engine/src/executor.rs:625:31: delete ! in Executor::flatten_all
+engine/src/executor.rs:629:31: replace < with == in Executor::flatten_all
+engine/src/executor.rs:629:31: replace < with > in Executor::flatten_all
+engine/src/executor.rs:629:31: replace < with <= in Executor::flatten_all
+engine/src/executor.rs:630:39: replace * with + in Executor::flatten_all
+engine/src/executor.rs:630:39: replace * with / in Executor::flatten_all
+engine/src/executor.rs:630:60: replace * with + in Executor::flatten_all
+engine/src/executor.rs:630:60: replace * with / in Executor::flatten_all
+engine/src/executor.rs:674:46: replace > with == in Executor::flatten_all
+engine/src/executor.rs:674:46: replace > with < in Executor::flatten_all
+engine/src/executor.rs:674:46: replace > with >= in Executor::flatten_all
+engine/src/executor.rs:680:28: replace + with - in Executor::flatten_all
+engine/src/executor.rs:680:28: replace + with * in Executor::flatten_all
+engine/src/executor.rs:680:35: replace * with + in Executor::flatten_all
+engine/src/executor.rs:680:35: replace * with / in Executor::flatten_all
+engine/src/executor.rs:680:51: replace + with - in Executor::flatten_all
+engine/src/executor.rs:680:51: replace + with * in Executor::flatten_all
+engine/src/executor.rs:687:35: replace < with == in Executor::flatten_all
+engine/src/executor.rs:687:35: replace < with > in Executor::flatten_all
+engine/src/executor.rs:687:35: replace < with <= in Executor::flatten_all
+engine/src/executor.rs:691:36: replace > with == in Executor::flatten_all
+engine/src/executor.rs:691:36: replace > with < in Executor::flatten_all
+engine/src/executor.rs:691:36: replace > with >= in Executor::flatten_all
+engine/src/executor.rs:693:32: replace || with && in Executor::flatten_all
+engine/src/executor.rs:693:25: replace <= with > in Executor::flatten_all
+engine/src/executor.rs:693:35: delete ! in Executor::flatten_all
+engine/src/executor.rs:696:43: replace * with + in Executor::flatten_all
+engine/src/executor.rs:696:43: replace * with / in Executor::flatten_all
+engine/src/executor.rs:696:64: replace / with % in Executor::flatten_all
+engine/src/executor.rs:696:64: replace / with * in Executor::flatten_all
+engine/src/executor.rs:730:42: replace > with == in Executor::flatten_all
+engine/src/executor.rs:730:42: replace > with < in Executor::flatten_all
+engine/src/executor.rs:730:42: replace > with >= in Executor::flatten_all
+engine/src/executor.rs:769:9: replace Executor::ensure_sl -> Result<bool> with Ok(true)
+engine/src/executor.rs:769:9: replace Executor::ensure_sl -> Result<bool> with Ok(false)
+engine/src/executor.rs:776:57: replace - with + in Executor::ensure_sl
+engine/src/executor.rs:776:57: replace - with / in Executor::ensure_sl
+engine/src/executor.rs:777:20: replace < with == in Executor::ensure_sl
+engine/src/executor.rs:777:20: replace < with > in Executor::ensure_sl
+engine/src/executor.rs:777:20: replace < with <= in Executor::ensure_sl
+engine/src/executor.rs:785:57: replace || with && in Executor::ensure_sl
+engine/src/executor.rs:785:43: replace || with && in Executor::ensure_sl
+engine/src/executor.rs:785:25: replace || with && in Executor::ensure_sl
+engine/src/executor.rs:785:50: replace <= with > in Executor::ensure_sl
+engine/src/executor.rs:785:66: replace <= with > in Executor::ensure_sl
+engine/src/executor.rs:788:22: delete ! in Executor::ensure_sl
+engine/src/executor.rs:823:9: replace Executor::ensure_tp -> Result<bool> with Ok(true)
+engine/src/executor.rs:823:9: replace Executor::ensure_tp -> Result<bool> with Ok(false)
+engine/src/executor.rs:827:57: replace - with + in Executor::ensure_tp
+engine/src/executor.rs:827:57: replace - with / in Executor::ensure_tp
+engine/src/executor.rs:828:20: replace < with == in Executor::ensure_tp
+engine/src/executor.rs:828:20: replace < with > in Executor::ensure_tp
+engine/src/executor.rs:828:20: replace < with <= in Executor::ensure_tp
+engine/src/executor.rs:836:57: replace || with && in Executor::ensure_tp
+engine/src/executor.rs:836:43: replace || with && in Executor::ensure_tp
+engine/src/executor.rs:836:25: replace || with && in Executor::ensure_tp
+engine/src/executor.rs:836:50: replace <= with > in Executor::ensure_tp
+engine/src/executor.rs:836:66: replace <= with > in Executor::ensure_tp
+engine/src/executor.rs:839:27: delete ! in Executor::ensure_tp
+engine/src/executor.rs:859:9: replace Executor::cancel_tp with ()
+engine/src/executor.rs:882:9: replace Executor::restore_tp_orders -> usize with 0
+engine/src/executor.rs:882:9: replace Executor::restore_tp_orders -> usize with 1
+engine/src/executor.rs:884:33: replace || with && in Executor::restore_tp_orders
+engine/src/executor.rs:884:16: delete ! in Executor::restore_tp_orders
+engine/src/executor.rs:891:27: replace > with == in Executor::restore_tp_orders
+engine/src/executor.rs:891:27: replace > with < in Executor::restore_tp_orders
+engine/src/executor.rs:891:27: replace > with >= in Executor::restore_tp_orders
+engine/src/executor.rs:894:19: replace += with -= in Executor::restore_tp_orders
+engine/src/executor.rs:894:19: replace += with *= in Executor::restore_tp_orders
+engine/src/executor.rs:904:27: replace && with || in Executor::restore_tp_orders
+engine/src/executor.rs:904:21: replace > with == in Executor::restore_tp_orders
+engine/src/executor.rs:904:21: replace > with < in Executor::restore_tp_orders
+engine/src/executor.rs:904:21: replace > with >= in Executor::restore_tp_orders
+engine/src/executor.rs:904:59: replace <= with > in Executor::restore_tp_orders
+engine/src/executor.rs:904:52: replace / with % in Executor::restore_tp_orders
+engine/src/executor.rs:904:52: replace / with * in Executor::restore_tp_orders
+engine/src/executor.rs:904:38: replace - with + in Executor::restore_tp_orders
+engine/src/executor.rs:904:38: replace - with / in Executor::restore_tp_orders
+engine/src/executor.rs:907:19: replace += with -= in Executor::restore_tp_orders
+engine/src/executor.rs:907:19: replace += with *= in Executor::restore_tp_orders
+engine/src/executor.rs:921:9: replace Executor::drain_tp_results -> usize with 0
+engine/src/executor.rs:921:9: replace Executor::drain_tp_results -> usize with 1
+engine/src/executor.rs:924:19: replace > with == in Executor::drain_tp_results
+engine/src/executor.rs:924:19: replace > with < in Executor::drain_tp_results
+engine/src/executor.rs:924:19: replace > with >= in Executor::drain_tp_results
+engine/src/executor.rs:927:15: replace += with -= in Executor::drain_tp_results
+engine/src/executor.rs:927:15: replace += with *= in Executor::drain_tp_results
+engine/src/executor.rs:929:14: replace > with == in Executor::drain_tp_results
+engine/src/executor.rs:929:14: replace > with < in Executor::drain_tp_results
+engine/src/executor.rs:929:14: replace > with >= in Executor::drain_tp_results
+engine/src/executor.rs:953:9: replace Executor::replace_sl -> Result<i64> with Ok(0)
+engine/src/executor.rs:953:9: replace Executor::replace_sl -> Result<i64> with Ok(1)
+engine/src/executor.rs:953:9: replace Executor::replace_sl -> Result<i64> with Ok(-1)
+engine/src/executor.rs:958:58: replace || with && in Executor::replace_sl
+engine/src/executor.rs:958:44: replace || with && in Executor::replace_sl
+engine/src/executor.rs:958:25: replace || with && in Executor::replace_sl
+engine/src/executor.rs:958:51: replace <= with > in Executor::replace_sl
+engine/src/executor.rs:958:68: replace <= with > in Executor::replace_sl
+engine/src/executor.rs:964:49: delete ! in Executor::replace_sl
+engine/src/executor.rs:967:18: replace != with == in Executor::replace_sl
+engine/src/executor.rs:995:9: replace Executor::cancel_sl with ()
+engine/src/executor.rs:1018:9: replace Executor::place_limit -> Result<Option<OrderInfo>> with Ok(None)
+engine/src/executor.rs:1018:28: replace || with && in Executor::place_limit
+engine/src/executor.rs:1018:12: delete ! in Executor::place_limit
+engine/src/executor.rs:1018:34: replace <= with > in Executor::place_limit
+engine/src/executor.rs:1022:34: replace || with && in Executor::place_limit
+engine/src/executor.rs:1022:12: delete ! in Executor::place_limit
+engine/src/executor.rs:1022:46: replace <= with > in Executor::place_limit
+engine/src/executor.rs:1027:12: delete ! in Executor::place_limit
+engine/src/executor.rs:1028:31: replace * with + in Executor::place_limit
+engine/src/executor.rs:1028:31: replace * with / in Executor::place_limit
+engine/src/executor.rs:1029:25: replace < with == in Executor::place_limit
+engine/src/executor.rs:1029:25: replace < with > in Executor::place_limit
+engine/src/executor.rs:1029:25: replace < with <= in Executor::place_limit
+engine/src/executor.rs:1035:15: replace <= with > in Executor::place_limit
+engine/src/executor.rs:1039:64: replace / with % in Executor::place_limit
+engine/src/executor.rs:1039:64: replace / with * in Executor::place_limit
+engine/src/executor.rs:1039:22: replace * with + in Executor::place_limit
+engine/src/executor.rs:1039:22: replace * with / in Executor::place_limit
+engine/src/executor.rs:1040:27: replace * with + in Executor::place_limit
+engine/src/executor.rs:1040:27: replace * with / in Executor::place_limit
+engine/src/executor.rs:1041:25: replace && with || in Executor::place_limit
+engine/src/executor.rs:1041:12: delete ! in Executor::place_limit
+engine/src/executor.rs:1041:37: replace < with == in Executor::place_limit
+engine/src/executor.rs:1041:37: replace < with > in Executor::place_limit
+engine/src/executor.rs:1041:37: replace < with <= in Executor::place_limit
+engine/src/executor.rs:1066:13: delete match arm (Some(_), _) in Executor::place_limit
+engine/src/executor.rs:1069:13: delete match arm (None, Some((total_sz, avg_px, _))) in Executor::place_limit
+engine/src/executor.rs:1071:33: replace += with -= in Executor::place_limit
+engine/src/executor.rs:1071:33: replace += with *= in Executor::place_limit
+engine/src/executor.rs:1080:9: replace Executor::cancel -> Result<()> with Ok(())
+engine/src/executor.rs:1095:9: replace Executor::cancel_all_open_orders -> anyhow::Result<usize> with Ok(0)
+engine/src/executor.rs:1095:9: replace Executor::cancel_all_open_orders -> anyhow::Result<usize> with Ok(1)
+engine/src/executor.rs:1099:29: replace += with -= in Executor::cancel_all_open_orders
+engine/src/executor.rs:1099:29: replace += with *= in Executor::cancel_all_open_orders
+engine/src/executor.rs:1112:9: replace Executor::cancel_all -> Result<usize> with Ok(0)
+engine/src/executor.rs:1112:9: replace Executor::cancel_all -> Result<usize> with Ok(1)
+engine/src/executor.rs:1116:32: replace == with != in Executor::cancel_all
+engine/src/executor.rs:1122:29: replace += with -= in Executor::cancel_all
+engine/src/executor.rs:1122:29: replace += with *= in Executor::cancel_all
+engine/src/executor.rs:1134:9: replace Executor::parse_open_orders -> Vec<OpenOrderRow> with vec![]
+engine/src/executor.rs:1143:36: replace == with != in Executor::parse_open_orders
+engine/src/executor.rs:1196:9: replace Executor::refresh_open_orders_all -> Result<Vec<OpenOrderRow>> with Ok(vec![])
+engine/src/executor.rs:1206:9: replace Executor::fetch_open_order_rows -> Result<Vec<OpenOrderRow>> with Ok(vec![])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![(String::new(), 0)])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![(String::new(), 1)])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![(String::new(), -1)])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![("xyzzy".into(), 0)])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![("xyzzy".into(), 1)])
+engine/src/executor.rs:1212:9: replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![("xyzzy".into(), -1)])
+engine/src/executor.rs:1249:17: replace || with && in Executor::refresh_orders
+engine/src/executor.rs:1251:32: replace && with || in Executor::refresh_orders
+engine/src/executor.rs:1251:59: replace != with == in Executor::refresh_orders
+engine/src/executor.rs:1253:27: replace > with == in Executor::refresh_orders
+engine/src/executor.rs:1253:27: replace > with < in Executor::refresh_orders
+engine/src/executor.rs:1253:27: replace > with >= in Executor::refresh_orders
+engine/src/executor.rs:1267:42: replace > with == in Executor::refresh_orders
+engine/src/executor.rs:1267:42: replace > with < in Executor::refresh_orders
+engine/src/executor.rs:1267:42: replace > with >= in Executor::refresh_orders
+engine/src/executor.rs:1269:35: replace && with || in Executor::refresh_orders
+engine/src/executor.rs:1269:20: delete ! in Executor::refresh_orders
+engine/src/executor.rs:1282:30: replace > with == in Executor::refresh_orders
+engine/src/executor.rs:1282:30: replace > with < in Executor::refresh_orders
+engine/src/executor.rs:1282:30: replace > with >= in Executor::refresh_orders
+engine/src/executor.rs:1285:44: replace / with % in Executor::refresh_orders
+engine/src/executor.rs:1285:44: replace / with * in Executor::refresh_orders
+engine/src/executor.rs:1285:63: replace / with % in Executor::refresh_orders
+engine/src/executor.rs:1285:63: replace / with * in Executor::refresh_orders
+engine/src/executor.rs:1288:43: replace > with == in Executor::refresh_orders
+engine/src/executor.rs:1288:43: replace > with < in Executor::refresh_orders
+engine/src/executor.rs:1288:43: replace > with >= in Executor::refresh_orders
+engine/src/executor.rs:1289:50: replace / with % in Executor::refresh_orders
+engine/src/executor.rs:1289:50: replace / with * in Executor::refresh_orders
+engine/src/executor.rs:1289:35: replace - with + in Executor::refresh_orders
+engine/src/executor.rs:1289:35: replace - with / in Executor::refresh_orders
+engine/src/executor.rs:1293:32: replace > with == in Executor::refresh_orders
+engine/src/executor.rs:1293:32: replace > with < in Executor::refresh_orders
+engine/src/executor.rs:1293:32: replace > with >= in Executor::refresh_orders
+engine/src/executor.rs:1320:9: replace Executor::dedupe_sl -> usize with 0
+engine/src/executor.rs:1320:9: replace Executor::dedupe_sl -> usize with 1
+engine/src/executor.rs:1328:27: replace > with == in Executor::dedupe_sl
+engine/src/executor.rs:1328:27: replace > with < in Executor::dedupe_sl
+engine/src/executor.rs:1328:27: replace > with >= in Executor::dedupe_sl
+engine/src/executor.rs:1329:46: replace - with + in Executor::dedupe_sl
+engine/src/executor.rs:1329:46: replace - with / in Executor::dedupe_sl
+engine/src/executor.rs:1332:39: replace += with -= in Executor::dedupe_sl
+engine/src/executor.rs:1332:39: replace += with *= in Executor::dedupe_sl
+engine/src/executor.rs:1363:44: replace / with % in Executor::dedupe_sl
+engine/src/executor.rs:1363:44: replace / with * in Executor::dedupe_sl
+engine/src/executor.rs:1363:65: replace / with % in Executor::dedupe_sl
+engine/src/executor.rs:1363:65: replace / with * in Executor::dedupe_sl
+engine/src/executor.rs:1369:27: replace > with == in Executor::dedupe_sl
+engine/src/executor.rs:1369:27: replace > with < in Executor::dedupe_sl
+engine/src/executor.rs:1369:27: replace > with >= in Executor::dedupe_sl
+engine/src/executor.rs:1378:9: replace Executor::refresh_positions -> Result<()> with Ok(())
+engine/src/executor.rs:1428:9: replace Executor::handle_ws_event with ()
+engine/src/executor.rs:1429:13: delete match arm "orderUpdates" in Executor::handle_ws_event
+engine/src/executor.rs:1433:13: delete match arm "user" | "userEvents" | "userNonFundingLedgerUpdates" in Executor::handle_ws_event
+engine/src/executor.rs:1450:9: replace Executor::apply_order_update with ()
+engine/src/executor.rs:1450:29: replace < with == in Executor::apply_order_update
+engine/src/executor.rs:1450:29: replace < with > in Executor::apply_order_update
+engine/src/executor.rs:1450:29: replace < with <= in Executor::apply_order_update
+engine/src/executor.rs:1451:30: replace += with -= in Executor::apply_order_update
+engine/src/executor.rs:1451:30: replace += with *= in Executor::apply_order_update
+engine/src/executor.rs:1474:9: replace Executor::apply_one_order_update with ()
+engine/src/executor.rs:1478:29: replace || with && in Executor::apply_one_order_update
+engine/src/executor.rs:1478:19: replace == with != in Executor::apply_one_order_update
+engine/src/executor.rs:1478:39: replace == with != in Executor::apply_one_order_update
+engine/src/executor.rs:1487:32: replace - with + in Executor::apply_one_order_update
+engine/src/executor.rs:1487:32: replace - with / in Executor::apply_one_order_update
+engine/src/executor.rs:1496:41: replace == with != in Executor::apply_one_order_update
+engine/src/executor.rs:1514:42: replace == with != in Executor::apply_one_order_update
+engine/src/executor.rs:1519:23: replace == with != in Executor::apply_one_order_update
+engine/src/executor.rs:1539:33: replace += with -= in Executor::apply_one_order_update
+engine/src/executor.rs:1539:33: replace += with *= in Executor::apply_one_order_update
+engine/src/executor.rs:1540:30: replace != with == in Executor::apply_one_order_update
+engine/src/executor.rs:1547:9: replace Executor::apply_fill with ()
+engine/src/executor.rs:1560:28: replace && with || in Executor::apply_fill
+engine/src/executor.rs:1560:12: delete ! in Executor::apply_fill
+engine/src/executor.rs:1564:25: replace += with -= in Executor::apply_fill
+engine/src/executor.rs:1564:25: replace += with *= in Executor::apply_fill
+engine/src/executor.rs:1565:27: replace += with -= in Executor::apply_fill
+engine/src/executor.rs:1565:27: replace += with *= in Executor::apply_fill
+engine/src/executor.rs:1571:57: replace && with || in Executor::apply_fill
+engine/src/executor.rs:1571:29: replace && with || in Executor::apply_fill
+engine/src/executor.rs:1571:12: delete ! in Executor::apply_fill
+engine/src/executor.rs:1571:32: delete ! in Executor::apply_fill
+engine/src/executor.rs:1571:60: delete ! in Executor::apply_fill
+engine/src/executor.rs:1572:65: replace += with -= in Executor::apply_fill
+engine/src/executor.rs:1572:65: replace += with *= in Executor::apply_fill
+engine/src/executor.rs:1576:29: replace && with || in Executor::apply_fill
+engine/src/executor.rs:1576:12: delete ! in Executor::apply_fill
+engine/src/executor.rs:1576:35: replace > with == in Executor::apply_fill
+engine/src/executor.rs:1576:35: replace > with < in Executor::apply_fill
+engine/src/executor.rs:1576:35: replace > with >= in Executor::apply_fill
+engine/src/executor.rs:1577:60: replace == with != in Executor::apply_fill
+engine/src/executor.rs:1587:35: replace += with -= in Executor::apply_fill
+engine/src/executor.rs:1587:35: replace += with *= in Executor::apply_fill
+engine/src/executor.rs:1589:35: replace -= with += in Executor::apply_fill
+engine/src/executor.rs:1589:35: replace -= with /= in Executor::apply_fill
+engine/src/executor.rs:1591:47: replace * with + in Executor::apply_fill
+engine/src/executor.rs:1591:47: replace * with / in Executor::apply_fill
+engine/src/executor.rs:1598:62: delete - in Executor::apply_fill
+engine/src/executor.rs:1600:52: replace * with + in Executor::apply_fill
+engine/src/executor.rs:1600:52: replace * with / in Executor::apply_fill
+engine/src/executor.rs:1614:46: replace == with != in Executor::apply_fill
+engine/src/executor.rs:1624:63: replace == with != in Executor::apply_fill
+engine/src/executor.rs:1635:75: replace == with != in Executor::apply_fill
+engine/src/executor.rs:1635:66: replace < with == in Executor::apply_fill
+engine/src/executor.rs:1635:66: replace < with > in Executor::apply_fill
+engine/src/executor.rs:1635:66: replace < with <= in Executor::apply_fill
+engine/src/executor.rs:1679:49: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1679:49: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1679:68: replace + with - in Executor::apply_fill
+engine/src/executor.rs:1679:68: replace + with * in Executor::apply_fill
+engine/src/executor.rs:1685:36: replace * with + in Executor::apply_fill
+engine/src/executor.rs:1685:36: replace * with / in Executor::apply_fill
+engine/src/executor.rs:1687:37: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1687:31: replace >= with < in Executor::apply_fill
+engine/src/executor.rs:1687:48: replace < with == in Executor::apply_fill
+engine/src/executor.rs:1687:48: replace < with > in Executor::apply_fill
+engine/src/executor.rs:1687:48: replace < with <= in Executor::apply_fill
+engine/src/executor.rs:1687:43: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1687:43: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1688:37: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1688:37: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1690:40: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1690:34: replace <= with > in Executor::apply_fill
+engine/src/executor.rs:1690:51: replace < with == in Executor::apply_fill
+engine/src/executor.rs:1690:51: replace < with > in Executor::apply_fill
+engine/src/executor.rs:1690:51: replace < with <= in Executor::apply_fill
+engine/src/executor.rs:1690:46: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1690:46: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1691:33: replace + with - in Executor::apply_fill
+engine/src/executor.rs:1691:33: replace + with * in Executor::apply_fill
+engine/src/executor.rs:1719:53: replace + with - in Executor::apply_fill
+engine/src/executor.rs:1719:53: replace + with * in Executor::apply_fill
+engine/src/executor.rs:1719:72: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1719:72: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1720:45: replace * with + in Executor::apply_fill
+engine/src/executor.rs:1720:45: replace * with / in Executor::apply_fill
+engine/src/executor.rs:1721:61: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1721:61: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1721:78: replace - with + in Executor::apply_fill
+engine/src/executor.rs:1721:78: replace - with / in Executor::apply_fill
+engine/src/executor.rs:1722:41: replace && with || in Executor::apply_fill
+engine/src/executor.rs:1722:35: replace > with == in Executor::apply_fill
+engine/src/executor.rs:1722:35: replace > with < in Executor::apply_fill
+engine/src/executor.rs:1722:35: replace > with >= in Executor::apply_fill
+engine/src/executor.rs:1722:55: replace >= with < in Executor::apply_fill
+engine/src/executor.rs:1733:84: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1733:69: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1733:54: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1733:77: replace <= with > in Executor::apply_fill
+engine/src/executor.rs:1733:90: replace <= with > in Executor::apply_fill
+engine/src/executor.rs:1739:41: delete ! in Executor::apply_fill
+engine/src/executor.rs:1770:74: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1770:60: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1770:45: replace || with && in Executor::apply_fill
+engine/src/executor.rs:1770:67: replace <= with > in Executor::apply_fill
+engine/src/executor.rs:1770:80: replace <= with > in Executor::apply_fill
+engine/src/executor.rs:1773:61: delete ! in Executor::apply_fill
+engine/src/executor.rs:1804:9: replace Executor::drain_sl_results -> usize with 0
+engine/src/executor.rs:1804:9: replace Executor::drain_sl_results -> usize with 1
+engine/src/executor.rs:1807:19: replace > with == in Executor::drain_sl_results
+engine/src/executor.rs:1807:19: replace > with < in Executor::drain_sl_results
+engine/src/executor.rs:1807:19: replace > with >= in Executor::drain_sl_results
+engine/src/executor.rs:1810:15: replace += with -= in Executor::drain_sl_results
+engine/src/executor.rs:1810:15: replace += with *= in Executor::drain_sl_results
+engine/src/executor.rs:1812:14: replace > with == in Executor::drain_sl_results
+engine/src/executor.rs:1812:14: replace > with < in Executor::drain_sl_results
+engine/src/executor.rs:1812:14: replace > with >= in Executor::drain_sl_results
+engine/src/executor.rs:1820:9: replace Executor::drain_fills -> Vec<FillEvent> with vec![]
+engine/src/executor.rs:1824:9: replace Executor::open_orders -> &HashMap<i64, OrderInfo> with Box::leak(Box::new(HashMap::new()))
+engine/src/executor.rs:1827:9: replace Executor::positions -> &HashMap<String, Position> with Box::leak(Box::new(HashMap::new()))
+engine/src/executor.rs:1827:9: replace Executor::positions -> &HashMap<String, Position> with Box::leak(Box::new(HashMap::from_iter([(String::new(), Default::default())])))
+engine/src/executor.rs:1827:9: replace Executor::positions -> &HashMap<String, Position> with Box::leak(Box::new(HashMap::from_iter([("xyzzy".into(), Default::default())])))
+engine/src/executor.rs:1830:9: replace Executor::realized_pnl -> f64 with 0.0
+engine/src/executor.rs:1830:9: replace Executor::realized_pnl -> f64 with 1.0
+engine/src/executor.rs:1830:9: replace Executor::realized_pnl -> f64 with -1.0
+engine/src/executor.rs:1837:9: replace Executor::closed_pnl_coins -> Vec<String> with vec![]
+engine/src/executor.rs:1837:9: replace Executor::closed_pnl_coins -> Vec<String> with vec![String::new()]
+engine/src/executor.rs:1837:9: replace Executor::closed_pnl_coins -> Vec<String> with vec!["xyzzy".into()]
+engine/src/executor.rs:1843:9: replace Executor::take_closed_pnl -> Option<f64> with None
+engine/src/executor.rs:1843:9: replace Executor::take_closed_pnl -> Option<f64> with Some(0.0)
+engine/src/executor.rs:1843:9: replace Executor::take_closed_pnl -> Option<f64> with Some(1.0)
+engine/src/executor.rs:1843:9: replace Executor::take_closed_pnl -> Option<f64> with Some(-1.0)
+engine/src/executor.rs:1846:9: replace Executor::fill_count -> usize with 0
+engine/src/executor.rs:1846:9: replace Executor::fill_count -> usize with 1
+engine/src/executor.rs:1849:9: replace Executor::user -> &str with ""
+engine/src/executor.rs:1849:9: replace Executor::user -> &str with "xyzzy"
+engine/src/executor.rs:1915:9: replace Executor::batch_execute -> anyhow::Result<Vec<BatchOut>> with Ok(vec![])
+engine/src/executor.rs:1916:12: delete ! in Executor::batch_execute
+engine/src/executor.rs:1924:47: replace == with != in Executor::batch_execute
+engine/src/executor.rs:2005:21: replace && with || in Executor::batch_execute
+engine/src/executor.rs:2005:30: replace < with == in Executor::batch_execute
+engine/src/executor.rs:2005:30: replace < with > in Executor::batch_execute
+engine/src/executor.rs:2005:30: replace < with <= in Executor::batch_execute
+engine/src/executor.rs:2009:29: replace <= with > in Executor::batch_execute
+engine/src/executor.rs:2011:32: replace >= with < in Executor::batch_execute
+engine/src/executor.rs:2014:29: replace += with -= in Executor::batch_execute
+engine/src/executor.rs:2014:29: replace += with *= in Executor::batch_execute
+engine/src/executor.rs:2016:31: replace += with -= in Executor::batch_execute
+engine/src/executor.rs:2016:31: replace += with *= in Executor::batch_execute
+engine/src/executor.rs:2022:25: delete field px from struct hyperliquid_api::exchange_endpoint::WireOrder expression in Executor::batch_execute
+engine/src/executor.rs:2054:27: replace += with -= in Executor::batch_execute
+engine/src/executor.rs:2054:27: replace += with *= in Executor::batch_execute
+engine/src/executor.rs:2069:12: delete ! in Executor::batch_execute
+engine/src/executor.rs:2087:9: replace Executor::cached_asset -> Option<(u32, u32)> with None
+engine/src/executor.rs:2087:9: replace Executor::cached_asset -> Option<(u32, u32)> with Some((0, 0))
+engine/src/executor.rs:2087:9: replace Executor::cached_asset -> Option<(u32, u32)> with Some((0, 1))
+engine/src/executor.rs:2087:9: replace Executor::cached_asset -> Option<(u32, u32)> with Some((1, 0))
+engine/src/executor.rs:2087:9: replace Executor::cached_asset -> Option<(u32, u32)> with Some((1, 1))
+engine/src/executor.rs:2092:9: replace Executor::sz_dec_of -> u32 with 0
+engine/src/executor.rs:2092:9: replace Executor::sz_dec_of -> u32 with 1
+engine/src/executor.rs:2094:39: replace == with != in Executor::sz_dec_of
+engine/src/executor.rs:2101:9: replace Executor::coin_of -> String with String::new()
+engine/src/executor.rs:2101:9: replace Executor::coin_of -> String with "xyzzy".into()
+engine/src/executor.rs:2103:39: replace == with != in Executor::coin_of
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![(String::new(), 0)]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![(String::new(), 1)]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![(String::new(), -1)]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![("xyzzy".into(), 0)]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![("xyzzy".into(), 1)]
+engine/src/executor.rs:2112:9: replace Executor::open_orders_view -> Vec<(String, i64)> with vec![("xyzzy".into(), -1)]
+engine/src/orderbook.rs:51:9: replace LocalBook::sync_from_rest -> Result<()> with Ok(())
+engine/src/orderbook.rs:87:9: replace LocalBook::apply_ws -> bool with true
+engine/src/orderbook.rs:87:9: replace LocalBook::apply_ws -> bool with false
+engine/src/orderbook.rs:87:34: replace != with == in LocalBook::apply_ws
+engine/src/orderbook.rs:92:24: replace match guard l.len() == 2 with true in LocalBook::apply_ws
+engine/src/orderbook.rs:92:24: replace match guard l.len() == 2 with false in LocalBook::apply_ws
+engine/src/orderbook.rs:92:32: replace == with != in LocalBook::apply_ws
+engine/src/orderbook.rs:101:9: replace LocalBook::apply_snapshot with ()
+engine/src/orderbook.rs:121:33: replace || with && in LocalBook::apply_snapshot
+engine/src/orderbook.rs:127:9: replace LocalBook::best_bid -> Option<LevelF> with None
+engine/src/orderbook.rs:130:9: replace LocalBook::best_ask -> Option<LevelF> with None
+engine/src/orderbook.rs:133:9: replace LocalBook::mid -> Option<f64> with None
+engine/src/orderbook.rs:133:9: replace LocalBook::mid -> Option<f64> with Some(0.0)
+engine/src/orderbook.rs:133:9: replace LocalBook::mid -> Option<f64> with Some(1.0)
+engine/src/orderbook.rs:133:9: replace LocalBook::mid -> Option<f64> with Some(-1.0)
+engine/src/orderbook.rs:133:58: replace / with % in LocalBook::mid
+engine/src/orderbook.rs:133:58: replace / with * in LocalBook::mid
+engine/src/orderbook.rs:133:35: replace + with - in LocalBook::mid
+engine/src/orderbook.rs:133:35: replace + with * in LocalBook::mid
+engine/src/orderbook.rs:136:9: replace LocalBook::spread_bps -> Option<f64> with None
+engine/src/orderbook.rs:136:9: replace LocalBook::spread_bps -> Option<f64> with Some(0.0)
+engine/src/orderbook.rs:136:9: replace LocalBook::spread_bps -> Option<f64> with Some(1.0)
+engine/src/orderbook.rs:136:9: replace LocalBook::spread_bps -> Option<f64> with Some(-1.0)
+engine/src/orderbook.rs:137:14: replace <= with > in LocalBook::spread_bps
+engine/src/orderbook.rs:140:40: replace * with + in LocalBook::spread_bps
+engine/src/orderbook.rs:140:40: replace * with / in LocalBook::spread_bps
+engine/src/orderbook.rs:140:22: replace / with % in LocalBook::spread_bps
+engine/src/orderbook.rs:140:22: replace / with * in LocalBook::spread_bps
+engine/src/orderbook.rs:140:17: replace - with + in LocalBook::spread_bps
+engine/src/orderbook.rs:140:17: replace - with / in LocalBook::spread_bps
+engine/src/orderbook.rs:140:33: replace / with % in LocalBook::spread_bps
+engine/src/orderbook.rs:140:33: replace / with * in LocalBook::spread_bps
+engine/src/orderbook.rs:140:28: replace + with - in LocalBook::spread_bps
+engine/src/orderbook.rs:140:28: replace + with * in LocalBook::spread_bps
+engine/src/orderbook.rs:145:9: replace LocalBook::imbalance -> Option<f64> with None
+engine/src/orderbook.rs:145:9: replace LocalBook::imbalance -> Option<f64> with Some(0.0)
+engine/src/orderbook.rs:145:9: replace LocalBook::imbalance -> Option<f64> with Some(1.0)
+engine/src/orderbook.rs:145:9: replace LocalBook::imbalance -> Option<f64> with Some(-1.0)
+engine/src/orderbook.rs:147:18: replace <= with > in LocalBook::imbalance
+engine/src/orderbook.rs:147:14: replace + with - in LocalBook::imbalance
+engine/src/orderbook.rs:147:14: replace + with * in LocalBook::imbalance
+engine/src/orderbook.rs:150:22: replace / with % in LocalBook::imbalance
+engine/src/orderbook.rs:150:22: replace / with * in LocalBook::imbalance
+engine/src/orderbook.rs:150:17: replace - with + in LocalBook::imbalance
+engine/src/orderbook.rs:150:17: replace - with / in LocalBook::imbalance
+engine/src/orderbook.rs:150:27: replace + with - in LocalBook::imbalance
+engine/src/orderbook.rs:150:27: replace + with * in LocalBook::imbalance
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with None
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((0.0, 0.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((0.0, 1.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((0.0, -1.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((1.0, 0.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((1.0, 1.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((1.0, -1.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((-1.0, 0.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((-1.0, 1.0))
+engine/src/orderbook.rs:156:9: replace LocalBook::vwap_fill -> Option<(f64, f64)> with Some((-1.0, -1.0))
+engine/src/orderbook.rs:164:21: replace <= with > in LocalBook::vwap_fill
+engine/src/orderbook.rs:168:18: replace += with -= in LocalBook::vwap_fill
+engine/src/orderbook.rs:168:18: replace += with *= in LocalBook::vwap_fill
+engine/src/orderbook.rs:168:26: replace * with + in LocalBook::vwap_fill
+engine/src/orderbook.rs:168:26: replace * with / in LocalBook::vwap_fill
+engine/src/orderbook.rs:169:20: replace += with -= in LocalBook::vwap_fill
+engine/src/orderbook.rs:169:20: replace += with *= in LocalBook::vwap_fill
+engine/src/orderbook.rs:170:18: replace -= with += in LocalBook::vwap_fill
+engine/src/orderbook.rs:170:18: replace -= with /= in LocalBook::vwap_fill
+engine/src/orderbook.rs:172:19: replace <= with > in LocalBook::vwap_fill
+engine/src/orderbook.rs:175:20: replace / with % in LocalBook::vwap_fill
+engine/src/orderbook.rs:175:20: replace / with * in LocalBook::vwap_fill
+engine/src/orderbook.rs:180:9: replace LocalBook::depth_within_bps -> Option<f64> with None
+engine/src/orderbook.rs:180:9: replace LocalBook::depth_within_bps -> Option<f64> with Some(0.0)
+engine/src/orderbook.rs:180:9: replace LocalBook::depth_within_bps -> Option<f64> with Some(1.0)
+engine/src/orderbook.rs:180:9: replace LocalBook::depth_within_bps -> Option<f64> with Some(-1.0)
+engine/src/orderbook.rs:182:39: delete - in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:69: replace <= with > in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:58: replace * with + in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:58: replace * with / in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:52: replace / with % in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:52: replace / with * in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:46: replace * with + in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:46: replace * with / in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:39: replace - with + in LocalBook::depth_within_bps
+engine/src/orderbook.rs:187:39: replace - with / in LocalBook::depth_within_bps
+engine/src/orderbook.rs:195:9: replace LocalBook::is_stale -> bool with true
+engine/src/orderbook.rs:195:9: replace LocalBook::is_stale -> bool with false
+engine/src/orderbook.rs:195:35: replace > with == in LocalBook::is_stale
+engine/src/orderbook.rs:195:35: replace > with < in LocalBook::is_stale
+engine/src/orderbook.rs:195:35: replace > with >= in LocalBook::is_stale
+engine/src/orderbook.rs:200:9: replace LocalBook::is_sane -> Result<()> with Ok(())
+engine/src/orderbook.rs:211:13: delete match arm (Some(b), Some(a)) in LocalBook::is_sane
+engine/src/orderbook.rs:202:35: replace match guard b.px < a.px with true in LocalBook::is_sane
+engine/src/orderbook.rs:202:35: replace match guard b.px < a.px with false in LocalBook::is_sane
+engine/src/orderbook.rs:202:40: replace < with == in LocalBook::is_sane
+engine/src/orderbook.rs:202:40: replace < with > in LocalBook::is_sane
+engine/src/orderbook.rs:202:40: replace < with <= in LocalBook::is_sane
+engine/src/orderbook.rs:203:71: replace > with == in LocalBook::is_sane
+engine/src/orderbook.rs:203:71: replace > with < in LocalBook::is_sane
+engine/src/orderbook.rs:203:71: replace > with >= in LocalBook::is_sane
+engine/src/orderbook.rs:204:71: replace < with == in LocalBook::is_sane
+engine/src/orderbook.rs:204:71: replace < with > in LocalBook::is_sane
+engine/src/orderbook.rs:204:71: replace < with <= in LocalBook::is_sane
+engine/src/orderbook.rs:205:31: replace && with || in LocalBook::is_sane
+engine/src/risk_manager.rs:93:9: replace RiskManager::config -> &RiskConfig with Box::leak(Box::new(Default::default()))
+engine/src/risk_manager.rs:98:9: replace RiskManager::update_equity with ()
+engine/src/risk_manager.rs:99:19: replace > with == in RiskManager::update_equity
+engine/src/risk_manager.rs:99:19: replace > with < in RiskManager::update_equity
+engine/src/risk_manager.rs:99:19: replace > with >= in RiskManager::update_equity
+engine/src/risk_manager.rs:102:29: replace > with == in RiskManager::update_equity
+engine/src/risk_manager.rs:102:29: replace > with < in RiskManager::update_equity
+engine/src/risk_manager.rs:102:29: replace > with >= in RiskManager::update_equity
+engine/src/risk_manager.rs:104:48: replace && with || in RiskManager::update_equity
+engine/src/risk_manager.rs:104:19: replace >= with < in RiskManager::update_equity
+engine/src/risk_manager.rs:116:9: replace RiskManager::drawdown_pct -> f64 with 0.0
+engine/src/risk_manager.rs:116:9: replace RiskManager::drawdown_pct -> f64 with 1.0
+engine/src/risk_manager.rs:116:9: replace RiskManager::drawdown_pct -> f64 with -1.0
+engine/src/risk_manager.rs:116:29: replace <= with > in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:56: replace * with + in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:56: replace * with / in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:37: replace / with % in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:37: replace / with * in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:27: replace - with + in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:119:27: replace - with / in RiskManager::drawdown_pct
+engine/src/risk_manager.rs:123:9: replace RiskManager::is_halted -> bool with true
+engine/src/risk_manager.rs:123:9: replace RiskManager::is_halted -> bool with false
+engine/src/risk_manager.rs:127:9: replace RiskManager::halt_reason -> Option<&str> with None
+engine/src/risk_manager.rs:127:9: replace RiskManager::halt_reason -> Option<&str> with Some("")
+engine/src/risk_manager.rs:127:9: replace RiskManager::halt_reason -> Option<&str> with Some("xyzzy")
+engine/src/risk_manager.rs:135:9: replace RiskManager::save_state -> anyhow::Result<()> with Ok(())
+engine/src/risk_manager.rs:157:9: replace RiskManager::load_state -> bool with true
+engine/src/risk_manager.rs:157:9: replace RiskManager::load_state -> bool with false
+engine/src/risk_manager.rs:182:9: replace RiskManager::resume with ()
+engine/src/risk_manager.rs:190:9: replace RiskManager::max_positions -> usize with 0
+engine/src/risk_manager.rs:190:9: replace RiskManager::max_positions -> usize with 1
+engine/src/risk_manager.rs:190:33: replace / with % in RiskManager::max_positions
+engine/src/risk_manager.rs:190:33: replace / with * in RiskManager::max_positions
+engine/src/risk_manager.rs:195:9: replace RiskManager::total_exposure -> f64 with 0.0
+engine/src/risk_manager.rs:195:9: replace RiskManager::total_exposure -> f64 with 1.0
+engine/src/risk_manager.rs:195:9: replace RiskManager::total_exposure -> f64 with -1.0
+engine/src/risk_manager.rs:208:9: replace RiskManager::pre_trade -> Result<(), RiskViolation> with Ok(())
+engine/src/risk_manager.rs:211:19: replace < with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:211:19: replace < with > in RiskManager::pre_trade
+engine/src/risk_manager.rs:211:19: replace < with <= in RiskManager::pre_trade
+engine/src/risk_manager.rs:215:31: replace < with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:215:31: replace < with > in RiskManager::pre_trade
+engine/src/risk_manager.rs:215:31: replace < with <= in RiskManager::pre_trade
+engine/src/risk_manager.rs:219:15: replace >= with < in RiskManager::pre_trade
+engine/src/risk_manager.rs:226:33: replace + with - in RiskManager::pre_trade
+engine/src/risk_manager.rs:226:33: replace + with * in RiskManager::pre_trade
+engine/src/risk_manager.rs:227:22: replace > with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:227:22: replace > with < in RiskManager::pre_trade
+engine/src/risk_manager.rs:227:22: replace > with >= in RiskManager::pre_trade
+engine/src/risk_manager.rs:233:53: replace + with - in RiskManager::pre_trade
+engine/src/risk_manager.rs:233:53: replace + with * in RiskManager::pre_trade
+engine/src/risk_manager.rs:234:18: replace > with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:234:18: replace > with < in RiskManager::pre_trade
+engine/src/risk_manager.rs:234:18: replace > with >= in RiskManager::pre_trade
+engine/src/risk_manager.rs:240:21: replace > with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:240:21: replace > with < in RiskManager::pre_trade
+engine/src/risk_manager.rs:240:21: replace > with >= in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:37: replace > with == in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:37: replace > with < in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:37: replace > with >= in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:33: replace + with - in RiskManager::pre_trade
+engine/src/risk_manager.rs:243:33: replace + with * in RiskManager::pre_trade
+engine/src/risk_manager.rs:245:38: replace + with - in RiskManager::pre_trade
+engine/src/risk_manager.rs:245:38: replace + with * in RiskManager::pre_trade
+engine/src/state_machine.rs:26:9: replace Side::is_buy -> bool with true
+engine/src/state_machine.rs:26:9: replace Side::is_buy -> bool with false
+engine/src/state_machine.rs:26:14: replace == with != in Side::is_buy
+engine/src/state_machine.rs:143:9: replace PositionStateMachine::recover with ()
+engine/src/state_machine.rs:144:48: replace match guard size.abs() > 1e-12 with true in PositionStateMachine::recover
+engine/src/state_machine.rs:144:48: replace match guard size.abs() > 1e-12 with false in PositionStateMachine::recover
+engine/src/state_machine.rs:144:59: replace > with == in PositionStateMachine::recover
+engine/src/state_machine.rs:144:59: replace > with < in PositionStateMachine::recover
+engine/src/state_machine.rs:144:59: replace > with >= in PositionStateMachine::recover
+engine/src/state_machine.rs:160:28: replace >= with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:175:35: replace <= with > in PositionStateMachine::on_decision
+engine/src/state_machine.rs:175:38: delete - in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:59: replace || with && in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:41: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:27: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:52: replace > with >= in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:83: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:68: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with > in PositionStateMachine::on_decision
+engine/src/state_machine.rs:206:94: replace < with <= in PositionStateMachine::on_decision
+engine/src/state_machine.rs:212:34: replace >= with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:213:28: replace != with == in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:21: replace || with && in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:51: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:37: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:62: replace <= with > in PositionStateMachine::on_decision
+engine/src/state_machine.rs:222:65: delete - in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:45: replace && with || in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:30: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:223:56: replace >= with < in PositionStateMachine::on_decision
+engine/src/state_machine.rs:232:37: replace == with != in PositionStateMachine::on_decision
+engine/src/state_machine.rs:254:13: delete match arm PosState::InPosition{side, size, ..} in PositionStateMachine::force_exit
+engine/src/state_machine.rs:260:33: replace == with != in PositionStateMachine::force_exit
+engine/src/state_machine.rs:271:9: replace PositionStateMachine::link_pending_oid with ()
+engine/src/state_machine.rs:282:20: replace match guard *poid == oid with true in PositionStateMachine::on_rejected
+engine/src/state_machine.rs:282:20: replace match guard *poid == oid with false in PositionStateMachine::on_rejected
+engine/src/state_machine.rs:282:26: replace == with != in PositionStateMachine::on_rejected
+engine/src/state_machine.rs:300:47: replace match guard oid == pending_oid(&self.state).unwrap_or(0) with true in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:300:47: replace match guard oid == pending_oid(&self.state).unwrap_or(0) with false in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:318:58: replace match guard oid != 0 && oid == poid with true in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:318:58: replace match guard oid != 0 && oid == poid with false in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:300:51: replace == with != in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:301:30: replace <= with > in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:318:67: replace && with || in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:318:62: replace != with == in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:318:74: replace == with != in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:319:30: replace <= with > in PositionStateMachine::on_order_status
+engine/src/state_machine.rs:335:13: delete match arm PosState::InPosition{side, entry, size, peak,} in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:366:13: delete match arm PosState::Pending{oid, remaining, ts, ..} in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:346:54: replace / with % in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:346:54: replace / with * in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:346:45: replace - with + in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:346:45: replace - with / in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:347:55: replace / with % in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:347:55: replace / with * in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:347:43: replace - with + in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:347:43: replace - with / in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:349:33: replace >= with < in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:349:25: replace * with + in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:349:25: replace * with / in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:83: replace && with || in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:62: replace && with || in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:32: replace > with == in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:32: replace > with < in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:32: replace > with >= in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:27: replace - with + in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:27: replace - with / in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:75: replace > with == in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:75: replace > with < in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:75: replace > with >= in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:370:90: replace != with == in PositionStateMachine::on_price_tick
+engine/src/state_machine.rs:385:9: replace PositionStateMachine::is_recon_pending -> bool with true
+engine/src/state_machine.rs:385:9: replace PositionStateMachine::is_recon_pending -> bool with false
+engine/src/state_machine.rs:390:9: replace PositionStateMachine::enter_reconciliation with ()
+engine/src/state_machine.rs:402:9: replace PositionStateMachine::link_recon_oid with ()
+engine/src/state_machine.rs:414:9: replace PositionStateMachine::recon_to_position with ()
+engine/src/state_machine.rs:425:9: replace PositionStateMachine::recon_attempt_bump -> u8 with 0
+engine/src/state_machine.rs:425:9: replace PositionStateMachine::recon_attempt_bump -> u8 with 1
+engine/src/state_machine.rs:447:9: replace PositionStateMachine::oid_zero_pending -> bool with true
+engine/src/state_machine.rs:447:9: replace PositionStateMachine::oid_zero_pending -> bool with false
+engine/src/state_machine.rs:451:9: replace PositionStateMachine::in_position -> Option<(Side, f64, f64)> with None
+engine/src/state_machine.rs:452:13: delete match arm PosState::InPosition{side, entry, size, ..} in PositionStateMachine::in_position
+engine/src/state_machine.rs:461:5: replace pending_oid -> Option<i64> with None
+engine/src/state_machine.rs:461:5: replace pending_oid -> Option<i64> with Some(0)
+engine/src/state_machine.rs:461:5: replace pending_oid -> Option<i64> with Some(1)
+engine/src/state_machine.rs:461:5: replace pending_oid -> Option<i64> with Some(-1)
+engine/src/state_machine.rs:462:9: delete match arm PosState::Pending{oid, ..} | PosState::PendingExit{oid, ..} in pending_oid
+engine/src/track.rs:38:5: replace tid_seen -> bool with true
+engine/src/track.rs:38:5: replace tid_seen -> bool with false
+engine/src/track.rs:45:19: replace > with == in tid_seen
+engine/src/track.rs:45:19: replace > with < in tid_seen
+engine/src/track.rs:45:19: replace > with >= in tid_seen
+engine/src/track.rs:74:5: replace write_trade_exit -> std::io::Result<()> with Ok(())
+engine/src/track.rs:164:9: replace LearnPolicy::frozen -> bool with true
+engine/src/track.rs:164:9: replace LearnPolicy::frozen -> bool with false
+engine/src/track.rs:164:11: replace < with == in LearnPolicy::frozen
+engine/src/track.rs:164:11: replace < with > in LearnPolicy::frozen
+engine/src/track.rs:164:11: replace < with <= in LearnPolicy::frozen
+engine/src/track.rs:168:9: replace LearnPolicy::full -> bool with true
+engine/src/track.rs:168:9: replace LearnPolicy::full -> bool with false
+engine/src/track.rs:168:11: replace >= with < in LearnPolicy::full
+engine/src/track.rs:173:5: replace env_usize -> usize with 0
+engine/src/track.rs:173:5: replace env_usize -> usize with 1
+engine/src/track.rs:202:9: replace StratStats::record with ()
+engine/src/track.rs:202:49: delete - in StratStats::record
+engine/src/track.rs:207:9: replace StratStats::record_r with ()
+engine/src/track.rs:208:21: delete - in StratStats::record_r
+engine/src/track.rs:212:35: replace > with == in StratStats::record_r
+engine/src/track.rs:212:35: replace > with < in StratStats::record_r
+engine/src/track.rs:212:35: replace > with >= in StratStats::record_r
+engine/src/track.rs:214:32: replace > with == in StratStats::record_r
+engine/src/track.rs:214:32: replace > with < in StratStats::record_r
+engine/src/track.rs:214:32: replace > with >= in StratStats::record_r
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with None
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(0.0)
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(1.0)
+engine/src/track.rs:222:9: replace StratStats::profit_factor -> Option<f64> with Some(-1.0)
+engine/src/track.rs:225:54: replace > with == in StratStats::profit_factor
+engine/src/track.rs:225:54: replace > with < in StratStats::profit_factor
+engine/src/track.rs:225:54: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with == in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with > in StratStats::profit_factor
+engine/src/track.rs:226:55: replace < with <= in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with == in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with < in StratStats::profit_factor
+engine/src/track.rs:227:22: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:228:17: replace / with % in StratStats::profit_factor
+engine/src/track.rs:228:17: replace / with * in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with == in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with < in StratStats::profit_factor
+engine/src/track.rs:229:23: replace > with >= in StratStats::profit_factor
+engine/src/track.rs:238:26: replace < with == in StratStats::explore_verdict
+engine/src/track.rs:238:26: replace < with > in StratStats::explore_verdict
+engine/src/track.rs:238:26: replace < with <= in StratStats::explore_verdict
+engine/src/track.rs:243:37: replace && with || in StratStats::explore_verdict
+engine/src/track.rs:243:15: replace >= with < in StratStats::explore_verdict
+engine/src/track.rs:243:43: replace >= with < in StratStats::explore_verdict
+engine/src/track.rs:245:43: replace || with && in StratStats::explore_verdict
+engine/src/track.rs:245:22: replace <= with > in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with == in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with > in StratStats::explore_verdict
+engine/src/track.rs:245:49: replace < with <= in StratStats::explore_verdict
+engine/src/track.rs:254:9: replace StratStats::win_rate -> Option<f64> with None
+engine/src/track.rs:254:9: replace StratStats::win_rate -> Option<f64> with Some(0.0)
+engine/src/track.rs:254:9: replace StratStats::win_rate -> Option<f64> with Some(1.0)
+engine/src/track.rs:254:9: replace StratStats::win_rate -> Option<f64> with Some(-1.0)
+engine/src/track.rs:254:32: replace < with == in StratStats::win_rate
+engine/src/track.rs:254:32: replace < with > in StratStats::win_rate
+engine/src/track.rs:254:32: replace < with <= in StratStats::win_rate
+engine/src/track.rs:258:26: replace / with % in StratStats::win_rate
+engine/src/track.rs:258:26: replace / with * in StratStats::win_rate
+engine/src/track.rs:263:9: replace StratStats::kelly -> Option<f64> with None
+engine/src/track.rs:263:9: replace StratStats::kelly -> Option<f64> with Some(0.0)
+engine/src/track.rs:263:9: replace StratStats::kelly -> Option<f64> with Some(1.0)
+engine/src/track.rs:263:9: replace StratStats::kelly -> Option<f64> with Some(-1.0)
+engine/src/track.rs:264:16: replace - with + in StratStats::kelly
+engine/src/track.rs:264:16: replace - with / in StratStats::kelly
+engine/src/track.rs:264:28: replace / with % in StratStats::kelly
+engine/src/track.rs:264:28: replace / with * in StratStats::kelly
+engine/src/track.rs:264:23: replace - with + in StratStats::kelly
+engine/src/track.rs:264:23: replace - with / in StratStats::kelly
+engine/src/track.rs:281:9: replace PortfolioHistory::record with ()
+engine/src/track.rs:283:33: replace > with == in PortfolioHistory::record
+engine/src/track.rs:283:33: replace > with < in PortfolioHistory::record
+engine/src/track.rs:283:33: replace > with >= in PortfolioHistory::record
+engine/src/track.rs:289:9: replace PortfolioHistory::n -> usize with 0
+engine/src/track.rs:289:9: replace PortfolioHistory::n -> usize with 1
+engine/src/track.rs:294:9: replace PortfolioHistory::win_rate -> Option<f64> with None
+engine/src/track.rs:294:9: replace PortfolioHistory::win_rate -> Option<f64> with Some(0.0)
+engine/src/track.rs:294:9: replace PortfolioHistory::win_rate -> Option<f64> with Some(1.0)
+engine/src/track.rs:294:9: replace PortfolioHistory::win_rate -> Option<f64> with Some(-1.0)
+engine/src/track.rs:295:14: replace == with != in PortfolioHistory::win_rate
+engine/src/track.rs:298:74: replace / with % in PortfolioHistory::win_rate
+engine/src/track.rs:298:74: replace / with * in PortfolioHistory::win_rate
+engine/src/track.rs:298:52: replace > with == in PortfolioHistory::win_rate
+engine/src/track.rs:298:52: replace > with < in PortfolioHistory::win_rate
+engine/src/track.rs:298:52: replace > with >= in PortfolioHistory::win_rate
+engine/src/track.rs:303:9: replace PortfolioHistory::avg_win -> Option<f64> with None
+engine/src/track.rs:303:9: replace PortfolioHistory::avg_win -> Option<f64> with Some(0.0)
+engine/src/track.rs:303:9: replace PortfolioHistory::avg_win -> Option<f64> with Some(1.0)
+engine/src/track.rs:303:9: replace PortfolioHistory::avg_win -> Option<f64> with Some(-1.0)
+engine/src/track.rs:307:28: replace > with == in PortfolioHistory::avg_win
+engine/src/track.rs:307:28: replace > with < in PortfolioHistory::avg_win
+engine/src/track.rs:307:28: replace > with >= in PortfolioHistory::avg_win
+engine/src/track.rs:312:39: replace / with % in PortfolioHistory::avg_win
+engine/src/track.rs:312:39: replace / with * in PortfolioHistory::avg_win
+engine/src/track.rs:317:9: replace PortfolioHistory::avg_loss -> Option<f64> with None
+engine/src/track.rs:317:9: replace PortfolioHistory::avg_loss -> Option<f64> with Some(0.0)
+engine/src/track.rs:317:9: replace PortfolioHistory::avg_loss -> Option<f64> with Some(1.0)
+engine/src/track.rs:317:9: replace PortfolioHistory::avg_loss -> Option<f64> with Some(-1.0)
+engine/src/track.rs:321:28: replace <= with > in PortfolioHistory::avg_loss
+engine/src/track.rs:326:41: replace / with % in PortfolioHistory::avg_loss
+engine/src/track.rs:326:41: replace / with * in PortfolioHistory::avg_loss
+engine/src/track.rs:331:9: replace PortfolioHistory::wl_ratio -> Option<f64> with None
+engine/src/track.rs:331:9: replace PortfolioHistory::wl_ratio -> Option<f64> with Some(0.0)
+engine/src/track.rs:331:9: replace PortfolioHistory::wl_ratio -> Option<f64> with Some(1.0)
+engine/src/track.rs:331:9: replace PortfolioHistory::wl_ratio -> Option<f64> with Some(-1.0)
+engine/src/track.rs:333:14: replace == with != in PortfolioHistory::wl_ratio
+engine/src/track.rs:336:16: replace / with % in PortfolioHistory::wl_ratio
+engine/src/track.rs:336:16: replace / with * in PortfolioHistory::wl_ratio
+engine/src/track.rs:341:9: replace PortfolioHistory::expectancy -> Option<f64> with None
+engine/src/track.rs:341:9: replace PortfolioHistory::expectancy -> Option<f64> with Some(0.0)
+engine/src/track.rs:341:9: replace PortfolioHistory::expectancy -> Option<f64> with Some(1.0)
+engine/src/track.rs:341:9: replace PortfolioHistory::expectancy -> Option<f64> with Some(-1.0)
+engine/src/track.rs:342:14: replace == with != in PortfolioHistory::expectancy
+engine/src/track.rs:345:63: replace / with % in PortfolioHistory::expectancy
+engine/src/track.rs:345:63: replace / with * in PortfolioHistory::expectancy
+engine/src/track.rs:350:9: replace PortfolioHistory::total_r -> f64 with 0.0
+engine/src/track.rs:350:9: replace PortfolioHistory::total_r -> f64 with 1.0
+engine/src/track.rs:350:9: replace PortfolioHistory::total_r -> f64 with -1.0
+engine/src/track.rs:356:9: replace PortfolioHistory::replace_all with ()
+engine/src/track.rs:390:9: replace PerformanceMetrics::from_rs -> Self with Default::default()
+engine/src/track.rs:392:17: delete field trades from struct Self expression in PerformanceMetrics::from_rs
+engine/src/track.rs:393:17: delete field mfe_r from struct Self expression in PerformanceMetrics::from_rs
+engine/src/track.rs:394:17: delete field mae_r from struct Self expression in PerformanceMetrics::from_rs
+engine/src/track.rs:398:63: replace > with == in PerformanceMetrics::from_rs
+engine/src/track.rs:398:63: replace > with < in PerformanceMetrics::from_rs
+engine/src/track.rs:398:63: replace > with >= in PerformanceMetrics::from_rs
+engine/src/track.rs:399:65: replace < with == in PerformanceMetrics::from_rs
+engine/src/track.rs:399:65: replace < with > in PerformanceMetrics::from_rs
+engine/src/track.rs:399:65: replace < with <= in PerformanceMetrics::from_rs
+engine/src/track.rs:408:17: replace += with -= in PerformanceMetrics::from_rs
+engine/src/track.rs:408:17: replace += with *= in PerformanceMetrics::from_rs
+engine/src/track.rs:410:32: replace - with + in PerformanceMetrics::from_rs
+engine/src/track.rs:410:32: replace - with / in PerformanceMetrics::from_rs
+engine/src/track.rs:416:19: replace <= with > in PerformanceMetrics::from_rs
+engine/src/track.rs:417:24: replace += with -= in PerformanceMetrics::from_rs
+engine/src/track.rs:417:24: replace += with *= in PerformanceMetrics::from_rs
+engine/src/track.rs:425:46: replace / with % in PerformanceMetrics::from_rs
+engine/src/track.rs:425:46: replace / with * in PerformanceMetrics::from_rs
+engine/src/track.rs:426:45: replace > with == in PerformanceMetrics::from_rs
+engine/src/track.rs:426:45: replace > with < in PerformanceMetrics::from_rs
+engine/src/track.rs:426:45: replace > with >= in PerformanceMetrics::from_rs
+engine/src/track.rs:427:25: replace / with % in PerformanceMetrics::from_rs
+engine/src/track.rs:427:25: replace / with * in PerformanceMetrics::from_rs
+engine/src/track.rs:428:31: replace > with == in PerformanceMetrics::from_rs
+engine/src/track.rs:428:31: replace > with < in PerformanceMetrics::from_rs
+engine/src/track.rs:428:31: replace > with >= in PerformanceMetrics::from_rs
+engine/src/track.rs:433:55: replace / with % in PerformanceMetrics::from_rs
+engine/src/track.rs:433:55: replace / with * in PerformanceMetrics::from_rs
+engine/src/track.rs:437:30: replace / with % in PerformanceMetrics::from_rs
+engine/src/track.rs:437:30: replace / with * in PerformanceMetrics::from_rs
+engine/src/track.rs:442:32: replace / with % in PerformanceMetrics::from_rs
+engine/src/track.rs:442:32: replace / with * in PerformanceMetrics::from_rs
+engine/src/track.rs:442:22: delete - in PerformanceMetrics::from_rs
+engine/src/track.rs:453:9: replace PerformanceMetrics::line -> String with String::new()
+engine/src/track.rs:453:9: replace PerformanceMetrics::line -> String with "xyzzy".into()
+engine/src/track.rs:472:9: replace StrategyTracker::record_outcomes with ()
+engine/src/track.rs:472:73: delete - in StrategyTracker::record_outcomes
+engine/src/track.rs:479:9: replace StrategyTracker::record_outcome_r with ()
+engine/src/track.rs:490:9: replace StrategyTracker::record_portfolio_outcome with ()
+engine/src/track.rs:494:9: replace StrategyTracker::portfolio_n -> usize with 0
+engine/src/track.rs:494:9: replace StrategyTracker::portfolio_n -> usize with 1
+engine/src/track.rs:503:9: replace StrategyTracker::evidence_n -> usize with 0
+engine/src/track.rs:503:9: replace StrategyTracker::evidence_n -> usize with 1
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::new(), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::new(), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::new(), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 0.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 0.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 0.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 1.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 1.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 1.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), -1.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), -1.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), -1.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 0.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 0.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 0.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 1.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 1.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), 1.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), -1.0)]), HashSet::new(), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), -1.0)]), HashSet::from_iter([String::new()]), vec![])
+engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([("xyzzy".into(), -1.0)]), HashSet::from_iter(["xyzzy".into()]), vec![])
+engine/src/track.rs:535:16: delete ! in StrategyTracker::effective_weights
+engine/src/track.rs:562:22: replace < with == in StrategyTracker::effective_weights
+engine/src/track.rs:562:22: replace < with > in StrategyTracker::effective_weights
+engine/src/track.rs:562:22: replace < with <= in StrategyTracker::effective_weights
+engine/src/track.rs:575:37: replace && with || in StrategyTracker::effective_weights
+engine/src/track.rs:575:43: replace < with == in StrategyTracker::effective_weights
+engine/src/track.rs:575:43: replace < with > in StrategyTracker::effective_weights
+engine/src/track.rs:575:43: replace < with <= in StrategyTracker::effective_weights
+engine/src/track.rs:578:25: replace <= with > in StrategyTracker::effective_weights
+engine/src/track.rs:583:22: replace + with - in StrategyTracker::effective_weights
+engine/src/track.rs:583:22: replace + with * in StrategyTracker::effective_weights
+engine/src/track.rs:585:37: replace && with || in StrategyTracker::effective_weights
+engine/src/track.rs:585:43: replace < with == in StrategyTracker::effective_weights
+engine/src/track.rs:585:43: replace < with > in StrategyTracker::effective_weights
+engine/src/track.rs:585:43: replace < with <= in StrategyTracker::effective_weights
+engine/src/track.rs:586:18: replace < with == in StrategyTracker::effective_weights
+engine/src/track.rs:586:18: replace < with > in StrategyTracker::effective_weights
+engine/src/track.rs:586:18: replace < with <= in StrategyTracker::effective_weights
+engine/src/track.rs:590:47: replace > with == in StrategyTracker::effective_weights
+engine/src/track.rs:590:47: replace > with < in StrategyTracker::effective_weights
+engine/src/track.rs:590:47: replace > with >= in StrategyTracker::effective_weights
+engine/src/track.rs:590:20: replace - with + in StrategyTracker::effective_weights
+engine/src/track.rs:590:20: replace - with / in StrategyTracker::effective_weights
+engine/src/track.rs:593:36: replace == with != in StrategyTracker::effective_weights
+engine/src/track.rs:595:39: replace && with || in StrategyTracker::effective_weights
+engine/src/track.rs:595:33: replace > with == in StrategyTracker::effective_weights
+engine/src/track.rs:595:33: replace > with < in StrategyTracker::effective_weights
+engine/src/track.rs:595:33: replace > with >= in StrategyTracker::effective_weights
+engine/src/track.rs:595:45: replace > with == in StrategyTracker::effective_weights
+engine/src/track.rs:595:45: replace > with < in StrategyTracker::effective_weights
+engine/src/track.rs:595:45: replace > with >= in StrategyTracker::effective_weights
+engine/src/track.rs:622:9: replace StrategyTracker::explore_queue -> Vec<String> with vec![]
+engine/src/track.rs:622:9: replace StrategyTracker::explore_queue -> Vec<String> with vec![String::new()]
+engine/src/track.rs:622:9: replace StrategyTracker::explore_queue -> Vec<String> with vec!["xyzzy".into()]
+engine/src/track.rs:625:16: delete ! in StrategyTracker::explore_queue
+engine/src/track.rs:636:9: replace StrategyTracker::metrics -> PerformanceMetrics with Default::default()
+engine/src/track.rs:646:9: replace StrategyTracker::portfolio_metrics -> PerformanceMetrics with Default::default()
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with None
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((0.0, 0.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((0.0, 1.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((0.0, -1.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((1.0, 0.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((1.0, 1.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((1.0, -1.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((-1.0, 0.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((-1.0, 1.0))
+engine/src/track.rs:667:9: replace StrategyTracker::portfolio_stats -> Option<(f64, f64)> with Some((-1.0, -1.0))
+engine/src/track.rs:674:9: replace StrategyTracker::portfolio_report -> String with String::new()
+engine/src/track.rs:674:9: replace StrategyTracker::portfolio_report -> String with "xyzzy".into()
+engine/src/track.rs:675:14: replace == with != in StrategyTracker::portfolio_report
+engine/src/track.rs:705:9: replace StrategyTracker::next_explorer -> Option<String> with None
+engine/src/track.rs:705:9: replace StrategyTracker::next_explorer -> Option<String> with Some(String::new())
+engine/src/track.rs:705:9: replace StrategyTracker::next_explorer -> Option<String> with Some("xyzzy".into())
+engine/src/track.rs:710:25: replace % with / in StrategyTracker::next_explorer
+engine/src/track.rs:710:25: replace % with + in StrategyTracker::next_explorer
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::new()
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([(String::new(), 0.0)])
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([(String::new(), 1.0)])
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([(String::new(), -1.0)])
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([("xyzzy".into(), 0.0)])
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([("xyzzy".into(), 1.0)])
+engine/src/track.rs:715:9: replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([("xyzzy".into(), -1.0)])
+engine/src/track.rs:718:28: replace match guard f > 0.0 with true in StrategyTracker::ensemble_weights
+engine/src/track.rs:718:28: replace match guard f > 0.0 with false in StrategyTracker::ensemble_weights
+engine/src/track.rs:719:28: replace match guard s.outcomes.len() >= 15 with true in StrategyTracker::ensemble_weights
+engine/src/track.rs:719:28: replace match guard s.outcomes.len() >= 15 with false in StrategyTracker::ensemble_weights
+engine/src/track.rs:718:30: replace > with == in StrategyTracker::ensemble_weights
+engine/src/track.rs:718:30: replace > with < in StrategyTracker::ensemble_weights
+engine/src/track.rs:718:30: replace > with >= in StrategyTracker::ensemble_weights
+engine/src/track.rs:719:45: replace >= with < in StrategyTracker::ensemble_weights
+engine/src/track.rs:728:9: replace StrategyTracker::count -> usize with 0
+engine/src/track.rs:728:9: replace StrategyTracker::count -> usize with 1
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 0.0, -1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, 1.0, -1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (0, -1.0, -1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 0.0, -1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, 1.0, -1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 0.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 0.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 0.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, 1.0, -1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, -1.0, 0.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, -1.0, 1.0)
+engine/src/track.rs:733:9: replace StrategyTracker::summary -> (usize, f64, f64, f64) with (1, -1.0, -1.0, -1.0)
+engine/src/track.rs:762:9: replace StrategyTracker::save_state -> std::io::Result<()> with Ok(())
+engine/src/track.rs:781:16: delete ! in StrategyTracker::save_state
+engine/src/track.rs:823:9: replace StrategyTracker::load_state -> bool with true
+engine/src/track.rs:823:9: replace StrategyTracker::load_state -> bool with false
+engine/src/track.rs:832:19: replace != with == in StrategyTracker::load_state
+engine/src/track.rs:842:19: replace != with == in StrategyTracker::load_state
+engine/src/track.rs:858:38: replace == with != in StrategyTracker::load_state
+engine/src/track.rs:865:24: replace += with -= in StrategyTracker::load_state
+engine/src/track.rs:865:24: replace += with *= in StrategyTracker::load_state
+engine/src/track.rs:890:29: replace || with && in StrategyTracker::load_state
+engine/src/track.rs:890:25: replace > with == in StrategyTracker::load_state
+engine/src/track.rs:890:25: replace > with < in StrategyTracker::load_state
+engine/src/track.rs:890:25: replace > with >= in StrategyTracker::load_state
+engine/src/track.rs:890:51: replace > with == in StrategyTracker::load_state
+engine/src/track.rs:890:51: replace > with < in StrategyTracker::load_state
+engine/src/track.rs:890:51: replace > with >= in StrategyTracker::load_state
+engine/src/track.rs:918:5: replace live_weights_json -> String with String::new()
+engine/src/track.rs:918:5: replace live_weights_json -> String with "xyzzy".into()
+engine/src/track.rs:925:18: replace < with == in live_weights_json
+engine/src/track.rs:925:18: replace < with > in live_weights_json
+engine/src/track.rs:925:18: replace < with <= in live_weights_json
+engine/src/track.rs:925:14: replace + with - in live_weights_json
+engine/src/track.rs:925:14: replace + with * in live_weights_json
+engine/src/track.rs:938:5: replace weights_json -> String with String::new()
+engine/src/track.rs:938:5: replace weights_json -> String with "xyzzy".into()
+engine/src/track.rs:943:5: replace learn_table -> String with String::new()
+engine/src/track.rs:943:5: replace learn_table -> String with "xyzzy".into()
+engine/src/track.rs:1476:9: replace Health::mode -> Mode with Default::default()
+engine/src/track.rs:1479:9: replace Health::crit_streak -> usize with 0
+engine/src/track.rs:1479:9: replace Health::crit_streak -> usize with 1
+engine/src/track.rs:1484:9: replace Health::on_ws_reconnect -> bool with true
+engine/src/track.rs:1484:9: replace Health::on_ws_reconnect -> bool with false
+engine/src/track.rs:1490:48: replace < with == in Health::on_ws_reconnect
+engine/src/track.rs:1490:48: replace < with > in Health::on_ws_reconnect
+engine/src/track.rs:1490:48: replace < with <= in Health::on_ws_reconnect
+engine/src/track.rs:1491:54: replace && with || in Health::on_ws_reconnect
+engine/src/track.rs:1491:37: replace > with == in Health::on_ws_reconnect
+engine/src/track.rs:1491:37: replace > with < in Health::on_ws_reconnect
+engine/src/track.rs:1491:37: replace > with >= in Health::on_ws_reconnect
+engine/src/track.rs:1491:67: replace == with != in Health::on_ws_reconnect
+engine/src/track.rs:1499:9: replace Health::ws_recent -> usize with 0
+engine/src/track.rs:1499:9: replace Health::ws_recent -> usize with 1
+engine/src/track.rs:1504:9: replace Health::on_error -> bool with true
+engine/src/track.rs:1504:9: replace Health::on_error -> bool with false
+engine/src/track.rs:1511:34: replace += with -= in Health::on_error
+engine/src/track.rs:1511:34: replace += with *= in Health::on_error
+engine/src/track.rs:1512:64: replace && with || in Health::on_error
+engine/src/track.rs:1512:37: replace >= with < in Health::on_error
+engine/src/track.rs:1512:77: replace != with == in Health::on_error
+engine/src/track.rs:1523:9: replace Health::on_cycle_ok with ()
+engine/src/track.rs:1525:41: replace && with || in Health::on_cycle_ok
+engine/src/track.rs:1525:22: replace == with != in Health::on_cycle_ok
+engine/src/track.rs:1525:69: replace <= with > in Health::on_cycle_ok
+engine/src/track.rs:1532:9: replace Health::entries_allowed -> bool with true
+engine/src/track.rs:1532:9: replace Health::entries_allowed -> bool with false
+engine/src/track.rs:1532:19: replace == with != in Health::entries_allowed
+engine/src/track.rs:1536:9: replace Health::reset with ()

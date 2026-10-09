@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::sync_exchange_sl
+@@ -1698,17 +1698,17 @@
+                     }
+                     if *szi > 0.0 {
+                         e * 0.98
+                     } else {
+                         e * 1.02
+                     }
+                 }
+             };
+-            if sl_px <= 0.0 || !sl_px.is_finite() {
++            if sl_px <= 0.0 ||  /* ~ changed by cargo-mutants ~ */sl_px.is_finite() {
+                 continue;
+             }
+             let is_long = *szi > 0.0;
+ 
+             // ================= TRAİLİNG STOP =================
+             // 1) Mark ile tepe/dip güncelle, 2) hedef stop'u hesapla,
+             // 3) yalnız **daha iyi** ise ve adım eşiğini geçiyorsa taşı.
+             if self.loop_cfg.trail_on {

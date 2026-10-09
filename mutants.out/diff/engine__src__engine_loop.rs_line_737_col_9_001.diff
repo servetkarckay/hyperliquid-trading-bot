@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace EntryGate::health_ok -> bool with false
+@@ -729,17 +729,17 @@
+ impl EntryGate {
+     /// **DENKLEMİN TEK NOKTASI.** Burada başka hiçbir yol
+     /// `entries_allowed` üretmez.
+     pub fn entries_allowed(&self) -> bool {
+         Engine::entries_allowed_of(self.health_ok, self.risk_locked)
+     }
+ 
+     pub fn health_ok(&self) -> bool {
+-        self.health_ok
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn is_locked(&self) -> bool {
+         self.risk_locked
+     }
+ 
+     pub fn flat_count(&self) -> u32 {
+         self.flat_count

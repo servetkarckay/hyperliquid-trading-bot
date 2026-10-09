@@ -1,0 +1,24 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::rest_snapshot -> anyhow::Result<()> with Ok(())
+@@ -1064,20 +1064,17 @@
+             },
+             trade_exits_path: std::env::var("TRADE_EXITS_PATH")
+                 .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into()),
+             last_recon_ms: 0,
+         })
+     }
+ 
+     async fn rest_snapshot(&mut self) -> anyhow::Result<()> {
+-        let (meta, ctxs) = self.info.meta_and_asset_ctxs().await?;
+-        let names: Vec<String> = meta.universe.iter().map(|m| m.name.clone()).collect();
+-        self.ctx.apply_rest_snapshot(&names, &ctxs);
+-        Ok(())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// WS market verisi tüketimi
+     pub async fn ingest_step(&mut self, ev: data::StreamEvent) -> Vec<Action> {
+         let mut acts = Vec::new();
+         match ev {
+             data::StreamEvent::Trade {
+                 coin,

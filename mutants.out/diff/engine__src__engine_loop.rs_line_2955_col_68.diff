@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace == with != in Engine::run_cycle
+@@ -2947,17 +2947,17 @@
+                         tracing::info!(
+                             "{}: yeni giriş elendi ({} pozisyon/tavan {})",
+                             e.coin,
+                             open_now,
+                             cap_positions
+                         );
+                         continue;
+                     }
+-                    let cand_opt = selected.iter().find(|c| c.coin == e.coin);
++                    let cand_opt = selected.iter().find(|c| c.coin != /* ~ changed by cargo-mutants ~ */ e.coin);
+                     let notional = cand_opt.map(|c| c.allocated_usd).unwrap_or(0.0);
+                     let lev = pmap
+                         .get(&e.coin)
+                         .map(|p| p.leverage)
+                         .unwrap_or(self.leverage)
+                         .max(self.leverage);
+                     // risk kontrolü: mevcut + bu-cycle kabul edilmiş maruziyet
+                     if let Err(risk_err) =

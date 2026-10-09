@@ -1,0 +1,26 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::load_live_weights -> anyhow::Result<LiveWeightsLoad> with Ok(Default::default())
+@@ -1406,22 +1406,17 @@
+     /// **Üst sınır UYGULANMAZ**: `WEIGHT_CLAMP_HI=2.0` yalnız tracker kanıtından
+     /// türetilen ağırlıkları sınırlar (`effective_weights`), kaydedilmiş canlı
+     /// değerler **birebir** (verbatim) korunur. `1.75` dosyada varsa `1.75`
+     /// olarak ensemble'a girer.
+     pub fn load_live_weights(
+         &mut self,
+         raw: &serde_json::Value,
+     ) -> anyhow::Result<LiveWeightsLoad> {
+-        let m = parse_live_weights(raw)?;
+-        // Dosyada olmayan stratejiler AÇIKÇA raporlanır (sessiz "nötr" yok).
+-        let defaulted = missing_live_strategies(&self.strategy_names, &m);
+-        let applied = m.len();
+-        self.live_weights = m;
+-        Ok(LiveWeightsLoad { applied, defaulted })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// ** keşif seti** — bu döngüde sırası gelen TEK strateji.
+     ///
+     /// `None` → boş küme (kuyruk kuyruğu boş veya kimse sinyal üretmedi).
+     /// `explore_max_usd` / %5 havuz matematiği **aynen korunur**; yalnız
+     /// "hangi strateji keşifçi" tanımı değişti: isim-temelli → veri-açlığı.
+     pub fn explore_set(&self) -> std::collections::HashSet<String> {

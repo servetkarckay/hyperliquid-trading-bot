@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace == with != in PositionStateMachine::force_exit
+@@ -252,17 +252,17 @@
+         }
+         match self.state.clone() {
+             PosState::InPosition { side, size, .. } => {
+                 self.state = PosState::PendingExit { oid: 0, side };
+                 Action::ExitNow(BotOrder {
+                     coin: self.coin.clone(),
+                     side: side.flip(),
+                     sz: size,
+-                    px: if side == Side::Long { bid } else { ask },
++                    px: if side != /* ~ changed by cargo-mutants ~ */ Side::Long { bid } else { ask },
+                     post_only: false,
+                     reduce_only: true,
+                 })
+             }
+             _ => Action::Nothing,
+         }
+     }
+ 

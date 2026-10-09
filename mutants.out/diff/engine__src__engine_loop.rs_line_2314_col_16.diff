@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::run_cycle
+@@ -2306,17 +2306,17 @@
+             // BORSA STOP'U yetim DEĞİLDİR: `machines` yalnız botun kendi
+             // giriş/çıkış emirlerini bilir, `sl_orders` stop'ları
+             // tutar. Stop'u "yetim" sayıp iptal etmek, giriş
+             // pozisyonunu borsada korumasız bırakırdı.
+             // TP trigger da bot'un KORUMA çiftidir — "yetim" sayıp
+             // iptal etmek, kâr hedefini borsadan SİLER.
+             let is_sl = self.executor.sl_orders.get(&cn) == Some(&oid)
+                 || self.executor.tp_orders.get(&cn) == Some(&oid);
+-            if !known && !is_sl {
++            if  /* ~ changed by cargo-mutants ~ */known && !is_sl {
+                 if let Err(e2) = self.executor.cancel(&cn, oid).await {
+                     tracing::warn!("yetim iptal {cn}/{oid}: {e2}");
+                 } else {
+                     recon_notes.push(format!("[RECON] yetim emir iptal: {cn}/{oid}"));
+                 }
+             }
+         }
+         for a in recon_notes {

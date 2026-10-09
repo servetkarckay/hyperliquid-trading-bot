@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace / with % in AllocationConfig::tp_from_entry
+@@ -109,17 +109,17 @@
+     /// `exit_reason=TakeProfit` atanır. Bu formül hem plan hem gerçek emrin
+     /// TEK kaynağıdır.
+     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+         let risk = risk_mesafesi.abs();
+         if entry_eff.is_nan() || risk.is_nan() || entry_eff <= 0.0 || risk <= 0.0 {
+             return entry_eff;
+         }
+         let min_tp_dist = risk * 2.0;
+-        let tp_dist = ((self.tp_atr_mult / self.sl_atr_mult) * risk).max(min_tp_dist);
++        let tp_dist = ((self.tp_atr_mult % /* ~ changed by cargo-mutants ~ */ self.sl_atr_mult) * risk).max(min_tp_dist);
+         match dir {
+             Dir::Long => entry_eff + tp_dist,
+             Dir::Short => entry_eff - tp_dist,
+             Dir::Neutral => entry_eff,
+         }
+     }
+ }
+ 

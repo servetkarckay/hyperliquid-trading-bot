@@ -1,0 +1,79 @@
+--- engine/src/track.rs
++++ replace PerformanceMetrics::from_rs -> Self with Default::default()
+@@ -382,75 +382,17 @@
+ }
+ 
+ impl PerformanceMetrics {
+     /// R dizisinden (GERÇEK fill kayıtları) metrikler.
+     ///
+     /// `rs` = işlem başına R-çarpanı (net PnL / giriş riski). Boş dizi =
+     /// kanıt yok → tüm alanlar `None` (sıfır bile UYDURULMAZ).
+     pub fn from_rs(rs: &[f64], mfe_r: Option<f64>, mae_r: Option<f64>) -> Self {
+-        if rs.is_empty() {
+-            return Self {
+-                trades: 0,
+-                mfe_r,
+-                mae_r,
+-                ..Default::default()
+-            };
+-        }
+-        let wins: Vec<f64> = rs.iter().copied().filter(|r| *r > 0.0).collect();
+-        let losses: Vec<f64> = rs.iter().copied().filter(|r| *r < 0.0).collect();
+-        let win_sum: f64 = wins.iter().sum();
+-        let loss_sum: f64 = losses.iter().copied().map(|r| r.abs()).sum();
+-
+-        // max drawdown: kümülatif R eğrisi
+-        let mut cum = 0.0f64;
+-        let mut peak = 0.0f64;
+-        let mut mdd = 0.0f64;
+-        for r in rs {
+-            cum += *r;
+-            peak = peak.max(cum);
+-            mdd = mdd.max(peak - cum);
+-        }
+-        // ardışık kayıp serisi
+-        let mut streak = 0usize;
+-        let mut worst = 0usize;
+-        for r in rs {
+-            if *r <= 0.0 {
+-                streak += 1;
+-                worst = worst.max(streak);
+-            } else {
+-                streak = 0;
+-            }
+-        }
+-        Self {
+-            trades: rs.len(),
+-            win_rate: Some(wins.len() as f64 / rs.len() as f64),
+-            profit_factor: Some(if loss_sum > 0.0 {
+-                win_sum / loss_sum
+-            } else if win_sum > 0.0 {
+-                10.0
+-            } else {
+-                0.0
+-            }),
+-            expectancy_r: Some(rs.iter().sum::<f64>() / rs.len() as f64),
+-            avg_win_r: if wins.is_empty() {
+-                None
+-            } else {
+-                Some(win_sum / wins.len() as f64)
+-            },
+-            avg_loss_r: if losses.is_empty() {
+-                None
+-            } else {
+-                Some(-loss_sum / losses.len() as f64)
+-            },
+-            max_drawdown_r: Some(mdd),
+-            max_consecutive_losses: Some(worst),
+-            mfe_r,
+-            mae_r,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Rapor satırı — iddia değil ölçüm.
+     pub fn line(&self) -> String {
+         let f =
+             |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
+         format!(
+             "trades={} win_rate={} pf={} E[R]={} avg_win_R={} avg_loss_R={} maxDD_R={} ardışık_kayıp={} MFE_R={} MAE_R={}",

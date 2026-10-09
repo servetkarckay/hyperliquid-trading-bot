@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::run_cycle
+@@ -2475,17 +2475,17 @@
+                 let Some(f) = self.ctx.get(&ee.coin).map(|c| c.funding) else {
+                     continue;
+                 };
+                 let ema = match self.funding_ema.get(&ee.coin) {
+                     Some(v) => v * (2.0 / 3.0) + f * (1.0 / 3.0),
+                     None => f, // ilk gözlem: freeze yok
+                 };
+                 self.funding_ema.insert(ee.coin.clone(), ema);
+-                if self.funding_ema.len() > 1 && ema.abs() > 1e-12 {
++                if self.funding_ema.len() >= /* ~ changed by cargo-mutants ~ */ 1 && ema.abs() > 1e-12 {
+                     let rel = (f - ema).abs() / ema.abs().max(1e-12);
+                     if rel > 4.0 {
+                         self.funding_freeze_until
+                             .insert(ee.coin.clone(), now_f + 900_000);
+                         tracing::warn!("{}: funding anomali (+{:.1}x) — 15dk freeze", ee.coin, rel);
+                     }
+                 }
+             }

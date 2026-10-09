@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace || with && in cloid_is_tp
+@@ -67,17 +67,17 @@
+ /// üretilenle birebir eşleşiyor mu?
+ ///
+ /// `make_cloid` deterministiktir (coin+px+sz+tuz) → restart sonrası RAM'de
+ /// kaybolan `tp_last_px`/`tp_orders`'a GEREK KALMAZ: REST satırının
+ /// (px=sz'den yeniden üretilen) cloid'i TP tuzuyla aynıysa BU BİZİM
+ /// TP'MİZDİR. SL cloid'i farklı tuz (dec) kullandığı için çapraz eşleşmez.
+ pub fn cloid_is_tp(coin: &str, row_px: f64, row_sz: f64, row_cloid: Option<&str>) -> bool {
+     let Some(c) = row_cloid else { return false };
+-    if !row_px.is_finite() || !row_sz.is_finite() || row_px <= 0.0 || row_sz <= 0.0 {
++    if !row_px.is_finite() || !row_sz.is_finite() && /* ~ changed by cargo-mutants ~ */ row_px <= 0.0 || row_sz <= 0.0 {
+         return false;
+     }
+     let expected = make_cloid(coin, row_px, row_sz, TP_CLOID_SALT);
+     c.eq_ignore_ascii_case(&expected)
+ }
+ 
+ /// bu dinlenen reduce-only satır **bizim TP trigger'ımız mı?**
+ ///

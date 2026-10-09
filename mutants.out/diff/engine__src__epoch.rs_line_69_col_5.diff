@@ -1,0 +1,33 @@
+--- engine/src/epoch.rs
++++ replace assert_testnet_endpoint -> Result<()> with Ok(())
+@@ -61,29 +61,17 @@
+ 
+ /// TESTNET epoch'u canlı endpoint'e karşı BAŞLAMAZ (yapısal kapı).
+ ///
+ /// Kural: `environment == "testnet"` iken `NETWORK != "testnet"` veya
+ /// API url'si mainnet hostu içeriyorsa → hata. Böylece testnet modunda
+ /// canlı endpoint'e emir gitmesi **yapısal olarak** engellenir (emir
+ /// hiç atılmadan süreç durur).
+ pub fn assert_testnet_endpoint(network: &str, api_url: &str, environment: &str) -> Result<()> {
+-    if environment != "testnet" {
+-        bail!("öğrenme dönemi environment=\"{environment}\" — yalnız testnet kabul edilir");
+-    }
+-    if network != "testnet" {
+-        bail!(
+-            "TESTNET öğrenme dönemi NETWORK={network:?} ile BAŞLAMAZ — canlı hesabı korumak için \
+-             süreci düşürüyorum (NETWORK=testnet yapın)"
+-        );
+-    }
+-    if api_url.contains("mainnet") || api_url.contains("hyperliquid.xyz") {
+-        bail!("TESTNET öğrenme dönemi canlı API ({api_url}) ile BAŞLAMAZ — yapısal koruma");
+-    }
+-    Ok(())
++    Ok(()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Yeniden başlatma kararı (saf):
+ ///
+ /// | fresh | epoch dosyası | testnet | karar |
+ /// |---|---|---|---|
+ /// | 0 | — | — | `KeepExisting` (normal restart: hiçbir şey silinmez) |
+ /// | 1 | yok | evet | `Wipe` (İLK bootstrap çalıştırması) |

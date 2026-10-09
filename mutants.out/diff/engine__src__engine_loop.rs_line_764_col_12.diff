@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in EntryGate::unlock_manual
+@@ -756,17 +756,17 @@
+         self.flat_count = 0;
+         let was = self.risk_locked;
+         self.risk_locked = true;
+         !was
+     }
+ 
+     /// Manuel açma. `health_ok=false` ise giriş **kapalı kalır**.
+     pub fn unlock_manual(&mut self) -> bool {
+-        if !self.risk_locked {
++        if  /* ~ changed by cargo-mutants ~ */self.risk_locked {
+             return false;
+         }
+         self.risk_locked = false;
+         self.flat_count = 0;
+         true
+     }
+ 
+     /// Bir döngünün auto-unlock adımı.

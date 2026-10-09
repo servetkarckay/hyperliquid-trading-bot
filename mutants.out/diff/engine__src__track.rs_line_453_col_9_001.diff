@@ -1,0 +1,35 @@
+--- engine/src/track.rs
++++ replace PerformanceMetrics::line -> String with "xyzzy".into()
+@@ -445,31 +445,17 @@
+             max_consecutive_losses: Some(worst),
+             mfe_r,
+             mae_r,
+         }
+     }
+ 
+     /// Rapor satırı — iddia değil ölçüm.
+     pub fn line(&self) -> String {
+-        let f =
+-            |v: Option<f64>, d: usize| v.map(|x| format!("{x:.d$}")).unwrap_or_else(|| "-".into());
+-        format!(
+-            "trades={} win_rate={} pf={} E[R]={} avg_win_R={} avg_loss_R={} maxDD_R={} ardışık_kayıp={} MFE_R={} MAE_R={}",
+-            self.trades,
+-            f(self.win_rate, 3),
+-            f(self.profit_factor, 2),
+-            f(self.expectancy_r, 3),
+-            f(self.avg_win_r, 2),
+-            f(self.avg_loss_r, 2),
+-            f(self.max_drawdown_r, 2),
+-            self.max_consecutive_losses.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+-            f(self.mfe_r, 2),
+-            f(self.mae_r, 2),
+-        )
++        "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ impl StrategyTracker {
+     pub fn record_outcomes(&mut self, strategy_names: Vec<String>, ts: u64, win: bool) {
+         self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
+     }
+ 
+     /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).

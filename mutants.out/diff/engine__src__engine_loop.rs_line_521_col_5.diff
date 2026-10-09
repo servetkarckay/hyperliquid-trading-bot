@@ -1,0 +1,29 @@
+--- engine/src/engine_loop.rs
++++ replace recon_decide -> ReconAction with Default::default()
+@@ -513,25 +513,17 @@
+ }
+ 
+ /// Bounded recheck: UNKNOWN emir için en fazla bu kadar yeniden sorgu.
+ pub const RECON_MAX_ATTEMPTS: u8 = 3;
+ /// recheck arası bekleme (delayed visibility penceresi).
+ pub const RECON_RECHECK_MS: u64 = 2_000;
+ 
+ pub fn recon_decide(has_order: bool, has_position: bool, attempts: u8) -> ReconAction {
+-    if has_order {
+-        ReconAction::LinkOid
+-    } else if has_position {
+-        ReconAction::ToPosition
+-    } else if attempts < RECON_MAX_ATTEMPTS {
+-        ReconAction::Retry
+-    } else {
+-        ReconAction::Flat
+-    }
++    Default::default() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
+ ///
+ /// Borsa TP/SL trigger kapanışları makineye oid üzerinden haber
+ /// vermez (makine o oid'i bilmemez); recon bu kapanışı makineye
+ /// taşır — aksi halde makine `InPosition`'da KALIR:
+ /// `already_on=true` → aynı coine yeni giriş kilitli kalır,

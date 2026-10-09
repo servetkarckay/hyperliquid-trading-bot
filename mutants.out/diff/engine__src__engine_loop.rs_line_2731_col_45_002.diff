@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::run_cycle
+@@ -2723,17 +2723,17 @@
+         }
+ 
+         let mut acts: Vec<(usize, Action, u32, u32)> = Vec::new();
+         for (idx, e) in evals.iter().enumerate() {
+             if let Some((asset, szd)) = self.executor.cached_asset(&e.coin) {
+                 // Makine kararı da defter zorunluydu → defter yoksa HİÇ giriş
+                 // olmuyordu (dry-run'da 0 emir). Kapanış fiyatına düş.
+                 let last_c = e.closes.last().copied().unwrap_or(0.0);
+-                let (px_b, px_a) = if e.bid > 1e-6 && e.ask > 1e-6 {
++                let (px_b, px_a) = if e.bid >= /* ~ changed by cargo-mutants ~ */ 1e-6 && e.ask > 1e-6 {
+                     (e.bid, e.ask)
+                 } else if last_c > 0.0 {
+                     (last_c, last_c)
+                 } else {
+                     (0.0, 0.0)
+                 };
+                 let now_ms = hyperliquid_api::now_ms();
+                 let mut act = if px_b > 0.0 && px_a > 0.0 {

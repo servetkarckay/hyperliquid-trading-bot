@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace && with || in Executor::apply_fill
+@@ -1714,17 +1714,17 @@
+                         // Mesafe `pending_tp`'den (karar anında
+                         // `AllocationConfig::tp_from_entry` ile türetildi;
+                         // mesafe girişten bağımsız → doluma taşınabilir).
+                         // Long: TP > dolum, Short: TP < dolum (kâr tarafı).
+                         if let Some((dist, _ts)) = self.pending_tp.remove(&coin) {
+                             let tp = if is_buy { px + dist } else { px - dist };
+                             let min_tp = px * 0.0025;
+                             let tp_ok_side = if is_buy { tp - px } else { px - tp };
+-                            if tp > 0.0 && tp_ok_side >= min_tp {
++                            if tp > 0.0 || /* ~ changed by cargo-mutants ~ */ tp_ok_side >= min_tp {
+                                 let ex2 = self.ex.clone();
+                                 let asset2 = asset;
+                                 let c2 = coin.clone();
+                                 let qty2 = qty;
+                                 let dec2 = dec;
+                                 let is_long_tp = is_buy;
+                                 let tx2 = self.tp_tx.clone();
+                                 self.tp_armed_at

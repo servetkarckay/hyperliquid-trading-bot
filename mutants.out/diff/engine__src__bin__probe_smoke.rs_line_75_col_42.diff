@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_smoke.rs
++++ replace == with != in main
+@@ -67,17 +67,17 @@
+     let rows = ex.refresh_open_orders_all().await.unwrap_or_default();
+     if let Some(r) = rows.iter().find(|r| r.coin == coin) {
+         let (cn, oid) = (r.coin.clone(), r.oid);
+         println!("[SMOKE] açık emir DOĞRULANDI: {cn} oid={oid}");
+         ex.cancel(&coin, oid).await?;
+         println!("[SMOKE] cancel OK");
+         // iptalin gerçekte işlendiğini tekrar kontrol et
+         let rows2 = ex.refresh_open_orders_all().await.unwrap_or_default();
+-        if rows2.iter().any(|r2| r2.coin == coin) {
++        if rows2.iter().any(|r2| r2.coin != /* ~ changed by cargo-mutants ~ */ coin) {
+             anyhow::bail!("cancel sonrası emir hâlâ açık — smoke FİGÜR hata");
+         }
+         println!("[SMOKE] iptal DOĞRULANDI (açık listede yok) ✓");
+     } else {
+         println!("[SMOKE] açık listede emir yok (doldu/hemen reddedildi)");
+     }
+ 
+     // 5) pozisyon FLAT ✓/eksik sinyal

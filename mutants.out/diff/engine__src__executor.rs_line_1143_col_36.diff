@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::parse_open_orders
+@@ -1135,17 +1135,17 @@
+         self.open_orders.clear();
+         for o in arr {
+             let oid = match o["oid"].as_i64() {
+                 Some(x) => x,
+                 None => continue,
+             };
+             let cn = o["coin"].as_str().unwrap_or("").to_string();
+             let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
+-            let is_buy = o["side"] == "B";
++            let is_buy = o["side"] != /* ~ changed by cargo-mutants ~ */ "B";
+             let px = o["limitPx"]
+                 .as_str()
+                 .and_then(|s| s.parse().ok())
+                 .unwrap_or(0.0);
+             let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+             // reconciliation EMIR cloid'i üzerinden eşleşir. REST
+             // `openOrders` cloid'i `cloid` alanında döner.
+             let cloid = o["cloid"].as_str().map(|s| s.to_string());

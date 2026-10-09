@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::run_cycle
+@@ -2908,17 +2908,17 @@
+                                 0.0
+                             }
+                         };
+                         let (ok, risk_bps, floor_bps) =
+                             self.am
+                                 .cfg
+                                 .cost
+                                 .ev_ok(e.atr_pct, self.am.cfg.sl_atr_mult, spread_bps);
+-                        if !ok {
++                        if  /* ~ changed by cargo-mutants ~ */ok {
+                             tracing::info!(
+                                 "[EV] {} ATR {:.0}bps → risk {:.0}bps < maliyet flooru {:.0}bps → SKIP \
+                                  (round-trip {:.0}bps; işlem sayısının düşmesi BEKLENEN davranış)",
+                                 e.coin,
+                                 e.atr_pct * 10_000.0,
+                                 risk_bps,
+                                 floor_bps,
+                                 self.am.cfg.cost.round_trip_cost_bps(spread_bps)

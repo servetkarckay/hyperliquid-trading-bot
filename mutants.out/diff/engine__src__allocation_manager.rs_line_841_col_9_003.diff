@@ -1,0 +1,24 @@
+--- engine/src/allocation_manager.rs
++++ replace CostModel::ev_ok -> (bool, f64, f64) with (true, 1.0, 0.0)
+@@ -833,20 +833,17 @@
+         self.ev_min_dist_bps
+             .max(3.0 * self.round_trip_cost_bps(spread_bps))
+     }
+ 
+     /// EV kapısı: `sl_mult × ATR_bps < taban` → SKIP.
+     ///
+     /// `atr_pct` = ATR/mid (ondalık). Dönüş: (geçti, risk_bps, taban_bps).
+     pub fn ev_ok(&self, atr_pct: f64, sl_mult: f64, spread_bps: f64) -> (bool, f64, f64) {
+-        let atr_bps = atr_pct * 10_000.0;
+-        let risk_bps = sl_mult * atr_bps;
+-        let floor = self.min_risk_dist_bps(spread_bps);
+-        (risk_bps >= floor, risk_bps, floor)
++        (true, 1.0, 0.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **YÜRÜTME FİYAT BANDI** (bps, tek yön) — EV ile AYNI model:
+     /// IOC limit fiyatı = referans × (1 ± band/1e4). Model maliyeti
+     /// `EXECUTION_BAND_FLOOR_BPS` altındaysa operasyonel taban uygulanır
+     /// (ince testnet defterinde model maliyetinin altına band daraltmak,
+     /// dolum kaçışı üretirdi — Not: ).
+     pub fn execution_band_bps(&self, spread_bps: f64) -> f64 {

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with * in Engine::ingest_oe
+@@ -1253,17 +1253,17 @@
+             }
+             if exited_now {
+                 if let Some(attr) = self.entry_attr.remove(&coin) {
+                     // R-çarpanı: net hareket / giriş riski (PF tabanlı terfi için)
+                     let move_px = match attr.side {
+                         SmSide::Long => avg - attr.entry_px,
+                         SmSide::Short => attr.entry_px - avg,
+                     };
+-                    let r = move_px / attr.risk_px.max(f64::EPSILON);
++                    let r = move_px * /* ~ changed by cargo-mutants ~ */ attr.risk_px.max(f64::EPSILON);
+                     self.tracker.record_outcome_r(
+                         attr.voters.clone(),
+                         hyperliquid_api::now_ms(),
+                         r,
+                     );
+                     // TradeExit kaydı: makine-yolu çıkışı DA trade-exit
+                     // yazsın (attr burada silinirse SignalExit
+                     // kayıtlarına "signal" yazılmıyordu). MFE/MAE trail'den.

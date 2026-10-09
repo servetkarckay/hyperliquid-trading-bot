@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::apply_fill
+@@ -1616,17 +1616,17 @@
+                     self.sl_orders.remove(&coin);
+                     self.sl_armed_at.remove(&coin);
+                     tracing::info!(
+                         "[SL] {coin} borsa stop TETİKLENDİ (oid={oid}) — kayıt düşürüldü"
+                     );
+                 }
+                 // F: TP FİLL — gerçek kapanış kaynağı. oid eşleşmesi MFE'den
+                 // KESİN daha güvenilirdir (MFE>0 ≠ TakeProfit).
+-                let is_tp_fill = if self.tp_orders.get(&coin) == Some(&oid) {
++                let is_tp_fill = if self.tp_orders.get(&coin) != /* ~ changed by cargo-mutants ~ */ Some(&oid) {
+                     self.tp_orders.remove(&coin);
+                     self.tp_armed_at.remove(&coin);
+                     tracing::info!("[TP] {coin} TP TETİKLENDİ (oid={oid}) → ExitReason=TakeProfit");
+                     true
+                 } else {
+                     false
+                 };
+                 self.tp_fill_flags

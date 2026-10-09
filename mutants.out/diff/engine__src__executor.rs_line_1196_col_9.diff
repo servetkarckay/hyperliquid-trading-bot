@@ -1,0 +1,23 @@
+--- engine/src/executor.rs
++++ replace Executor::refresh_open_orders_all -> Result<Vec<OpenOrderRow>> with Ok(vec![])
+@@ -1188,19 +1188,17 @@
+     /// TÜM dinlenen açık emirleri `(coin, oid, cloid, reduce_only, ...)`
+     /// olarak döndürür.
+     ///
+     /// Neden ayrı API: [`Self::refresh_orders`] YALNIZ reduce-only (stop)
+     /// emirleri döndürür. UNKNOWN olan **giriş** emirleri `reduce_only=false`
+     /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
+     /// giriş emrini bulamazdı.
+     pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
+-        let v = self.info.open_orders(&self.user).await?;
+-        let arr = v.as_array().cloned().unwrap_or_default();
+-        Ok(self.parse_open_orders(&arr))
++        Ok(vec![]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
+     /// borsa stop'larıdır (`dedupe_sl` ile `sl_orders`'a yazılır).
+     /// Ham satırlar — TP oid geri yükleme (`restore_tp_orders`) bu satırları
+     /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
+     pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
+         let v = self.info.open_orders(&self.user).await?;

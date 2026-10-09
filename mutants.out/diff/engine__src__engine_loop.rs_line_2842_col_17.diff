@@ -1,0 +1,370 @@
+--- engine/src/engine_loop.rs
++++ delete match arm Action::Place(_o) in Engine::run_cycle
+@@ -2834,366 +2834,17 @@
+             .ctx
+             .all()
+             .map(|c| (c.coin.clone(), c.mark_px))
+             .collect();
+         // 3b) izin → tahsis/dağıtma → yürütme (makine borçlanması kısa kısa)
+         for (idx, act, asset, szd) in acts {
+             let e = &evals[idx];
+             match act {
+-                Action::Place(_o) => {
+-                    // ── DUPLICATE YASAĞI: reconciliation bekleyen (UNKNOWN) emir varsa
+-                    // aynı coine ikinci GERÇEK entry YOLLANMAZ — cloid tek kimlik;
+-                    // farklı fiyattan yeni cloid üretimi çift maruziyet doğururdu.
+-                    //
+-                    // ÖLÜ-KİLİT FİKSİ: kapı yalnız CYCLE-BAŞI bekleyenlere uygulanır
+-                    // (`pre_pending` anlık görüntüsü). Aynı cycle'da evals'in yeni
+-                    // ürettiği karar (Flat→Pending{oid:0}) İLK GİRİŞTİR — engelli
+-                    // değildir; engellenseydi batch ASLA gönderilmez, makine
+-                    // oid=0'da sonsuz beklerdi (canlı kanıt: 51 coin kilit).
+-                    if place_arm_gate(pre_pending.contains(&e.coin), self.machines.get(&e.coin)) {
+-                        tracing::info!(
+-                            "{}: cycle-başı bekleyen emir var — bu cycle'da ikinci entry atlandı",
+-                            e.coin
+-                        );
+-                        continue;
+-                    }
+-                    // EXITS_ONLY: kararsız durumda yeni giriş AÇILMAZ.
+-                    // Çıkışlar (`ExitNow`) ve borsa stop'ları etkilenmez.
+-                    if !self.entries_allowed() {
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // GERÇEK değerler: 0.0 notional + 1.0 kaldıraç geçiliyordu →
+-                    // pozisyon/toplam maruziyet limitleri hiç uygulanmıyordu.
+-                    if !sel_names.contains(&e.coin) {
+-                        // tahsise giremedi (korelasyon/conviction) — revert
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!("{}: tahsis dışı — bekletildi", e.coin);
+-                        continue;
+-                    }
+-                    // AYNI COİNE TEKRAR GİRİŞ (piramitleme) YOK: pozisyon
+-                    // zaten varsa yeni emir üretilmez.
+-                    // `pmap` state machine'lerden kuruluyor ve yalnız `position_value`
+-                    // taşıyor — `szi` `Default` = 0.0. Burada `szi`'ye
+-                    // bakmak "zaten tutmuyorum" kontrolünü DAİMA false
+-                    // yapıyordu — açık pozisyonda ikinci girişe
+-                    // ters yönde giriş yapıldı, pozisyon ikiye katlandı).
+-                    // Doğru kaynak: borsadan gelen `executor.positions`.
+-                    // ── FEE-FARKINDALIKLI EV KAPISI ──────────────────
+-                    // Tahsisten SONRA ama yürütmeden ÖNCE: `1.5×ATR < maliyet
+-                    // tabanı` → SKIP. Clamp DEĞİL — clamp stop'u daraltıp
+-                    // EV'yi daha da bozardı.
+-                    //
+-                    // Sayılarla: round-trip ≈ 19 bps. 1.5×ATR = %0.25 (alt
+-                    // sınır) → R ≈ 1.3, 2:1 TP'de başabaş WR ≈ %59 → **yapısal
+-                    // negatif EV**. Taban = max(75 bps, 3×round_trip) = %0.75.
+-                    {
+-                        let spread_bps = {
+-                            // ask−bid / mid, ondalık → bps
+-                            let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                                (e.ask + e.bid) / 2.0
+-                            } else {
+-                                0.0
+-                            };
+-                            if mid2 > 0.0 {
+-                                (e.ask - e.bid).abs() / mid2 * 10_000.0
+-                            } else {
+-                                0.0
+-                            }
+-                        };
+-                        let (ok, risk_bps, floor_bps) =
+-                            self.am
+-                                .cfg
+-                                .cost
+-                                .ev_ok(e.atr_pct, self.am.cfg.sl_atr_mult, spread_bps);
+-                        if !ok {
+-                            tracing::info!(
+-                                "[EV] {} ATR {:.0}bps → risk {:.0}bps < maliyet flooru {:.0}bps → SKIP \
+-                                 (round-trip {:.0}bps; işlem sayısının düşmesi BEKLENEN davranış)",
+-                                e.coin,
+-                                e.atr_pct * 10_000.0,
+-                                risk_bps,
+-                                floor_bps,
+-                                self.am.cfg.cost.round_trip_cost_bps(spread_bps)
+-                            );
+-                            if let Some(m) = self.machines.get_mut(&e.coin) {
+-                                if m.oid_zero_pending() {
+-                                    m.state = PosState::Flat;
+-                                }
+-                            }
+-                            continue;
+-                        }
+-                    }
+-                    let already_held = self
+-                        .executor
+-                        .positions()
+-                        .get(&e.coin)
+-                        .map(|p| p.szi.abs() > 1e-12)
+-                        .unwrap_or(false);
+-                    // TAVAN DOLUYSA yeni giriş yapılmaz (çıkışlar serbest).
+-                    if already_held || open_now >= cap_positions {
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!(
+-                            "{}: yeni giriş elendi ({} pozisyon/tavan {})",
+-                            e.coin,
+-                            open_now,
+-                            cap_positions
+-                        );
+-                        continue;
+-                    }
+-                    let cand_opt = selected.iter().find(|c| c.coin == e.coin);
+-                    let notional = cand_opt.map(|c| c.allocated_usd).unwrap_or(0.0);
+-                    let lev = pmap
+-                        .get(&e.coin)
+-                        .map(|p| p.leverage)
+-                        .unwrap_or(self.leverage)
+-                        .max(self.leverage);
+-                    // risk kontrolü: mevcut + bu-cycle kabul edilmiş maruziyet
+-                    if let Err(risk_err) =
+-                        projection.check_and_commit(&self.risk, self.equity, &e.coin, notional, lev)
+-                    {
+-                        tracing::warn!("{}: RİSK KAPISI reddi: {risk_err}", e.coin);
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        tracing::info!("{}: risk kapısı reddi — {risk_err}", e.coin);
+-                        continue;
+-                    }
+-                    let cand = selected.iter().find(|c| c.coin == e.coin).unwrap();
+-                    let book_px = if cand.dir == Dir::Long { e.ask } else { e.bid };
+-                    let entry_px = if book_px > 1e-6 {
+-                        book_px
+-                    } else {
+-                        e.closes.last().copied().unwrap_or(0.0)
+-                    };
+-                    // ATR=0 / bozuk SL koruması (min %0.25 mesafe)
+-                    let min_dist = entry_px * 0.0025;
+-                    let (sl_ok, tp_ok) = if cand.dir == Dir::Long {
+-                        (entry_px - cand.sl_px, cand.tp_px - entry_px)
+-                    } else {
+-                        (cand.sl_px - entry_px, entry_px - cand.tp_px)
+-                    };
+-                    // KONTRAT KAPISI: negatif SL/TP fiyatı (ATR girişin
+-                    // katları) borsada "invalid price" olur → korumasız pozisyon.
+-                    if !entry_contract_ok(
+-                        matches!(cand.dir, Dir::Long),
+-                        entry_px,
+-                        cand.sl_px,
+-                        cand.tp_px,
+-                    ) || sl_ok < min_dist
+-                        || tp_ok < min_dist
+-                    {
+-                        tracing::warn!(
+-                            "{}: SL/TP kontrat/mesafe koruması (ATR âm) — emir atlandı",
+-                            e.coin
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // GHOST ORDER + MIN NOTIONAL kapısı: `round_sz_up`'a GİRMEDEN ele.
+-                    // ($8 tahsis → lot 0.0000 → borsada 0-lot emir = hayalet emir)
+-                    if cand.allocated_usd < crate::allocation_manager::MIN_NOTIONAL_USD {
+-                        tracing::info!(
+-                            "{}: tahsis çok küçük (${:.2} < ${:.0}) — atlandı",
+-                            e.coin,
+-                            cand.allocated_usd,
+-                            crate::allocation_manager::MIN_NOTIONAL_USD
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    let sz = hyperliquid_api::round_sz_up(cand.allocated_usd / entry_px, szd);
+-                    if sz <= 0.0 || !sz.is_finite() {
+-                        tracing::info!(
+-                            "{}: lot yuvarlaması 0 (${:.2}/@${:.2}) — hayalet emir koruması, atlandı",
+-                            e.coin, cand.allocated_usd, entry_px
+-                        );
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    let side_sm = if cand.dir == Dir::Long {
+-                        SmSide::Long
+-                    } else {
+-                        SmSide::Short
+-                    };
+-                    // KALDIRAÇ tembel: gerçek emirden hemen önce, bir kez.
+-                    // (Açılışta 178 istek atmak hız sınırını patlatıyordu.)
+-                    let lev = self.leverage as u32;
+-                    let coin_lv = e.coin.clone();
+-                    if let Err(err) = self.executor.ensure_leverage(&coin_lv, lev).await {
+-                        tracing::warn!("{coin_lv}: kaldıraç ayarlanamadı ({err})");
+-                    }
+-                    let mut attr = EntryAttr {
+-                        coin: e.coin.clone(),
+-                        ts: hyperliquid_api::now_ms(),
+-                        voters: selected
+-                            .iter()
+-                            .find(|c| c.coin == e.coin)
+-                            .map(|c| c.voters.clone())
+-                            .unwrap_or_default(),
+-                        side: side_sm,
+-                        entry_px,
+-                        risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
+-                        size: sz,
+-                        // Analytical TP, tahsis anında karar fiyatından türetilir
+-                        tp_px: None,
+-                        exit_reason: None,
+-                    };
+-                    // TP formülü ÜRETİMDE de aynı fonksiyondan gelir.
+-                    // Buradaki değer PLAN (henüz dolum yok); `apply_real_fill`
+-                    // gelince gerçek dolumla YENİDEN türetilir.
+-                    if let Some(tp) = attr.set_analytical_tp(&self.am.cfg) {
+-                        tracing::info!(
+-                            "[TP] {} analytical hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
+-                            e.coin,
+-                            entry_px,
+-                            attr.risk_px,
+-                            tp
+-                        );
+-                    }
+-                    // EMİR FİYATI: ALO(post-only) KALDIRILDI. Long'da ask'a,
+-                    // short'ta bid'e post-only yazmak spread'i kestiği için
+-                    // borsa reddediyordu ("Post only order would have
+-                    // immediately matched", status=badAloPxRejected) → 11
+-                    // emrin 4'ü hiç girmiyordu. Şimdi IOC + %0.2 kayma kapağı.
+-                    // Testnet defteri çok ince: ask/bid tabanlı dar kapağa hiç erişilemiyor
+-                    // ("could not immediately match against any resting orders").
+-                    // TEK MALİYET MODELİ: band `CostModel::execution_band_bps`
+-                    // (EV kapısıyla AYNI fee+slippage+spread). Ad-hoc ±%0.5/±%0.2
+-                    // ikinci maliyet modeli KALDIRILDI; operasyonel taban
+-                    // (EXECUTION_BAND_FLOOR_BPS=50 bps) ince testnet defterinde
+-                    // dolum kaçışını önler (ince defterde agresif fiyat).
+-                    let spread_bps_band = {
+-                        let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                            (e.ask + e.bid) / 2.0
+-                        } else {
+-                            0.0
+-                        };
+-                        if mid2 > 0.0 {
+-                            (e.ask - e.bid).abs() / mid2 * 10_000.0
+-                        } else {
+-                            0.0
+-                        }
+-                    };
+-                    let band = self.am.cfg.cost.execution_band_bps(spread_bps_band);
+-                    let ord_px = match mark_map.get(&e.coin) {
+-                        Some(mk) if *mk > 0.0 => {
+-                            let f = band / 10_000.0;
+-                            if side_sm.is_buy() {
+-                                *mk * (1.0 + f)
+-                            } else {
+-                                *mk * (1.0 - f)
+-                            }
+-                        }
+-                        _ => {
+-                            let f = band / 10_000.0;
+-                            let raw = if side_sm.is_buy() {
+-                                entry_px * (1.0 + f)
+-                            } else {
+-                                entry_px * (1.0 - f)
+-                            };
+-                            raw.clamp(entry_px * 0.97, entry_px * 1.03)
+-                        }
+-                    };
+-                    // Fiyat kapısı: kitap/closure olmayan yeni listelenmiş
+-                    // coinlerde entry_px=0 çıkıyor ve borsa "Order has invalid
+-                    // price." diyordu. Sıfır/NaN fiyatla emir ATILMAZ.
+-                    if ord_px <= 1e-9 || !ord_px.is_finite() {
+-                        tracing::warn!("{}: fiyat geçersiz ({:.8}) — emir atlandı", e.coin, ord_px);
+-                        if let Some(m) = self.machines.get_mut(&e.coin) {
+-                            if m.oid_zero_pending() {
+-                                m.state = PosState::Flat;
+-                            }
+-                        }
+-                        continue;
+-                    }
+-                    // CLOID: `signing::post` 5xx'te isteği yeniden
+-                    // yollar. İstek borsada işlendi ama yanıt kaybolduysa
+-                    // aynı emir İKİNCİ kez yollanır ve pozisyon ikiye
+-                    // katlanırdı. Deterministik anahtar aynı emri retry'de
+-                    // aynı kılar → borsa ikinciyi "duplicate" diye reddeder.
+-                    // `salt = n_cycles<<16 | batch_index`: aynı döngüde aynı coin+px+sz
+-                    // iki kez geçerse cloid çakışmasın.
+-                    let cloid = crate::executor::make_cloid(
+-                        &e.coin,
+-                        ord_px,
+-                        sz,
+-                        (self.n_cycles << 16) | (places.len() as u64 & 0xffff),
+-                    );
+-                    places.push(WireOrder {
+-                        asset,
+-                        is_buy: side_sm.is_buy(),
+-                        sz,
+-                        px: ord_px,
+-                        tif: Tif::Ioc,
+-                        reduce_only: false,
+-                        cloid: Some(cloid),
+-                    });
+-                    open_now += 1; // tavan sayacı bu tur için artsın
+-                                   // BORSA STOP HEDEFİ: dolum anında `apply_fill` bunu
+-                                   // kullanarak gecikmesiz reduce-only trigger SL kurar.
+-                                   //
+-                                   // ⚠️ MUTLAK FİYAT DEĞİL, **RİSK MESAFESİ** yazılır.
+-                                   // IOC kayması dolumu karar-anındaki defter fiyatından %0.9 gibi
+-                                   // oranlarda kötüleştirebilir; mesafe yolu bundan bağımsızdır
+-                                   // getirdi → kısa pozisyonun stop'u dolumun **altında**
+-                                   // kaldı → 1.1 saniyede tetiklendi (−$0.21). Mesafe
+-                                   // taşınınca stop `dolum_px ± mesafe` olur ve kayma stop'u
+-                                   // yan tarafa taşıyamaz.
+-                    if attr.risk_px > 0.0 {
+-                        let now_ms = hyperliquid_api::now_ms();
+-                        self.executor
+-                            .pending_sl
+-                            .insert(e.coin.clone(), (attr.risk_px, now_ms));
+-                        // GERÇEK TP: mesafe `tp_from_entry` (tek formül)
+-                        // ile karar fiyatından; mesafe girişten bağımsız
+-                        // olduğu için dolum anına taşınır. Dolum gelince
+-                        // TP = dolum ± mesafe reduce-only asılır.
+-                        if let Some(tp) = attr.tp_px {
+-                            let dist = if attr.side.is_buy() {
+-                                tp - entry_px
+-                            } else {
+-                                entry_px - tp
+-                            };
+-                            if dist > 0.0 && dist.is_finite() {
+-                                self.executor
+-                                    .pending_tp
+-                                    .insert(e.coin.clone(), (dist, now_ms));
+-                            }
+-                        }
+-                    }
+-                    self.entry_attr.insert(e.coin.clone(), attr);
+-                }
++                 /* ~ changed by cargo-mutants ~ */
+                 Action::ExitNow(o) => {
+                     // ÇIKIŞ SEBEBİ: SignalExit olarak işaretle (entry_attr'a yazılacak)
+                     if let Some(attr) = self.entry_attr.get_mut(&e.coin) {
+                         attr.exit_reason = Some(ExitReason::SignalExit);
+                     }
+                     // HAYALET EMİR KORUMASI (çıkış yolu da): makine boyutu
+                     // bilmiyorsa pozisyonun kendisinden al; 0 kalırsa emir
+                     // GÖNDERİLMEZ (borsada reduce-only 0-lot = kapatılmayan

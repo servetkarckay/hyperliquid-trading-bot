@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace == with != in Engine::run_cycle
+@@ -3031,17 +3031,17 @@
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         continue;
+                     }
+-                    let side_sm = if cand.dir == Dir::Long {
++                    let side_sm = if cand.dir != /* ~ changed by cargo-mutants ~ */ Dir::Long {
+                         SmSide::Long
+                     } else {
+                         SmSide::Short
+                     };
+                     // KALDIRAÇ tembel: gerçek emirden hemen önce, bir kez.
+                     // (Açılışta 178 istek atmak hız sınırını patlatıyordu.)
+                     let lev = self.leverage as u32;
+                     let coin_lv = e.coin.clone();

@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace > with == in AllocationManager::allocate
+@@ -438,17 +438,17 @@
+                 }
+             }
+         }
+         // 5c) POZİSYON BAŞINA TAVAN: tahsis risk kapısıyla aynı tavanı
+         // aşamaz. Aksi halde tek güçlü aday TÜM bütçeyi alıyor
+         // (aksi halde tek güçlü aday coin-tavanına takılır ve sinyal
+         // tahsis alamadan boşa gider).
+         for c in picked.iter_mut() {
+-            if c.allocated_usd > self.cfg.max_position_usd {
++            if c.allocated_usd == /* ~ changed by cargo-mutants ~ */ self.cfg.max_position_usd {
+                 tracing::info!(
+                     "[AL] {} tahsisi ${:.0} → ${:.0} (pozisyon tavanı)",
+                     c.coin,
+                     c.allocated_usd,
+                     self.cfg.max_position_usd
+                 );
+                 c.allocated_usd = self.cfg.max_position_usd;
+                 c.capped = true;

@@ -1,0 +1,28 @@
+--- engine/src/executor.rs
++++ delete match arm "user" | "userEvents" | "userNonFundingLedgerUpdates" in Executor::handle_ws_event
+@@ -1425,24 +1425,17 @@
+ 
+     /// Kanal: "orderUpdates" -> emir durumu; "user" (userEvents) -> fill'ler.
+     pub fn handle_ws_event(&mut self, channel: &str, data: &Value) {
+         match channel {
+             "orderUpdates" => self.apply_order_update(data),
+             // SUNUCU KANALI ADI "userEvents" — "user" takısıyla eşleşir;
+             // eşleşmeyen kanal adı tüm fill'leri sessizce DÜŞÜRÜR (fill
+             // işlenmez, makine hiç pozisyona girmez).
+-            "user" | "userEvents" | "userNonFundingLedgerUpdates" => {
+-                for f in data["fills"].as_array().cloned().unwrap_or_default() {
+-                    self.apply_fill(&f);
+-                }
+-                if data["liquidation"].is_object() {
+-                    tracing::warn!("LIKİDASYON eventi: {}", data["liquidation"]);
+-                }
+-            }
++             /* ~ changed by cargo-mutants ~ */
+             _ => {}
+         }
+     }
+ 
+     /// WS zarfı: `{"channel":"orderUpdates","data":{"orders":[ … ]}}`.
+     /// Eskiden tek bir emir nesnesi bekleniyordu → `orders` dizisi gelince
+     /// status/oid boş geliyor, HİÇBİR emir takip edilemiyordu (bot açık
+     /// emirlerini yetim bırakıyordu).

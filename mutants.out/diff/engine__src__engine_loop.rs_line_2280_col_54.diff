@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace >= with < in Engine::run_cycle
+@@ -2272,17 +2272,17 @@
+             }
+         }
+         self.dyn_weights();
+ 
+         // == PERİYODİK RECON (30 sn) — cycle-sayacı yerine zaman
+         // Mutex guard'ı await ÖNCESİNE serbest bırak (engine field kullan)
+         let now_ms = hyperliquid_api::now_ms();
+         let mut recon_notes: Vec<String> = Vec::new();
+-        if now_ms.saturating_sub(self.last_recon_ms) >= 30_000 {
++        if now_ms.saturating_sub(self.last_recon_ms) < /* ~ changed by cargo-mutants ~ */ 30_000 {
+             self.last_recon_ms = now_ms;
+             // DEDUPE ÖNCESİ DRAIN ZORUNLU: recon, spawn kanallarını
+             // tük-etmeden dedupe çalıştırırsa `sl_last_px` boş kalır →
+             // TP "yetim stop" sayılıp İPTAL EDİLEBİLİR. Drain sınıflamayı
+             // besler; dedupe ancak sonrasında güvenlidir.
+             self.executor.drain_sl_results();
+             self.executor.drain_tp_results();
+             let cands = self.executor.refresh_orders().await;

@@ -1,0 +1,74 @@
+--- engine/src/executor.rs
++++ replace Executor::dedupe_sl -> usize with 0
+@@ -1312,70 +1312,17 @@
+     /// birini `reduceOnlyCanceled` ile iptal eder; `sl_orders`
+     /// hangisinin ayakta kaldığını bilemez →
+     /// bir sonraki taramada üçüncüsü ekleniyor.
+     ///
+     /// oid zamanla artan sayıdır (yeni emir daha büyük oid alır) → en büyük
+     /// oid en yenidir. `refresh_orders`'ın döndürdüğü `(coin, oid)` listesinden
+     /// yararlanır; `sl_orders`'ı da doğru şekilde doldurur.
+     pub async fn dedupe_sl(&mut self, candidates: Vec<(String, i64)>) -> usize {
+-        let mut by_coin: HashMap<String, Vec<i64>> = HashMap::new();
+-        for (c, o) in candidates {
+-            by_coin.entry(c).or_default().push(o);
+-        }
+-        let mut cancelled = 0usize;
+-        for (coin, mut oids) in by_coin {
+-            oids.sort_unstable();
+-            let keep = *oids.last().unwrap();
+-            if oids.len() > 1 {
+-                for oid in oids[..oids.len() - 1].iter() {
+-                    match self.cancel(&coin, *oid).await {
+-                        Ok(()) => {
+-                            cancelled += 1;
+-                            tracing::warn!(
+-                                "[SL] {coin} ARTIK stop iptal edildi oid={oid} (korunan={keep})"
+-                            );
+-                        }
+-                        Err(e) => tracing::warn!(coin, oid, "artık stop iptal hatası: {e}"),
+-                    }
+-                    self.open_orders.remove(oid);
+-                }
+-            }
+-            // STOP FİYATINI REST'ten TERS HESAPLA — KONTRAT:
+-            //
+-            // `place_trigger(is_market = true)` gövdeyi
+-            // "p": trigger_px × 1.05 (alış stop, kısa kapatma)
+-            // "p": trigger_px × 0.95 (satış stop, uzun kapatma)
+-            // olarak yolluyor ve REST `openOrders` yalnız **`limitPx`**'i
+-            // döndürüyor. Yani `limitPx` **stop fiyatı DEĞİL**, piyasa emri
+-            // koruma fiyatı. Kanıt (canlı eşleşme):
+-            // LAYER stop kuruldu px=0.07868414 → REST limitPx=0.082614
+-            // 0.082614 / 1.05 = 0.078680 ✓
+-            // TURBO stop kuruldu px=0.00106343 → REST limitPx=0.001116
+-            // 0.001116 / 1.05 = 0.00106286 ✓
+-            // `sl_last_px` bunu tersine çevirmeden doldurulursa restart'tan
+-            // sonra trailing stop seviyesi %5 yanlış okunur → yanlış ratchet
+-            // kararı (ya da mevcut stop'un gevşetilmesi).
+-            let trigger_px = self
+-                .open_orders
+-                .get(&keep)
+-                .map(|o| {
+-                    let d = self.px_dec.get(&o.asset).copied().unwrap_or(6);
+-                    hyperliquid_api::round_px_for(
+-                        if o.is_buy { o.px / 1.05 } else { o.px / 0.95 },
+-                        d,
+-                    )
+-                })
+-                .unwrap_or(0.0);
+-            self.sl_orders.insert(coin.clone(), keep);
+-            if trigger_px > 0.0 {
+-                self.sl_last_px.insert(coin, trigger_px);
+-            }
+-        }
+-        cancelled
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// REST'ten pozisyonları yenile (clearinghouseState.assetPositions)
+     pub async fn refresh_positions(&mut self) -> Result<()> {
+         let st = self.info.clearinghouse_state(&self.user).await?;
+         // KRİTİK: borsa ara sıra `null` döndürebilir. Null'da pozisyonları
+         // SİLMEK, borsadaki açık pozisyonları "yok" saymak olur → bot onları
+         // yönetmezdi. Boş/çözümsüz yanıt = hatadır, önceki harita korunur.

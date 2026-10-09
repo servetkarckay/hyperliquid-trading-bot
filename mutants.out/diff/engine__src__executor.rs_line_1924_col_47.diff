@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::batch_execute
+@@ -1916,17 +1916,17 @@
+         if !places.is_empty() {
+             // Gönderim izi: hangi coin/fiyat/lot gitti (hata ayıklamanın tek
+             // yolu bu — borsa "invalid price" dediğinde fiyatı nerede gördüğümüz
+             // belli olmalı).
+             for w in places {
+                 let cn = self
+                     .assets
+                     .iter()
+-                    .find(|(_, (a, _, _))| *a == w.asset)
++                    .find(|(_, (a, _, _))| *a != /* ~ changed by cargo-mutants ~ */ w.asset)
+                     .map(|(c, _)| c.clone())
+                     .unwrap_or_else(|| format!("#{}", w.asset));
+                 // log da GERÇEKTEN giden tick'i göstersin (szDecimals değil:
+                 // fiyat ızgarası coin'e özel ve keşfediliyor)
+                 let px_w = hyperliquid_api::round_px_for(w.px, self.px_dec_for(w.asset));
+                 tracing::info!(
+                     coin = %cn, px = px_w, px_hesap = w.px, sz = w.sz, notional = px_w * w.sz,
+                     buy = w.is_buy, tif = ?w.tif, "emir gönderiliyor"

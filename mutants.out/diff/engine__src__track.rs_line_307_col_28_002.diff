@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace > with >= in PortfolioHistory::avg_win
+@@ -299,17 +299,17 @@
+     }
+ 
+     /// ort kazanç R (r > 0)
+     pub fn avg_win(&self) -> Option<f64> {
+         let wins: Vec<f64> = self
+             .trades
+             .iter()
+             .map(|(_, r)| *r)
+-            .filter(|r| *r > 0.0)
++            .filter(|r| *r >= /* ~ changed by cargo-mutants ~ */ 0.0)
+             .collect();
+         if wins.is_empty() {
+             return None;
+         }
+         Some(wins.iter().sum::<f64>() / wins.len() as f64)
+     }
+ 
+     /// ort kayıp R (r ≤ 0)

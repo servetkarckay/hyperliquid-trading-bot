@@ -1,0 +1,94 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::apply_effective_weights with ()
+@@ -1517,90 +1517,17 @@
+     /// Kural 2: canlı dosya yüklendikten sonra bir sonraki
+     /// `apply_effective_weights` çağrısında sessizce 1.0'a EZİLEMEZ.
+     /// Snapshot **birebir** uygulanır: `WEIGHT_CLAMP_*` yalnız tracker
+     /// türevlerine ait, dosyadaki `1.75` `1.75` kalır.
+     ///
+     /// Kullanılmayan (registry'de olmayan) snapshot girdileri **sessizce
+     /// düşmez** — uyarıyla loglanır.
+     pub fn apply_effective_weights(&mut self) {
+-        let (tracker_w, explorers, events) = self
+-            .tracker
+-            .effective_weights(&self.strategy_names, &self.learn_pol);
+-        self.explore_names = explorers.clone();
+-        for e in &events {
+-            let v = match e.verdict {
+-                crate::track::ExploreVerdict::Promote => "TERFİ",
+-                crate::track::ExploreVerdict::Demote => "SUSTUR",
+-                _ => "—",
+-            };
+-            tracing::warn!(
+-                "[LEARN] {v}: {} {:.2}→{:.2} (n={} wr={:.2} pf={:.2})",
+-                e.strategy,
+-                e.from,
+-                e.to,
+-                e.trades,
+-                e.win_rate,
+-                e.profit_factor
+-            );
+-        }
+-
+-        // Saf merge (testler de aynı fonksiyonu sınar).
+-        let merged = {
+-            let tracker = &self.tracker;
+-            merge_effective_weights(
+-                &tracker_w,
+-                &self.live_weights,
+-                &|name: &str| tracker.evidence_n(name),
+-                self.learn_pol.min_n,
+-            )
+-        };
+-        if !merged.unknown.is_empty() {
+-            tracing::warn!(
+-                "[LEARN] canlı ağırlık dosyasındaki {} strateji registry'de YOK → ensemble'a girmedi: {:?}",
+-                merged.unknown.len(),
+-                merged.unknown
+-            );
+-        }
+-
+-        let n_w = merged.ensemble_weights.len();
+-        self.ensemble.cfg.weights = merged.ensemble_weights;
+-
+-        if self.live_weights.is_empty() {
+-            tracing::info!(
+-                "[LEARN] nötr başlangıç: canlı ağırlık dosyası YOK → {n_w} strateji × w=1.0 (tracker kanıtı yoksa)"
+-            );
+-        } else if merged.live_applied.is_empty() {
+-            tracing::info!(
+-                "[LEARN] canlı ağırlıklar YOK sayıldı: {} strateji için tracker kanıtı yeterli (n ≥ min_n={}) → {:?}",
+-                merged.live_overridden.len(),
+-                self.learn_pol.min_n,
+-                merged.live_overridden
+-            );
+-        } else {
+-            let mut parts: Vec<String> = merged
+-                .live_applied
+-                .iter()
+-                .filter_map(|n| self.live_weights.get(n).map(|w| format!("{n}={w:.4}")))
+-                .collect();
+-            parts.sort();
+-            tracing::info!(
+-                "[LEARN] canlı ağırlıklar uygulandı: {} strateji [{}]",
+-                merged.live_applied.len(),
+-                parts.join(", ")
+-            );
+-            tracing::info!("[LEARN] cold-start kullanılmadı");
+-            if !merged.live_overridden.is_empty() {
+-                tracing::info!(
+-                    "[LEARN] canlı snapshot korundu ama tracker kanıtı üstüne yazdı ({} strateji): {:?}",
+-                    merged.live_overridden.len(),
+-                    merged.live_overridden
+-                );
+-            }
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// geriye uyumlu çağrı (test/legacy yol)
+     fn dyn_weights(&mut self) {
+         self.apply_effective_weights();
+     }
+ 
+     /// Bütçe: portfolyo-paylı f* (yetersiz stat yarımda sabit)

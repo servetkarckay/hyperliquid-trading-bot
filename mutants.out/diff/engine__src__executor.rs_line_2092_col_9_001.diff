@@ -1,0 +1,25 @@
+--- engine/src/executor.rs
++++ replace Executor::sz_dec_of -> u32 with 1
+@@ -2084,21 +2084,17 @@
+ impl Executor {
+     /// coin -> (asset id, szDecimals) — cache'li, ağ çağrısı yapmaz (None: yok)
+     pub fn cached_asset(&self, coin: &str) -> Option<(u32, u32)> {
+         self.assets.get(coin).map(|(a, d, _)| (*a, *d))
+     }
+ 
+     /// asset id -> szDecimals (bilinmiyorsa 0 — merkezi kural 6 hane verir).
+     pub fn sz_dec_of(&self, asset: u32) -> u32 {
+-        self.assets
+-            .iter()
+-            .find(|(_, (a, _, _))| *a == asset)
+-            .map(|(_, (_, d, _))| *d)
+-            .unwrap_or(0)
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+     pub fn coin_of(&self, asset: u32) -> String {
+         self.assets
+             .iter()
+             .find(|(_, (a, _, _))| *a == asset)
+             .map(|(c, _)| c.clone())

@@ -1,0 +1,56 @@
+--- engine/src/executor.rs
++++ replace place_sl_grid -> Result<i64> with Ok(1)
+@@ -128,52 +128,17 @@
+     ex: &Exchange,
+     asset: u32,
+     exit_is_buy: bool,
+     qty: f64,
+     sl: f64,
+     mut dec: u32,
+     coin: &str,
+ ) -> Result<i64> {
+-    let mut last = String::new();
+-    while dec >= 1 {
+-        let px = hyperliquid_api::round_px_for(sl, dec);
+-        // Cloid: `signing::post` 5xx retry'ında aynı emri tekrar yollayabilir.
+-        // `salt = dec` ile ızgara denemeleri birbirinden ayrılır, ama AYNI
+-        // ızgaranın retry'si aynı cloid'i alır → borsa ikinciyi reddeder.
+-        let cloid = make_cloid(coin, px, qty, dec as u64);
+-        match ex
+-            .place_trigger(hyperliquid_api::exchange_endpoint::TriggerOrderParams {
+-                asset,
+-                is_buy: exit_is_buy,
+-                sz: qty,
+-                trigger_px: px,
+-                is_market: true,
+-                is_take_profit: false,
+-                reduce_only: true,
+-                cloid: Some(&cloid),
+-            })
+-            .await
+-        {
+-            Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
+-            Ok(st) => {
+-                last = st.error(0).unwrap_or("bilinmeyen").to_string();
+-                if !last.contains("invalid price") {
+-                    break;
+-                }
+-                dec -= 1;
+-            }
+-            Err(e) => {
+-                last = e.to_string();
+-                break;
+-            }
+-        }
+-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+-    }
+-    bail!("SL reddi (hane={dec}): {last}")
++    Ok(1) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// **REDUCE-ONLY TP TRIGGER** — `tpsl="tp"`, `is_market=false` (dinlenen
+ /// limit). TP gerçek kapanış kaynağıdır: fill geldiğinde `oid` eşleşmesi
+ /// ile `ExitReason::TakeProfit` atanır.
+ ///
+ /// SL ile AYNI ızgara mantığı: borsa fiyat ızgarasını reddederse hane
+ /// azaltılarak denenir; her deneme AYRI cloid tuzu (`TP_CLOID_SALT`) alır.

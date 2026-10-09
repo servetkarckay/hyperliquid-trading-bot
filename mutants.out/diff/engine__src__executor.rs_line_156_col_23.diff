@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace match guard st.error(0).is_none() with true in place_sl_grid
+@@ -148,17 +148,17 @@
+                 trigger_px: px,
+                 is_market: true,
+                 is_take_profit: false,
+                 reduce_only: true,
+                 cloid: Some(&cloid),
+             })
+             .await
+         {
+-            Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
++            Ok(st) if true /* ~ changed by cargo-mutants ~ */ => return Ok(st.resting_oid(0).unwrap_or(0)),
+             Ok(st) => {
+                 last = st.error(0).unwrap_or("bilinmeyen").to_string();
+                 if !last.contains("invalid price") {
+                     break;
+                 }
+                 dec -= 1;
+             }
+             Err(e) => {

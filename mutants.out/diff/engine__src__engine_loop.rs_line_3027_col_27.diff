@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace <= with > in Engine::run_cycle
+@@ -3019,17 +3019,17 @@
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         continue;
+                     }
+                     let sz = hyperliquid_api::round_sz_up(cand.allocated_usd / entry_px, szd);
+-                    if sz <= 0.0 || !sz.is_finite() {
++                    if sz > /* ~ changed by cargo-mutants ~ */ 0.0 || !sz.is_finite() {
+                         tracing::info!(
+                             "{}: lot yuvarlaması 0 (${:.2}/@${:.2}) — hayalet emir koruması, atlandı",
+                             e.coin, cand.allocated_usd, entry_px
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }

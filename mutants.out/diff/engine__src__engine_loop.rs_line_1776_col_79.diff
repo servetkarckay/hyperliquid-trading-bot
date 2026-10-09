@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with == in Engine::sync_exchange_sl
+@@ -1768,17 +1768,17 @@
+                         t.worst_px = t.worst_px.min(px);
+                     } else {
+                         t.peak_px = t.peak_px.min(px);
+                         t.worst_px = t.worst_px.max(px);
+                     }
+                     t.last_px = px;
+                 }
+                 // ATR güncel: yeni hesaplanmışsa al, yoksa giriş ATR'ına sabit.
+-                if let Some(a) = self.atr_px.get(coin).copied().filter(|a| *a > 0.0) {
++                if let Some(a) = self.atr_px.get(coin).copied().filter(|a| *a == /* ~ changed by cargo-mutants ~ */ 0.0) {
+                     t.atr_px = a;
+                 }
+                 if t.atr_px > 0.0 {
+                     let dist = self.loop_cfg.trail_atr_k * t.atr_px;
+                     let target = if is_long {
+                         t.peak_px - dist
+                     } else {
+                         t.peak_px + dist

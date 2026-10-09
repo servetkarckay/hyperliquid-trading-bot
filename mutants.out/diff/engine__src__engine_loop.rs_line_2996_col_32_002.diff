@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with <= in Engine::run_cycle
+@@ -2988,17 +2988,17 @@
+                     };
+                     // KONTRAT KAPISI: negatif SL/TP fiyatı (ATR girişin
+                     // katları) borsada "invalid price" olur → korumasız pozisyon.
+                     if !entry_contract_ok(
+                         matches!(cand.dir, Dir::Long),
+                         entry_px,
+                         cand.sl_px,
+                         cand.tp_px,
+-                    ) || sl_ok < min_dist
++                    ) || sl_ok <= /* ~ changed by cargo-mutants ~ */ min_dist
+                         || tp_ok < min_dist
+                     {
+                         tracing::warn!(
+                             "{}: SL/TP kontrat/mesafe koruması (ATR âm) — emir atlandı",
+                             e.coin
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {

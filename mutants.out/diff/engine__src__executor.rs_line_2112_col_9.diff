@@ -1,0 +1,24 @@
+--- engine/src/executor.rs
++++ replace Executor::open_orders_view -> Vec<(String, i64)> with vec![]
+@@ -2104,20 +2104,17 @@
+             .map(|(c, _)| c.clone())
+             .unwrap_or_else(|| format!("#{asset}"))
+     }
+ }
+ 
+ impl Executor {
+     /// açık emir akışı: (coin, oid) — watchdog usage
+     pub fn open_orders_view(&self) -> Vec<(String, i64)> {
+-        self.open_orders
+-            .values()
+-            .map(|o| (o.coin.clone(), o.oid))
+-            .collect()
++        vec![] /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tick_tests {
+ 
+     // REGRESYON KORUMASI: cancel_tp/cancel_sl iptal sonucunu YUTAMAZ —
+     // başarısız iptal sessiz kalırsa borsada kalıntı emir/korumsuzluk kalır.

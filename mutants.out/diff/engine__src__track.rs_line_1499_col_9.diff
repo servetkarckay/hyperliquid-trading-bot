@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace Health::ws_recent -> usize with 0
+@@ -1491,17 +1491,17 @@
+         if self.ws_reconnects.len() > WS_STORM_COUNT && self.mode == Mode::Normal {
+             self.mode = Mode::ExitsOnly;
+             return true;
+         }
+         false
+     }
+ 
+     pub fn ws_recent(&self) -> usize {
+-        self.ws_reconnects.len()
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Döngü hatası. `true` dönerse → flatten + halt.
+     pub fn on_error(&mut self, err: &str) -> bool {
+         match classify(err) {
+             ErrClass::Transient => {
+                 // sayaç **sıfırlanmaz** ama artmaz da: arka arkaya başarılı
+                 // döngülerde sıfırlanır (aşağıda).

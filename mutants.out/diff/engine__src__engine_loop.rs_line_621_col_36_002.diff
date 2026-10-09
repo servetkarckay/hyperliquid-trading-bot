@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in entry_contract_ok
+@@ -613,17 +613,17 @@
+         return false;
+     }
+     if sl_px <= 0.0 || !sl_px.is_finite() || tp_px <= 0.0 || !tp_px.is_finite() {
+         return false;
+     }
+     if is_long {
+         sl_px < entry_eff && tp_px > entry_eff
+     } else {
+-        tp_px < entry_eff && sl_px > entry_eff
++        tp_px < entry_eff && sl_px >= /* ~ changed by cargo-mutants ~ */ entry_eff
+     }
+ }
+ 
+ /// Kâr tarafı kapısı: long → TP > entry, short → TP < entry.
+ pub fn tp_side_ok(is_long: bool, tp_px: f64, entry_eff: f64) -> bool {
+     if tp_px.is_nan() || entry_eff.is_nan() || tp_px <= 0.0 || entry_eff <= 0.0 {
+         return false;
+     }

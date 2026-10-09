@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with % in Engine::budget_usd
+@@ -1617,17 +1617,17 @@
+         let w = self.tracker.ensemble_weights();
+         let entered: Vec<&f64> = w
+             .values()
+             .filter(|x| **x > 0.040 && **x != crate::track::NEUTRAL_WEIGHT)
+             .collect();
+         let f = if entered.is_empty() {
+             0.072
+         } else {
+-            (entered.iter().map(|x| **x).sum::<f64>() / entered.len() as f64).min(0.10)
++            (entered.iter().map(|x| **x).sum::<f64>() % /* ~ changed by cargo-mutants ~ */ entered.len() as f64).min(0.10)
+         };
+         self.equity * f
+     }
+ 
+     /// ANA DÖNGÜ ADIMI (3 faz)
+     /// Her döngüde BORSA STOP senkronu ( "exits_only" kuralı).
+     ///
+     /// Açık her pozisyon için borsada reduce-only SL yoksa kurar; pozisyon

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace == with != in Engine::run_cycle
+@@ -2569,17 +2569,17 @@
+             if already_on || e.cs.dir == Dir::Neutral {
+                 n_skip_neutral += 1;
+                 continue;
+             }
+             let side_sign = if e.cs.dir == Dir::Long { 1.0 } else { -1.0 };
+             let voters: Vec<String> =
+                 e.cs.contributors
+                     .iter()
+-                    .filter(|(_, contrib)| contrib.signum() == side_sign)
++                    .filter(|(_, contrib)| contrib.signum() != /* ~ changed by cargo-mutants ~ */ side_sign)
+                     .map(|(n, _)| n.clone())
+                     .collect();
+             if voters.is_empty() {
+                 n_skip_novoter += 1;
+                 continue;
+             }
+             signaled.extend(voters.iter().cloned());
+             closes_map.insert(e.coin.clone(), e.closes.clone());

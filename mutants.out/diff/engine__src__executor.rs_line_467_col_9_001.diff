@@ -1,0 +1,64 @@
+--- engine/src/executor.rs
++++ replace Executor::set_leverage_all -> Vec<String> with vec![String::new()]
+@@ -459,60 +459,17 @@
+ 
+     /// Hesap kaldıracını AÇIKÇA ayarla (cross). Varsayılan 20x → likidasyon
+     /// mesafesi ~%5'e iner; botun risk modeli bunu göremez.
+     ///
+     /// **Bloklamaz ve kilitlemez:** coinler 8'erli yığınlarda paralel işlenir,
+     /// her istekte 8 sn zaman aşımı. 178 coin'lik evrende sıralı çağrı ~4 dk
+     /// sürüyor ve açılışta motor döngüsünü kilitliyordu.
+     pub async fn set_leverage_all(&mut self, coins: &[String], leverage: u32) -> Vec<String> {
+-        let mut failed = Vec::new();
+-        const CHUNK: usize = 8;
+-        for chunk in coins.chunks(CHUNK) {
+-            let mut jobs = Vec::new();
+-            for c in chunk {
+-                let Ok((asset, _)) = self.asset_of(c) else {
+-                    failed.push(format!("{c}: bilinmeyen coin"));
+-                    continue;
+-                };
+-                let ex = self.ex.clone();
+-                let coin = c.clone();
+-                jobs.push(tokio::spawn(async move {
+-                    let fut = async move {
+-                        tokio::time::timeout(
+-                            std::time::Duration::from_secs(8),
+-                            ex.update_leverage(asset, true, leverage),
+-                        )
+-                        .await
+-                    };
+-                    match fut.await {
+-                        Ok(Ok(v)) => {
+-                            let ok = v
+-                                .get("response")
+-                                .and_then(|r| r.get("type"))
+-                                .and_then(|t| t.as_str())
+-                                == Some("ok");
+-                            if !ok {
+-                                Some(format!("{coin}: {v}"))
+-                            } else {
+-                                None
+-                            }
+-                        }
+-                        Ok(Err(e)) => Some(format!("{coin}: {e}")),
+-                        Err(_) => Some(format!("{coin}: zaman aşımı (8 sn)")),
+-                    }
+-                }));
+-            }
+-            for j in jobs {
+-                if let Ok(Some(msg)) = j.await {
+-                    failed.push(msg);
+-                }
+-            }
+-        }
+-        failed
++        vec![String::new()] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Kaldıraç **tembel** ayarlanır: yalnız gerçekten pozisyon açılacak coin
+     /// için, ilk emrinden hemen önce, bir kez. Açılışta 178 paralel imzalı
+     /// istek atmak borsanın hız sınırını (HTTP 429) patlatıyordu.
+     pub async fn ensure_leverage(&mut self, coin: &str, leverage: u32) -> Result<()> {
+         if self.lev_done.contains(coin) {
+             return Ok(());

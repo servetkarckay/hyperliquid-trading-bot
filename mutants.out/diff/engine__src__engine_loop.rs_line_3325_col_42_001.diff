@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::reconcile_unknown_cloid
+@@ -3317,17 +3317,17 @@
+             // kanıt 2 (yalnız emir yokken): fill → pozisyon kanıtı
+             let has_position = if has_order {
+                 false
+             } else {
+                 let _ = self.executor.refresh_positions().await;
+                 self.executor
+                     .positions()
+                     .get(coin)
+-                    .map(|p| p.szi.abs() > 1e-12)
++                    .map(|p| p.szi.abs() < /* ~ changed by cargo-mutants ~ */ 1e-12)
+                     .unwrap_or(false)
+             };
+             match recon_decide(has_order, has_position, attempts) {
+                 ReconAction::LinkOid => {
+                     let oid = rows_opt
+                         .and_then(|r| find_by_cloid(&r, coin, cloid))
+                         .expect("has_order=true ⇒ oid bulunmalı");
+                     if let Some(m) = self.machines.get_mut(coin) {

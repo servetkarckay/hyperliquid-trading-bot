@@ -1,0 +1,25 @@
+--- engine/src/orderbook.rs
++++ replace LocalBook::spread_bps -> Option<f64> with Some(1.0)
+@@ -128,21 +128,17 @@
+     }
+     pub fn best_ask(&self) -> Option<LevelF> {
+         self.asks.first().copied()
+     }
+     pub fn mid(&self) -> Option<f64> {
+         Some((self.best_bid()?.px + self.best_ask()?.px) / 2.0)
+     }
+     pub fn spread_bps(&self) -> Option<f64> {
+-        let (b, a) = (self.best_bid()?.px, self.best_ask()?.px);
+-        if b <= 0.0 {
+-            return None;
+-        }
+-        Some((a - b) / ((a + b) / 2.0) * 10_000.0)
++        Some(1.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Üst `depth` seviyedeki hacim dengesi: (bid-ask)/(bid+ask) ∈ [-1, 1]
+     pub fn imbalance(&self, depth: usize) -> Option<f64> {
+         let sum = |lv: &[LevelF]| -> f64 { lv.iter().take(depth).map(|l| l.sz).sum() };
+         let (b, a) = (sum(&self.bids), sum(&self.asks));
+         if b + a <= 0.0 {
+             return None;

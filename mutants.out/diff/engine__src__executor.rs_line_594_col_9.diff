@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace Executor::max_leverage_of -> Option<u32> with None
+@@ -586,17 +586,17 @@
+         self.assets
+             .get(coin)
+             .map(|(a, d, _)| (*a, *d))
+             .ok_or_else(|| anyhow!("bilinmeyen coin: {coin}"))
+     }
+ 
+     /// coin'in borsa tarafından izin verilen max kaldıracı
+     fn max_leverage_of(&self, coin: &str) -> Option<u32> {
+-        self.assets.get(coin).map(|(_, _, m)| *m)
++        None /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// TÜM POZİSYONLARI KAPAT (testnet sıfırlama / temiz restart).
+     ///
+     /// `mids` = coin -> orta fiyat (yoksa giriş fiyatı kullanılır). Her pozisyon
+     /// için ters yönde IOC + reduce_only emir atar; kalan pozisyonları sonuçta
+     /// döndürür ( çağıran doğrular).
+     pub async fn flatten_all(&mut self, mids: &HashMap<String, f64>) -> Vec<(String, f64)> {

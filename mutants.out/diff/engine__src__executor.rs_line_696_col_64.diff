@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace / with % in Executor::flatten_all
+@@ -688,17 +688,17 @@
+                 let base = mids
+                     .get(coin)
+                     .copied()
+                     .filter(|x| *x > 0.0)
+                     .unwrap_or_else(|| self.positions.get(coin).map(|p| p.entry_px).unwrap_or(0.0));
+                 if base <= 0.0 || !base.is_finite() {
+                     continue;
+                 }
+-                let px = if is_buy { base * wide } else { base / wide };
++                let px = if is_buy { base * wide } else { base % /* ~ changed by cargo-mutants ~ */ wide };
+                 if let Some((asset, szd)) = self.cached_asset(coin) {
+                     let qty = hyperliquid_api::round_sz_up(szi.abs(), szd);
+                     let w = hyperliquid_api::exchange_endpoint::WireOrder {
+                         asset,
+                         is_buy,
+                         sz: qty,
+                         px,
+                         tif: Tif::Ioc,

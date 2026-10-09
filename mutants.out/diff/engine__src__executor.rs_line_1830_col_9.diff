@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace Executor::realized_pnl -> f64 with 0.0
+@@ -1822,17 +1822,17 @@
+ 
+     pub fn open_orders(&self) -> &HashMap<i64, OrderInfo> {
+         &self.open_orders
+     }
+     pub fn positions(&self) -> &HashMap<String, Position> {
+         &self.positions
+     }
+     pub fn realized_pnl(&self) -> f64 {
+-        self.realized_pnl
++        0.0 /* ~ changed by cargo-mutants ~ */
+     }
+     /// bekleyen KAPANIŞ fill'i olan coinler (WS closing fill'ler).
+     /// Recon bloğu bunları REST 'gone' deltasıyla BİRLİŞTİRİR: `apply_fill`
+     /// pozisyonu haritadan düştüğü için 'gone' delta kapanışları YUTAR —
+     /// kapanış kaydının gerçek kaynağı bu haritadır.
+     pub fn closed_pnl_coins(&self) -> Vec<String> {
+         self.closed_pnl.keys().cloned().collect()
+     }

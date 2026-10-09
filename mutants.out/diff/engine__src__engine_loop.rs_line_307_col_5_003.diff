@@ -1,0 +1,55 @@
+--- engine/src/engine_loop.rs
++++ replace parse_live_weights -> anyhow::Result<HashMap<String, f64>> with Ok(HashMap::from_iter([(String::new(), -1.0)]))
+@@ -299,51 +299,17 @@
+ /// 3. Her değer bir JSON **sayı** olmalı.
+ /// 4. Değer `finite` ve `>= 0.0` olmalı.
+ ///
+ /// **Üst sınır UYGULANMAZ**: `WEIGHT_CLAMP_HI = 2.0` yalnız tracker kanıtından
+ /// türetilen ağırlıkları sınırlar (`StrategyTracker::effective_weights`).
+ /// Kaydedilmiş canlı değerler **birebir** korunur: dosyada `1.75` varsa
+ /// ensemble'a `1.75` girer.
+ pub fn parse_live_weights(raw: &serde_json::Value) -> anyhow::Result<HashMap<String, f64>> {
+-    match raw.get("origin").and_then(|x| x.as_str()) {
+-        Some("live") => {}
+-        Some(other) => anyhow::bail!(
+-            "canlı ağırlık dosyası origin=\"{other}\" — yalnız \"live\" kabul edilir \
+-             (backtest çıkışı look-ahead biaslı)"
+-        ),
+-        None => {
+-            anyhow::bail!("canlı ağırlık dosyasında \"origin\" alanı yok — \"live\" doğrulanamaz")
+-        }
+-    }
+-    let obj = raw
+-        .get("weights")
+-        .and_then(|x| x.as_object())
+-        .ok_or_else(|| {
+-            anyhow::anyhow!("canlı ağırlık dosyasında \"weights\" nesnesi yok — geçersiz şema")
+-        })?;
+-    let mut m: HashMap<String, f64> = HashMap::with_capacity(obj.len());
+-    for (name, v) in obj {
+-        let w = v.as_f64().ok_or_else(|| {
+-            anyhow::anyhow!(
+-                "canlı ağırlık \"{name}\" sayı DEĞİL — beklenen canlı şeması: \
+-                 origin=live + weights={{ \"Wyckoff\": 0.83 }}"
+-            )
+-        })?;
+-        if !w.is_finite() {
+-            anyhow::bail!("canlı ağırlık \"{name}\" sonlu değil ({w})");
+-        }
+-        if w < 0.0 {
+-            anyhow::bail!(
+-                "canlı ağırlık \"{name}\" negatif ({w}) — kâr maksimizasyonu negatif ağırlık koymaz"
+-            );
+-        }
+-        m.insert(name.clone(), w);
+-    }
+-    Ok(m)
++    Ok(HashMap::from_iter([(String::new(), -1.0)])) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// `[RISK-LOCK] AKTİF` logunun kalan pozisyon parçası — **saf** bicimlendirici.
+ ///
+ /// Çıktı tam olarak `[(coin,sz,direction),(coin,sz,direction)]` şeklindedir
+ /// (`direction` = boyut işareti: `>0` long, `<0` short). Testler bu biçimi
+ /// doğrulayarak log sözleşmesini sabitler.
+ /// PLACE KAPISI (ölü-kilit fiksli): bloklar YALNIZ cycle-başı bekleyen

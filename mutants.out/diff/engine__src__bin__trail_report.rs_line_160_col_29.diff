@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace >= with < in main
+@@ -152,17 +152,17 @@
+             v,
+             v as f64 / n as f64 * 100.0
+         );
+     }
+ 
+     // 5) Geri-verme oranı (MFE≥1R alt kümesinde)
+     let mfe_ge_1: Vec<f64> = exits
+         .iter()
+-        .filter(|e| e.mfe_r >= 1.0)
++        .filter(|e| e.mfe_r < /* ~ changed by cargo-mutants ~ */ 1.0)
+         .map(|e| 1.0 - e.r_kapanis / e.mfe_r.max(f64::EPSILON))
+         .collect();
+     if !mfe_ge_1.is_empty() {
+         let giveback_med = median(mfe_ge_1.clone()).unwrap_or(0.0);
+         let giveback_gt60 = mfe_ge_1.iter().filter(|x| **x > 0.6).count();
+         println!("\n--- Geri-Veri Oranı (MFE≥1R, n={}) ---", mfe_ge_1.len());
+         println!("  median: {:.1}%", giveback_med * 100.0);
+         println!(

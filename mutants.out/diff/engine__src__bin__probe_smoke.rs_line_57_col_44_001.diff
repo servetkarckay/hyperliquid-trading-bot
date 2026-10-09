@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_smoke.rs
++++ replace / with * in main
+@@ -49,17 +49,17 @@
+     // NO: anında doldu → iptal başarısız; limit alanına GİR: fiyatı 30% DİŞ
+     // bantta koy → kabullenir ama DOLMAZ ✓
+     let limit_px = hyperliquid_api::perp_price(mid * 0.70, 2);
+     println!("[SMOKE] limit px={limit_px} (derin bandsız düşük bid tarafı)");
+ 
+     // Executor kur
+     let mut ex = engine::Executor::new(cfg).await?;
+     let placed = ex
+-        .place_limit(&coin, true, notional / mid, limit_px, Tif::Gtc, false)
++        .place_limit(&coin, true, notional * /* ~ changed by cargo-mutants ~ */ mid, limit_px, Tif::Gtc, false)
+         .await?;
+     let Some(info_oi) = placed else {
+         // doldu (beklenmez ama kanıt); FLAT doğrulama
+         println!("[SMOKE] order döndü None (dolabilir kurallar) — flat kontrol");
+         return Ok(());
+     };
+     println!("[SMOKE] place sonucu: {info_oi:?}");
+ 

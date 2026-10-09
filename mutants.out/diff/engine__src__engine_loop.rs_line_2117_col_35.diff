@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace <= with > in Engine::run_cycle
+@@ -2109,17 +2109,17 @@
+                 let am_cfg = self.am.cfg.clone();
+                 let rest_entries: Vec<(String, f64)> = self
+                     .executor
+                     .positions()
+                     .iter()
+                     .map(|(cn, p)| (cn.clone(), p.entry_px))
+                     .collect();
+                 for (cn, rest_entry) in rest_entries {
+-                    if rest_entry <= 0.0 {
++                    if rest_entry > /* ~ changed by cargo-mutants ~ */ 0.0 {
+                         continue;
+                     }
+                     if let Some(a) = self.entry_attr.get_mut(&cn) {
+                         a.apply_real_fill(rest_entry, &am_cfg);
+                     }
+                 }
+                 for c in closed {
+  // MFE/MAE (excursion) GÖSTERGESİ — TRAİLİNG'İN FAYDASINI

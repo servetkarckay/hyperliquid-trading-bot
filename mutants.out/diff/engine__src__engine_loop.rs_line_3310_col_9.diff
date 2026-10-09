@@ -1,0 +1,105 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::reconcile_unknown_cloid -> anyhow::Result<()> with Ok(())
+@@ -3302,101 +3302,17 @@
+     /// olabilir ve yanlış emri bağlamak pozisyonu ikiye katlar.
+     pub async fn reconcile_unknown_cloid(&mut self, cloid: &str, coin: &str) -> anyhow::Result<()> {
+         // CLOID TEK KİMLİK: eşleşme yalnız (coin, cloid) çiftiyle.
+         // Anlık Flat YASAK — bounded recheck döngüsü:
+         //   1. open orders (cloid) → oid bağlanır
+         //   2. pozisyon (fill kanıtı) → InPosition + sentetik attr
+         //   3. kanıt yok → recheck (geçikmeli görünürlük penceresi)
+         //   4. deneme hakkı bitti → Flat
+-        let mut attempts: u8 = 0;
+-        loop {
+-            let rows_opt = self.executor.refresh_open_orders_all().await.ok();
+-            let has_order = rows_opt
+-                .as_ref()
+-                .map(|r| find_by_cloid(r, coin, cloid).is_some())
+-                .unwrap_or(false);
+-            // kanıt 2 (yalnız emir yokken): fill → pozisyon kanıtı
+-            let has_position = if has_order {
+-                false
+-            } else {
+-                let _ = self.executor.refresh_positions().await;
+-                self.executor
+-                    .positions()
+-                    .get(coin)
+-                    .map(|p| p.szi.abs() > 1e-12)
+-                    .unwrap_or(false)
+-            };
+-            match recon_decide(has_order, has_position, attempts) {
+-                ReconAction::LinkOid => {
+-                    let oid = rows_opt
+-                        .and_then(|r| find_by_cloid(&r, coin, cloid))
+-                        .expect("has_order=true ⇒ oid bulunmalı");
+-                    if let Some(m) = self.machines.get_mut(coin) {
+-                        m.link_recon_oid(oid, 0.0); // kalan; dolum bildirimi ayrı akışta
+-                    }
+-                    tracing::info!("[RECON] cloid={cloid} coin={coin} oid={oid} ile bağlandı");
+-                    return Ok(());
+-                }
+-                ReconAction::ToPosition => {
+-                    let pos = self
+-                        .executor
+-                        .positions()
+-                        .get(coin)
+-                        .cloned()
+-                        .unwrap_or_default();
+-                    if let Some(m) = self.machines.get_mut(coin) {
+-                        let side = if pos.szi > 0.0 {
+-                            crate::state_machine::Side::Long
+-                        } else {
+-                            crate::state_machine::Side::Short
+-                        };
+-                        let _ = side;
+-                        m.recon_to_position(pos.entry_px, pos.szi.abs());
+-                    }
+-                    // sentetik attr (recovery kontratı): kapanış sayılır;
+-                    // voter kanıtı YAZILMAZ (sahipsiz stratejiye kredi yok)
+-                    let now = hyperliquid_api::now_ms();
+-                    if let Some(m) = self.machines.get(coin) {
+-                        if let Some((_s, entry, size)) = m.in_position() {
+-                            self.entry_attr.insert(
+-                                coin.to_string(),
+-                                synth_recovered_attr(
+-                                    coin,
+-                                    crate::state_machine::Side::Long,
+-                                    entry,
+-                                    size,
+-                                    now,
+-                                ),
+-                            );
+-                        }
+-                    }
+-                    tracing::info!(
+-                        "[RECON] cloid={cloid} coin={coin} FILL kanıtı → pozisyon devri"
+-                    );
+-                    return Ok(());
+-                }
+-                ReconAction::Retry => {
+-                    attempts += 1;
+-                    tracing::debug!(
+-                        "[RECON] cloid={cloid} coin={coin} kanıt yok — recheck {attempts}/{RECON_MAX_ATTEMPTS}"
+-                    );
+-                    tokio::time::sleep(std::time::Duration::from_millis(RECON_RECHECK_MS)).await;
+-                }
+-                ReconAction::Flat => {
+-                    if let Some(m) = self.machines.get_mut(coin) {
+-                        m.state = crate::state_machine::PosState::Flat;
+-                    }
+-                    tracing::warn!(
+-                        "[RECON] cloid={cloid} coin={coin} kanıt YOK ({attempts} recheck) → Flat"
+-                    );
+-                    return Ok(());
+-                }
+-            }
+-        }
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl Engine {
+     /// D — **strateji durum raporu** (`ACTIVE` / `AUXILIARY` / `DATA-MISSING`).
+     ///
+     /// Her strateji KENDİ durumunu bildirir (`Strategy::status`); temsili
+     /// girdi yalnız gerçek motor state'inden doldurulur (iv yok, portfolio

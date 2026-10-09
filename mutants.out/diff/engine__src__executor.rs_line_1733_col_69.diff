@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace || with && in Executor::apply_fill
+@@ -1725,17 +1725,17 @@
+                                 let c2 = coin.clone();
+                                 let qty2 = qty;
+                                 let dec2 = dec;
+                                 let is_long_tp = is_buy;
+                                 let tx2 = self.tp_tx.clone();
+                                 self.tp_armed_at
+                                     .insert(coin.clone(), hyperliquid_api::now_ms());
+                                 tokio::spawn(async move {
+-                                    if qty2.is_nan() || tp.is_nan() || qty2 <= 0.0 || tp <= 0.0 {
++                                    if qty2.is_nan() || tp.is_nan() && /* ~ changed by cargo-mutants ~ */ qty2 <= 0.0 || tp <= 0.0 {
+                                         return; // hayalet koruması
+                                     }
+                                     match place_tp_grid(
+                                         &ex2,
+                                         asset2,
+                                         !is_long_tp,
+                                         qty2,
+                                         tp,

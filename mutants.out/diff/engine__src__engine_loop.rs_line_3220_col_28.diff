@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace <= with > in Engine::run_cycle
+@@ -3212,17 +3212,17 @@
+                                     .positions()
+                                     .get(&e.coin)
+                                     .map(|p| p.szi.abs())
+                                     .filter(|x| *x > 0.0)
+                             })
+                             .unwrap_or(0.0)
+                     };
+                     let xsz = hyperliquid_api::round_sz_up(exit_sz, szd);
+-                    if xsz <= 0.0 || !xsz.is_finite() {
++                    if xsz > /* ~ changed by cargo-mutants ~ */ 0.0 || !xsz.is_finite() {
+                         tracing::warn!(
+                             "{}: çıkış boyutu 0 (pozisyon yok?) — kapatma emri atlandı",
+                             e.coin
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             m.state = PosState::Flat;
+                         }
+                         continue;

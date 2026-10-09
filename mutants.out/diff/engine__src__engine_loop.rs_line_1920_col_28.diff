@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace match guard a.tp_px.is_some() with true in Engine::sync_exchange_sl
+@@ -1912,17 +1912,17 @@
+                         tracing::info!("[TP] {n} TP oid borsadan geri yüklendi");
+                     }
+                 }
+                 Err(e) => tracing::warn!("[TP] openOrders taraması başarısız: {e}"),
+             }
+         }
+         for (coin, szi) in &open_pos_tp {
+             let tp_px = match self.entry_attr.get(coin) {
+-                Some(a) if a.tp_px.is_some() => a.tp_px.unwrap(),
++                Some(a) if true /* ~ changed by cargo-mutants ~ */ => a.tp_px.unwrap(),
+                 Some(a) => {
+                     // dolum düzeltmesi gelmemişse: risk mesafesinden (tek formül)
+                     let risk = if a.risk_px > 0.0 {
+                         a.risk_px
+                     } else {
+                         a.entry_px.abs() * 0.02
+                     };
+                     let dir = if a.side.is_buy() {

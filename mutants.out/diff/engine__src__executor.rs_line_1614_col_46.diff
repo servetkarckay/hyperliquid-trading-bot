@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::apply_fill
+@@ -1606,17 +1606,17 @@
+                     }
+                 }
+                 // STOP TETİKLENDİ (bu dolumun oid'i borsa stop'ununkiyle aynıysa):
+                 // stop artık yerinde değildir; `sl_orders`'ta kalırsa döngü
+                 // sonundaki senkron "pozisyon hâlâ açık" görüp aynı stop'u
+                 // YENİDEN kurar, sonra iptal eder (çift stop döngüsü).
+                 // Borsa stop'u kendisi kapanmışsa `oid` eşleşir.
+                 let mut is_sl_fill = false;
+-                if self.sl_orders.get(&coin) == Some(&oid) {
++                if self.sl_orders.get(&coin) != /* ~ changed by cargo-mutants ~ */ Some(&oid) {
+                     is_sl_fill = true;
+                     self.sl_orders.remove(&coin);
+                     self.sl_armed_at.remove(&coin);
+                     tracing::info!(
+                         "[SL] {coin} borsa stop TETİKLENDİ (oid={oid}) — kayıt düşürüldü"
+                     );
+                 }
+                 // F: TP FİLL — gerçek kapanış kaynağı. oid eşleşmesi MFE'den

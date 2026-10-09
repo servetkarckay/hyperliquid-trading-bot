@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::run_cycle
+@@ -2377,17 +2377,17 @@
+ 
+             let input = MarketInput {
+                 coin: coin.clone(),
+                 candles: candles.clone(),
+                 ctx: ctx.clone(),
+                 oi_delta: self.ctx.delta_oi(&coin),
+                 taker_ratio: taker,
+                 book_imbalance: book.map(|(_, _, i)| i),
+-                best_bid: (bid > 1e-9).then_some(bid),
++                best_bid: (bid < /* ~ changed by cargo-mutants ~ */ 1e-9).then_some(bid),
+                 best_ask: (ask > 1e-9).then_some(ask),
+                 universe_returns: universe_returns.clone(),
+                 iv: None, // IV feed bağlı DEĞİL → sahte IV üretme (VolArbitraj=DATA-MISSING)
+                 equity: self.equity,
+                 // D: gerçek pozisyon (USD, ±) — türetilmiş veri değil
+                 inventory_usd: self
+                     .executor
+                     .positions()

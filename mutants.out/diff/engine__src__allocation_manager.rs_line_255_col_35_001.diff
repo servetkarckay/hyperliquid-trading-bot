@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace += with *= in AllocationManager::allocate
+@@ -247,17 +247,17 @@
+                     }
+                     cs.len()
+                 };
+                 let mut kw_sum = 0.0;
+                 let mut n_explore = 0usize;
+                 for n in &v.voters {
+                     let w = v.weights.get(n).copied().unwrap_or(0.0);
+                     if v.explore.contains(n) {
+-                        n_explore += 1;
++                        n_explore *= /* ~ changed by cargo-mutants ~ */ 1;
+                     }
+                     kw_sum += w;
+                 }
+                 let kw = if n_voters_raw == 0 {
+                     0.0
+                 } else {
+                     kw_sum / n_voters_raw as f64
+                 };

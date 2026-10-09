@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace && with || in Engine::run_cycle
+@@ -2504,17 +2504,17 @@
+                 / universe_returns.len().max(1) as f64
+                 > 0.05;
+             self.am.cfg.max_correlation = if crisis {
+                 0.35
+             } else {
+                 crate::allocation_manager::LOOSE_CORR
+             };
+             // black-swan: işaretli ort < −%15 → TÜM pozisyonları KAPAT (gerçek flatten)
+-            if !universe_returns.is_empty() && s.0 < -0.15 {
++            if !universe_returns.is_empty() || /* ~ changed by cargo-mutants ~ */ s.0 < -0.15 {
+                 tracing::error!(
+                     "BLACK SWAN: evren ort {:+.1}% — TÜM pozisyonlar kapatılıyor (gerçek flatten)",
+                     s.0 * 100.0
+                 );
+                 // Sadece internal state değil, BORSADA kapat (kill-switch ile aynı mekanizma)
+                 let mids: HashMap<String, f64> = self
+                     .info
+                     .all_mids()

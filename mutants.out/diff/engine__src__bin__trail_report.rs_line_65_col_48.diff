@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace == with != in main
+@@ -57,17 +57,17 @@
+     let mut exits: Vec<TradeExit> = Vec::new();
+ 
+     for line in reader.lines() {
+         let line = line?;
+         if line.trim().is_empty() {
+             continue;
+         }
+         if let Ok(e) = serde_json::from_str::<TradeExit>(&line) {
+-            if epoch_filter.as_ref().map(|f| f == &e.epoch).unwrap_or(true) {
++            if epoch_filter.as_ref().map(|f| f != /* ~ changed by cargo-mutants ~ */ &e.epoch).unwrap_or(true) {
+                 // ŞEMA DENETİMİ: tüm alanlar gerçekten okunur — kuyruk
+                 // alanları bu raporda görünmese bile bozuk/yarım satır
+                 // sessiz yarı-veri olamaz (finite/boşluk-dayanıklılık).
+                 let _schema_check = (
+                     e.ts > 0,
+                     !e.epoch.is_empty(),
+                     !e.git.is_empty(),
+                     !e.coin.is_empty(),

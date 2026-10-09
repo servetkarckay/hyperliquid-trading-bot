@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with > in Engine::sync_exchange_sl
+@@ -1894,17 +1894,17 @@
+             .executor
+             .positions()
+             .iter()
+             .filter(|(_, p)| p.szi.abs() > 1e-12)
+             .map(|(c, p)| (c.clone(), p.szi))
+             .collect();
+         // 2a) TP oid kaybı (restart/WS kopması): borsada dinlenen bizim TP'yi
+         // TARA → oid geri yükle → **yeni emir ATILMAZ** (duplicate yasağı).
+-        if self.executor.tp_orders.len() < open_pos_tp.len() {
++        if self.executor.tp_orders.len() > /* ~ changed by cargo-mutants ~ */ open_pos_tp.len() {
+             match self.executor.fetch_open_order_rows().await {
+                 Ok(rows) => {
+                     let want: HashMap<String, f64> = self
+                         .entry_attr
+                         .iter()
+                         .filter_map(|(c, a)| a.tp_px.filter(|t| *t > 0.0).map(|t| (c.clone(), t)))
+                         .collect();
+                     let n = self.executor.restore_tp_orders(&rows, &want);

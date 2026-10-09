@@ -1,0 +1,26 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::next_explorer -> Option<String> with Some(String::new())
+@@ -697,22 +697,17 @@
+     /// iki farklı keşifçiye sıra gelmez (kabul kriteri).
+     pub fn next_explorer(
+         &self,
+         names: &[String],
+         pol: &LearnPolicy,
+         signaled: &std::collections::HashSet<String>,
+         cursor: usize,
+     ) -> Option<String> {
+-        let q = self.explore_queue(names, pol);
+-        let act: Vec<String> = q.into_iter().filter(|s| signaled.contains(s)).collect();
+-        if act.is_empty() {
+-            return None;
+-        }
+-        Some(act[cursor % act.len()].clone())
++        Some(String::new()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
+     pub fn ensemble_weights(&self) -> HashMap<String, f64> {
+         let mut raw: HashMap<String, f64> = HashMap::new();
+         for (name, s) in &self.stats {
+             let w = match s.kelly(DEFAULT_PAYOFF, 15) {
+                 Some(f) if f > 0.0 => f,

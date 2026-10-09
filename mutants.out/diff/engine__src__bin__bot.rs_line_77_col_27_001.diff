@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace match guard e.kind() == std::io::ErrorKind::NotFound with false in main
+@@ -69,17 +69,17 @@
+                 Ok(()) => tracing::info!("[TESTNET] eski tracker state temizlendi: {tracker_path}"),
+                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                 Err(e) => anyhow::bail!("[TESTNET] tracker state silinemedi: {e}"),
+             }
+             // 1b) risk hafızası — silinir (yeni deney = yeni drawdown hafızası);
+             // AYNI çözülen yol (ENV RISK_STATE_PATH) — hard-coded DEĞİL
+             match std::fs::remove_file(&risk_state_path) {
+                 Ok(()) => tracing::info!("[TESTNET] eski risk hafızası temizlendi"),
+-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
++                Err(e) if false /* ~ changed by cargo-mutants ~ */ => {}
+                 Err(e) => anyhow::bail!("[TESTNET] risk hafızası silinemedi: {e}"),
+             }
+             // 2) eski canlı ağırlık snapshot — silinir (look-ahead'den temiz)
+             match std::fs::remove_file(&weights_path) {
+                 Ok(()) => tracing::info!(
+                     "[TESTNET] eski canlı ağırlık snapshot temizlendi: {weights_path}"
+                 ),
+                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

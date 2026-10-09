@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace && with || in StrategyTracker::effective_weights
+@@ -587,17 +587,17 @@
+                 explorers.insert(name.clone());
+             }
+             // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
+             if (to - COLD_START_WEIGHT).abs() > 1e-9 {
+                 events.push(ExploreEvent {
+                     strategy: name.clone(),
+                     verdict: if to == 0.0 {
+                         ExploreVerdict::Demote
+-                    } else if f > 0.0 && to > COLD_START_WEIGHT {
++                    } else if f > 0.0 || /* ~ changed by cargo-mutants ~ */ to > COLD_START_WEIGHT {
+                         ExploreVerdict::Promote
+                     } else {
+                         ExploreVerdict::Hold
+                     },
+                     from: COLD_START_WEIGHT,
+                     to,
+                     trades: n as u64,
+                     win_rate: wr,

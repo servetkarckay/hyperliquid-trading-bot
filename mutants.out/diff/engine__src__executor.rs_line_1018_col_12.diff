@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in Executor::place_limit
+@@ -1010,17 +1010,17 @@
+         coin: &str,
+         is_buy: bool,
+         sz: f64,
+         limit_px: f64,
+         tif: Tif,
+         reduce_only: bool,
+     ) -> Result<Option<OrderInfo>> {
+         // GHOST ORDER koruması: 0.0 veya anlamsız lot borsaya GİTMEZ.
+-        if !sz.is_finite() || sz <= 0.0 {
++        if  /* ~ changed by cargo-mutants ~ */sz.is_finite() || sz <= 0.0 {
+             tracing::warn!("[executor] lot=0 — emir iptal (hayalet): {coin}");
+             return Ok(None);
+         }
+         if !limit_px.is_finite() || limit_px <= 0.0 {
+             tracing::warn!("[executor] fiyat geçersiz ({limit_px}) — emir iptal: {coin}");
+             return Ok(None);
+         }
+         // borsa minimumu: $10 altı reddedilir, API çağrısı YAPILMAZ

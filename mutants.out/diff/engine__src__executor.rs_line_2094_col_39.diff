@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::sz_dec_of
+@@ -2086,17 +2086,17 @@
+     pub fn cached_asset(&self, coin: &str) -> Option<(u32, u32)> {
+         self.assets.get(coin).map(|(a, d, _)| (*a, *d))
+     }
+ 
+     /// asset id -> szDecimals (bilinmiyorsa 0 — merkezi kural 6 hane verir).
+     pub fn sz_dec_of(&self, asset: u32) -> u32 {
+         self.assets
+             .iter()
+-            .find(|(_, (a, _, _))| *a == asset)
++            .find(|(_, (a, _, _))| *a != /* ~ changed by cargo-mutants ~ */ asset)
+             .map(|(_, (_, d, _))| *d)
+             .unwrap_or(0)
+     }
+ 
+     /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+     pub fn coin_of(&self, asset: u32) -> String {
+         self.assets
+             .iter()

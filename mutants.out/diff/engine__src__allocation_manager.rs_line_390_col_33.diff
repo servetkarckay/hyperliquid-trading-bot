@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace <= with > in AllocationManager::allocate
+@@ -382,17 +382,17 @@
+         }
+         // Havuz = %5 tavanı (sert üst sınır). Taban ($10/kişi) havuzu
+         // AŞAMAZ: `max_funded` bunu zaten garanti eder, çünkü
+         // max_funded = ⌊havuz/$10⌋ → havuz ≥ max_funded × $10.
+         let explore_budget = cap_usd;
+         let mut used = 0.0;
+         let mut funded = 0usize;
+         for c in picked.iter_mut() {
+-            if c.explorer_share <= 0.0 {
++            if c.explorer_share > /* ~ changed by cargo-mutants ~ */ 0.0 {
+                 continue;
+             }
+             if funded >= max_funded {
+                 // tavan doldu: kalan keşifçiler ELENİR (sessizce değil, loglanır)
+                 c.allocated_usd = 0.0;
+                 c.capped = true;
+                 tracing::info!(
+                     "[AL] keşif tavanı dolu — {max_funded} kişi × ${MIN_NOTIONAL_USD:.0} = ${:.2} (havuz), artık yer yok — {} elendi",

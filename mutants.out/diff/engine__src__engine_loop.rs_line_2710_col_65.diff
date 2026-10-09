@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace * with + in Engine::run_cycle
+@@ -2702,17 +2702,17 @@
+             .machines
+             .iter()
+             .filter(|(_, m)| m.is_recon_pending() || m.oid_zero_pending())
+             .map(|(c, _)| c.clone())
+             .collect();
+         // ÖNCÜ temizlik: öncesinden beri oid=0 bekleyen ve ASLA batch'e
+         // girmemiş makine — kanıtsız kalıntıdır; cycle penceresi (2×cycle)
+         // aşılırsa geri Flat'a döner (bounded, sessiz kilit YOK).
+-        let oid0_grace_ms = self.loop_cfg.cycle_secs.max(1) * 2 * 1000;
++        let oid0_grace_ms = self.loop_cfg.cycle_secs.max(1) * 2 + /* ~ changed by cargo-mutants ~ */ 1000;
+         let now0 = hyperliquid_api::now_ms();
+         for (cn, m) in self.machines.iter_mut() {
+             if let PosState::Pending { oid: 0, ts, .. } = m.state.clone() {
+                 let süresi = now0.saturating_sub(ts);
+                 if süresi > oid0_grace_ms {
+                     m.state = PosState::Flat;
+                     tracing::warn!(
+                         "[RECON] {cn} oid=0 bekleyen sıfırlandı (batch'e hiç girmedi, {} sn) — Flat",

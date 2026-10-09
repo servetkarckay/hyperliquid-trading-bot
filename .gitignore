@@ -12,3 +12,6 @@
 
 # Runtime state (bot her koşuda üretir/üzerine yazar — repoya girmez)
 config/*.json
+fuzz/artifacts/
+fuzz/target/
+fuzz/Cargo.lock

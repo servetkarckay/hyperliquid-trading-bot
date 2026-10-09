@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::dyn_weights with ()
+@@ -1595,17 +1595,17 @@
+                     merged.live_overridden
+                 );
+             }
+         }
+     }
+ 
+     /// geriye uyumlu çağrı (test/legacy yol)
+     fn dyn_weights(&mut self) {
+-        self.apply_effective_weights();
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Bütçe: portfolyo-paylı f* (yetersiz stat yarımda sabit)
+     /// `ENGINE_BUDGET_USD` verilirse bakiye-oranı hesabı atlanır (küçük
+     /// hesaplarda $72 bütçe $10 eşiğine takılıp hattı boğuyordu).
+     fn budget_usd(&self) -> f64 {
+         if let Ok(v) = std::env::var("ENGINE_BUDGET_USD") {
+             if let Ok(x) = v.parse::<f64>() {

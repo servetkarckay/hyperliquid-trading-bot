@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with * in Engine::run_cycle
+@@ -2893,17 +2893,17 @@
+                     //
+                     // Sayılarla: round-trip ≈ 19 bps. 1.5×ATR = %0.25 (alt
+                     // sınır) → R ≈ 1.3, 2:1 TP'de başabaş WR ≈ %59 → **yapısal
+                     // negatif EV**. Taban = max(75 bps, 3×round_trip) = %0.75.
+                     {
+                         let spread_bps = {
+                             // ask−bid / mid, ondalık → bps
+                             let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                                (e.ask + e.bid) / 2.0
++                                (e.ask + e.bid) * /* ~ changed by cargo-mutants ~ */ 2.0
+                             } else {
+                                 0.0
+                             };
+                             if mid2 > 0.0 {
+                                 (e.ask - e.bid).abs() / mid2 * 10_000.0
+                             } else {
+                                 0.0
+                             }

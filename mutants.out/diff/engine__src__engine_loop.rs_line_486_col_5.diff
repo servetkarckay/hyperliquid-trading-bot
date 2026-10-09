@@ -1,0 +1,31 @@
+--- engine/src/engine_loop.rs
++++ replace synth_recovered_attr -> EntryAttr with Default::default()
+@@ -478,27 +478,17 @@
+ /// GEÇER (gerçekten kapandı).
+ pub fn synth_recovered_attr(
+     coin: &str,
+     side: SmSide,
+     entry_px: f64,
+     size: f64,
+     ts: u64,
+ ) -> EntryAttr {
+-    EntryAttr {
+-        coin: coin.to_string(),
+-        voters: Vec::new(),
+-        side,
+-        entry_px,
+-        risk_px: (entry_px * 0.02).max(entry_px * 1e-4),
+-        size: size.abs(),
+-        ts,
+-        tp_px: None,
+-        exit_reason: None,
+-    }
++    Default::default() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// ── UNKNOWN RECONCILIATION — tek-adım karar (saf) ────────────────────
+ /// Kanıt sırası: open-order (cloid) → pozisyon (fill kanıtı) → retry
+ /// → Flat. UNKNOWN'da anlık Flat YASAK: emir borsada kabul edilmiş
+ /// olabilir (geçikmeli görünürlük).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum ReconAction {

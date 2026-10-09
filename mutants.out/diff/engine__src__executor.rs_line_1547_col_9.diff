@@ -1,0 +1,269 @@
+--- engine/src/executor.rs
++++ replace Executor::apply_fill with ()
+@@ -1539,265 +1539,17 @@
+                 self.fill_count += 1;
+             } else if status != "canceled" {
+                 tracing::warn!(oid, coin, status, "emir durumu");
+             }
+         }
+     }
+ 
+     fn apply_fill(&mut self, f: &Value) {
+-        let coin = f["coin"].as_str().unwrap_or("").to_string();
+-        let px: f64 = f["px"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+-        let sz: f64 = f["sz"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+-        let oid = f["oid"].as_u64().unwrap_or(0) as i64;
+-        let closed: f64 = f["closedPnl"]
+-            .as_str()
+-            .and_then(|s| s.parse().ok())
+-            .unwrap_or(0.0);
+-        let dir_field: &str = f["dir"].as_str().unwrap_or("");
+-        let mut closing_counted: std::collections::HashSet<String> =
+-            std::collections::HashSet::new();
+-        // TID DEDUP — aynı transaction ID iki kez işlenmesin
+-        let tid = f["tid"].as_str().unwrap_or("");
+-        if !tid.is_empty() && crate::track::tid_seen(tid) {
+-            tracing::warn!("[DEDUP] duplicate fill tid={tid} coin={coin} — atlandı");
+-            return;
+-        }
+-        self.fill_count += 1;
+-        self.realized_pnl += closed;
+-        // KAPANIŞ fill'i closedPnl=0 olsa bile (break-even) haritaya
+-        // yazılmalı — recon bloğunun kapanış kaydının tek güvenilir WS
+-        // işaretidir (0 yazmamak = break-even kapanışların kaybolması).
+-        // Açılış fill'lerinde closedPnl zaten 0'dır ve pozisyon açılır —
+-        // ayrım `dir` ile yapılır.
+-        if !coin.is_empty() && !is_open_fill(dir_field) && !closing_counted.contains(&coin) {
+-            *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;
+-            closing_counted.insert(coin.clone());
+-        }
+-        tracing::info!(oid, coin = %coin, sz, px, closed, "fill(user)");
+-        if !coin.is_empty() && sz > 0.0 {
+-            let is_buy = f["side"].as_str().unwrap_or("B") == "B";
+-            // POZİSYON HARİTASINI GÜNCELLE. `refresh_positions` yalnız açılışta
+-            // çağrılıyordu; WS dolumu haritaya yazılmadığı için motorun
+-            // gördüğü `positions` açılıştan beri BOŞ kaldı → `open_now` tavanı
+-            // hiç tetiklenmiyor, `pz`/PnL/risk hepsi yanlış sayıyordu
+-            // (Not: 3 açık pozisyon varken 4. giriş açıldı).
+-            if self.cached_asset(&coin).is_some() {
+-                match self.positions.get_mut(&coin) {
+-                    Some(e) => {
+-                        if is_buy {
+-                            e.szi += sz;
+-                        } else {
+-                            e.szi -= sz;
+-                        }
+-                        e.position_value = px * e.szi.abs();
+-                    }
+-                    None => {
+-                        self.positions.insert(
+-                            coin.clone(),
+-                            Position {
+-                                coin: coin.clone(),
+-                                szi: if is_buy { sz } else { -sz },
+-                                entry_px: px,
+-                                position_value: px * sz,
+-                                unrealized_pnl: 0.0,
+-                                leverage: 1.0,
+-                                liquidation_px: None,
+-                            },
+-                        );
+-                    }
+-                }
+-                // STOP TETİKLENDİ (bu dolumun oid'i borsa stop'ununkiyle aynıysa):
+-                // stop artık yerinde değildir; `sl_orders`'ta kalırsa döngü
+-                // sonundaki senkron "pozisyon hâlâ açık" görüp aynı stop'u
+-                // YENİDEN kurar, sonra iptal eder (çift stop döngüsü).
+-                // Borsa stop'u kendisi kapanmışsa `oid` eşleşir.
+-                let mut is_sl_fill = false;
+-                if self.sl_orders.get(&coin) == Some(&oid) {
+-                    is_sl_fill = true;
+-                    self.sl_orders.remove(&coin);
+-                    self.sl_armed_at.remove(&coin);
+-                    tracing::info!(
+-                        "[SL] {coin} borsa stop TETİKLENDİ (oid={oid}) — kayıt düşürüldü"
+-                    );
+-                }
+-                // F: TP FİLL — gerçek kapanış kaynağı. oid eşleşmesi MFE'den
+-                // KESİN daha güvenilirdir (MFE>0 ≠ TakeProfit).
+-                let is_tp_fill = if self.tp_orders.get(&coin) == Some(&oid) {
+-                    self.tp_orders.remove(&coin);
+-                    self.tp_armed_at.remove(&coin);
+-                    tracing::info!("[TP] {coin} TP TETİKLENDİ (oid={oid}) → ExitReason=TakeProfit");
+-                    true
+-                } else {
+-                    false
+-                };
+-                self.tp_fill_flags
+-                    .insert(coin.clone(), (is_tp_fill, is_sl_fill));
+-                // pozisyon kapanırsa (stop/exit) haritadan düşsün
+-                if self.positions.get(&coin).map(|e| e.szi.abs() < 1e-12) == Some(true) {
+-                    self.positions.remove(&coin);
+-                    // Pozisyon kapandı → TP/SL durumu temizle (borsa reduce-only
+-                    // trigger'ları otomatik iptal eder; bize kalan kayıt
+-                    // temizliğidir — bayat oid ile çift emir yasağı).
+-                    self.pending_sl.remove(&coin);
+-                    self.pending_tp.remove(&coin);
+-                    self.tp_orders.remove(&coin);
+-                    self.tp_armed_at.remove(&coin);
+-                }
+-            }
+-            // TP/SL fill bayrakları yalnız pozisyon haritası güncellenebildiyde
+-            // bilinir (oid eşleşmesi orada yapılır); kalan durumda false.
+-            let (is_tp_fill, is_sl_fill) =
+-                self.tp_fill_flags.remove(&coin).unwrap_or((false, false));
+-            self.fills_q.push(FillEvent {
+-                oid,
+-                coin: coin.clone(),
+-                px,
+-                sz,
+-                closed_pnl: closed,
+-                is_buy,
+-                is_tp_fill,
+-                is_sl_fill,
+-            });
+-            // GEÇİKMESİZ BORSA STOP: giriş dolumu geldiği anda SL kurulur.
+-            // (Döngü 1 saatte bir -> "sonraki döngüde" koymak pozisyonu
+-            // 1 saat korumasız bırakıyordu.) WS yolu senkron olduğu için
+-            // emir arka plan görevinde atılır; başarısızsa 3 kez denenir.
+-            // NOT: is_open_fill(dir) — "open" fill ise koruma kur.
+-            // `dir` boş geliyorsa (beklenmeyen şema) koruma KURULMAZ ve
+-            // uyarı loglanır (fail-safe: bayat koruma > illüzyon koruma);
+-            // pozisyon sonraki döngüde executor recon'undan korunur.
+-            let open_fill = is_open_fill(dir_field);
+-            if dir_field.is_empty() {
+-                tracing::warn!(
+-                    "fill'te dir alanı yok (oid={oid} coin={coin}) — giriş koruması ARMILMADI (fail-safe)"
+-                );
+-            }
+-            if open_fill {
+-                if let Some((risk, _ts)) = self.pending_sl.remove(&coin) {
+-                    // STOP GERÇEK DOLUM FİYATINDAN. `px` = dolum fiyatı
+-                    // (IOC kayması defter fiyatından sapor; mutlak fiyat yolu
+-                    // stop'u yanlış tarafa koyabilir — mesafe yolu bağışıklıdır).
+-                    let mut sl = if is_buy { px - risk } else { px + risk };
+-                    // SERT YAN KAPISI: stop dolum fiyatının **hatalı tarafına**
+-                    // konulamaz — o tarafta emir zaten piyasadadır ve anında
+-                    // tetiklenip zararı büyütür. Minimum
+-                    // mesafe %0.25; risk mesafesi zaten bu eşiğin üstündeyse
+-                    // koşul sağlanmaz.
+-                    let min_d = px * 0.0025;
+-                    if is_buy {
+-                        if sl >= px || px - sl < min_d {
+-                            sl = px - min_d;
+-                        }
+-                    } else if sl <= px || sl - px < min_d {
+-                        sl = px + min_d;
+-                    }
+-                    if let Some((asset, szd)) = self.cached_asset(&coin) {
+-                        let ex = self.ex.clone();
+-                        let c = coin.clone();
+-                        let qty = hyperliquid_api::round_sz_up(sz, szd);
+-                        // Tick keşfi: bu coin kaç haneye izin veriyor? (meta'da
+-                        // YOK — Not: ME 6 haneyi reddediyor)
+-                        let dec = self.px_dec.get(&asset).copied().unwrap_or(6);
+-                        let tx = self.sl_tx.clone();
+-                        // SPAWN ÖNCESİ İYİMSER KAYIT: `tokio::spawn` `&mut self`
+-                        // yakalayamaz, yani kurulan oid'i asla `sl_orders`'a
+-                        // yazamıyorduk — sadece loga düşüyordu. Sonuç:
+-                        // `sl_orders` o coin için BOŞ → `sync_exchange_sl`
+-                        // "eksik stop" görüyor → `ensure_sl` 5 dk sonra
+-                        // AYNI POZİSYONA İKİNCİ STOP asıyordu (Not:
+-                        // GMT …61867 + …165356, LAYER …61871 + …166722).
+-                        // `sl_armed_at` de yazılmadığı için grace kapısı tutmuyordu.
+-                        // İyimser yazmak, aynı döngüdeki herhangi bir `ensure_sl`
+-                        // çağrısını grace'e takar; gerçek oid kanal ile döner.
+-                        self.sl_armed_at
+-                            .insert(coin.clone(), hyperliquid_api::now_ms());
+-                        // GERÇEK TP EXECUTION: TP borsada asılıdır.
+-                        // Mesafe `pending_tp`'den (karar anında
+-                        // `AllocationConfig::tp_from_entry` ile türetildi;
+-                        // mesafe girişten bağımsız → doluma taşınabilir).
+-                        // Long: TP > dolum, Short: TP < dolum (kâr tarafı).
+-                        if let Some((dist, _ts)) = self.pending_tp.remove(&coin) {
+-                            let tp = if is_buy { px + dist } else { px - dist };
+-                            let min_tp = px * 0.0025;
+-                            let tp_ok_side = if is_buy { tp - px } else { px - tp };
+-                            if tp > 0.0 && tp_ok_side >= min_tp {
+-                                let ex2 = self.ex.clone();
+-                                let asset2 = asset;
+-                                let c2 = coin.clone();
+-                                let qty2 = qty;
+-                                let dec2 = dec;
+-                                let is_long_tp = is_buy;
+-                                let tx2 = self.tp_tx.clone();
+-                                self.tp_armed_at
+-                                    .insert(coin.clone(), hyperliquid_api::now_ms());
+-                                tokio::spawn(async move {
+-                                    if qty2.is_nan() || tp.is_nan() || qty2 <= 0.0 || tp <= 0.0 {
+-                                        return; // hayalet koruması
+-                                    }
+-                                    match place_tp_grid(
+-                                        &ex2,
+-                                        asset2,
+-                                        !is_long_tp,
+-                                        qty2,
+-                                        tp,
+-                                        dec2,
+-                                        &c2,
+-                                    )
+-                                    .await
+-                                    {
+-                                        Ok(oid) => {
+-                                            tracing::info!(
+-                                                "[TP] {c2} borsa TP kuruldu oid={oid} px={tp:.6} \
+-                                                 (hane={dec2}) sz={qty2} dolum={px} dist={dist:.6} \
+-                                                 ({}, +{:+.3}% dolumdan)",
+-                                                if is_long_tp { "LONG" } else { "SHORT" },
+-                                                (tp - px) / px * 100.0
+-                                            );
+-                                            let _ = tx2.send((c2, oid, tp));
+-                                        }
+-                                        Err(e) => {
+-                                            tracing::warn!("[TP] {c2} TP kurulamadı (döngüde yeniden denenir): {e}");
+-                                            let _ = tx2;
+-                                        }
+-                                    }
+-                                });
+-                            } else {
+-                                tracing::warn!(
+-                                    "[TP] {coin} TP mesafesi dolumun kâr tarafında değil (dist={dist:.6}) — TP kurulmadı, döngüde yeniden türetilecek"
+-                                );
+-                            }
+-                        }
+-                        tokio::spawn(async move {
+-                            if qty.is_nan() || sl.is_nan() || qty <= 0.0 || sl <= 0.0 {
+-                                return; // hayalet koruması
+-                            }
+-                            match place_sl_grid(&ex, asset, !is_buy, qty, sl, dec, &c).await {
+-                                Ok(oid) => {
+-                                    tracing::info!(
+-                                        "[SL] {c} borsa stop kuruldu oid={oid} px={sl} \
+-                                         (hane={dec}) sz={qty} dolum={px} risk={risk} \
+-                                         ({} taraf, {:+.3}% dolumdan)",
+-                                        if is_buy { "LONG" } else { "SHORT" },
+-                                        (sl - px) / px * 100.0
+-                                    );
+- // oid'i sahibe geri ver (bkz. `drain_sl_results`)
+-                                    let _ = tx.send((c, oid, sl));
+-                                }
+-                                Err(e) => tracing::error!(
+-                                    "[SL] {c}: borsa stop KURULAMADI ({e}) — pozisyon yalnızca bot içinde korunuyor"
+-                                ),
+-                            }
+-                        });
+-                    } else {
+-                        tracing::warn!("[SL] {coin}: asset cache'te yok, stop kurulamadı");
+-                    }
+-                }
+-            }
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Arka planda kurulan stop'ların oid'ini `sl_orders`'a yaz.
+     ///
+     /// `tokio::spawn` içinden `&mut self` geçemez; bu kanal tek yazma yoludur.
+     /// `run_cycle` başında çağrılır. Çağrılmazsa kurulan stop hiç kayıt
+     /// altına alınmaz ve motor aynı stop'u ikinci kez asabilir.
+     pub fn drain_sl_results(&mut self) -> usize {

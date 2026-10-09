@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace >= with < in AllocationManager::allocate
+@@ -451,17 +451,17 @@
+                     self.cfg.max_position_usd
+                 );
+                 c.allocated_usd = self.cfg.max_position_usd;
+                 c.capped = true;
+             }
+         }
+         // 6) MİN NOTİONAL: borsanın $10 altı emri reddi — sıfır/ mikro tahsisleri ele
+         let before = picked.len();
+-        picked.retain(|c| c.allocated_usd >= MIN_NOTIONAL_USD);
++        picked.retain(|c| c.allocated_usd < /* ~ changed by cargo-mutants ~ */ MIN_NOTIONAL_USD);
+         if before != picked.len() {
+             tracing::info!(
+                 "[AL] {} aday $10 altı tahsisle elendi",
+                 before - picked.len()
+             );
+         }
+         picked
+     }

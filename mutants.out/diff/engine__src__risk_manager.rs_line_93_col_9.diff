@@ -1,0 +1,21 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::config -> &RiskConfig with Box::leak(Box::new(Default::default()))
+@@ -85,17 +85,17 @@
+             cfg,
+             peak_equity: 0.0,
+             current_equity: 0.0,
+             halted: None,
+         }
+     }
+ 
+     pub fn config(&self) -> &RiskConfig {
+-        &self.cfg
++        Box::leak(Box::new(Default::default())) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma
+     pub fn update_equity(&mut self, equity: f64) {
+         self.current_equity = equity;
+         if equity > self.peak_equity {
+             self.peak_equity = equity;
+         }

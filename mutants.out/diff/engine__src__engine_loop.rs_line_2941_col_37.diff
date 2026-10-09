@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace || with && in Engine::run_cycle
+@@ -2933,17 +2933,17 @@
+                     }
+                     let already_held = self
+                         .executor
+                         .positions()
+                         .get(&e.coin)
+                         .map(|p| p.szi.abs() > 1e-12)
+                         .unwrap_or(false);
+                     // TAVAN DOLUYSA yeni giriş yapılmaz (çıkışlar serbest).
+-                    if already_held || open_now >= cap_positions {
++                    if already_held && /* ~ changed by cargo-mutants ~ */ open_now >= cap_positions {
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         tracing::info!(
+                             "{}: yeni giriş elendi ({} pozisyon/tavan {})",
+                             e.coin,

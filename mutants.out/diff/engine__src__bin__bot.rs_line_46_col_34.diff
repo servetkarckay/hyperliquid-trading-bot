@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace == with != in main
+@@ -38,17 +38,17 @@
+     let epoch_path = std::env::var("LEARNING_EPOCH_PATH")
+         .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
+     let tracker_path = std::env::var("TRACK_STATE_PATH")
+         .unwrap_or_else(|_| "/root/hyperliquid/config/track_state.json".into());
+     let trade_exits_path = std::env::var("TRADE_EXITS_PATH")
+         .unwrap_or_else(|_| "/root/hyperliquid/config/trade_exits.jsonl".into());
+     let weights_path = std::env::var("ENSEMBLE_WEIGHTS_IN")
+         .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
+-    let is_testnet = cfg.network == "testnet";
++    let is_testnet = cfg.network != /* ~ changed by cargo-mutants ~ */ "testnet";
+     // YAPISAL KORUMA (her başlangıç yolunda): TESTNET epoch canlı endpoint'e
+     // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
+     engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
+ 
+     // Risk hafızası yolu: WIPE ve normal-yükleme AYNI kaynağı kullanır —
+     // RISK_STATE_PATH env'i; custom path'te de fresh reset risk hafızasını
+     // tamamen temizler ve restart aynı hafızayı yükler.
+     let risk_state_path = std::env::var("RISK_STATE_PATH")

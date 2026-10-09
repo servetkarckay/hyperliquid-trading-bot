@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace is_open_fill -> bool with false
+@@ -112,17 +112,17 @@
+ /// KULLANILMAZ. Hyperliquid fill şeması:
+ /// "Open Long"/"Open Short" (açılış), "Close Long"/"Close Short"
+ /// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — önceki
+ /// tarafı kapatıp yeniyi açar → yeni taraf için açılış).
+ ///
+ /// `closedPnl == 0` kesinlikle "açılış" demek değildir: break-even
+ /// kapanışta 0'dır; açılış-koruması `dir`-tabanlı ayrımla kurulur.
+ pub fn is_open_fill(dir_field: &str) -> bool {
+-    dir_field.starts_with("Open") || dir_field.contains('>')
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// BORSA STOP grid denemesi: fiyat tick'i coin'e özel ve meta'da YOK
+ /// Bazı coin'ler 6 haneyi reddeder; "invalid price" gelince kaba
+ /// ızgarada bir hane azaltılır. Giriş yolu (`batch_execute`) ile
+ /// aynı strateji.
+ async fn place_sl_grid(
+     ex: &Exchange,

@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in Executor::apply_fill
+@@ -1731,17 +1731,17 @@
+                                     .insert(coin.clone(), hyperliquid_api::now_ms());
+                                 tokio::spawn(async move {
+                                     if qty2.is_nan() || tp.is_nan() || qty2 <= 0.0 || tp <= 0.0 {
+                                         return; // hayalet koruması
+                                     }
+                                     match place_tp_grid(
+                                         &ex2,
+                                         asset2,
+-                                        !is_long_tp,
++                                         /* ~ changed by cargo-mutants ~ */is_long_tp,
+                                         qty2,
+                                         tp,
+                                         dec2,
+                                         &c2,
+                                     )
+                                     .await
+                                     {
+                                         Ok(oid) => {

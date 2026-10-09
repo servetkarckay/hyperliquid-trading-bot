@@ -1,0 +1,21 @@
+--- engine/src/orderbook.rs
++++ replace == with != in LocalBook::apply_ws
+@@ -84,17 +84,17 @@
+ 
+     /// WS `l2Book` event verisini uygula. Coin uyuşmazsa false döner.
+     pub fn apply_ws(&mut self, data: &Value) -> bool {
+         if data["coin"].as_str() != Some(self.coin.as_str()) {
+             return false;
+         }
+         let time = data["time"].as_i64().unwrap_or(0);
+         let levels = match data["levels"].as_array() {
+-            Some(l) if l.len() == 2 => l.clone(),
++            Some(l) if l.len() != /* ~ changed by cargo-mutants ~ */ 2 => l.clone(),
+             _ => return false,
+         };
+         let coin = self.coin.clone();
+         self.apply_snapshot(&coin, time, &levels);
+         true
+     }
+ 
+     fn apply_snapshot(&mut self, coin: &str, time: i64, levels: &[Value]) {

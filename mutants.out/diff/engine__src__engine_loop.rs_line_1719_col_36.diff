@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with == in Engine::sync_exchange_sl
+@@ -1711,17 +1711,17 @@
+             // ================= TRAİLİNG STOP =================
+             // 1) Mark ile tepe/dip güncelle, 2) hedef stop'u hesapla,
+             // 3) yalnız **daha iyi** ise ve adım eşiğini geçiyorsa taşı.
+             if self.loop_cfg.trail_on {
+                 let px = self
+                     .ctx
+                     .get(coin)
+                     .map(|c| c.mark_px)
+-                    .filter(|m| *m > 0.0)
++                    .filter(|m| *m == /* ~ changed by cargo-mutants ~ */ 0.0)
+                     .or_else(|| self.executor.positions().get(coin).map(|p| p.entry_px))
+                     .unwrap_or(0.0);
+ 
+                 // ÖNCELİK: REST `entryPx` (gerçek dolum) > `entry_attr`
+                 // (karar anı defter fiyatı — kayma içerebilir). MFE/MAE bölmesi
+                 // ve tepe başlangıcı gerçek girişten olmalı.
+                 let pos_entry = self
+                     .executor

@@ -1,0 +1,36 @@
+--- engine/src/executor.rs
++++ replace Executor::load_px_dec with ()
+@@ -559,32 +559,17 @@
+             .collect();
+         if let Some(p) = std::path::Path::new(path).parent() {
+             let _ = std::fs::create_dir_all(p);
+         }
+         std::fs::write(path, serde_json::to_string(&map).unwrap_or_default())
+     }
+ 
+     pub fn load_px_dec(&mut self, path: &str) {
+-        let Ok(s) = std::fs::read_to_string(path) else {
+-            return;
+-        };
+-        let Ok(map) = serde_json::from_str::<HashMap<String, u32>>(&s) else {
+-            return;
+-        };
+-        let mut n = 0;
+-        for (name, d) in map {
+-            if let Some((a, _, _)) = self.assets.get(&name) {
+-                self.px_dec.insert(*a, d);
+-                n += 1;
+-            }
+-        }
+-        if n > 0 {
+-            tracing::info!("[TICK] {n} coin'in tick hassasiyeti diskten geri yüklendi");
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     fn asset_of(&self, coin: &str) -> Result<(u32, u32)> {
+         self.assets
+             .get(coin)
+             .map(|(a, d, _)| (*a, *d))
+             .ok_or_else(|| anyhow!("bilinmeyen coin: {coin}"))
+     }

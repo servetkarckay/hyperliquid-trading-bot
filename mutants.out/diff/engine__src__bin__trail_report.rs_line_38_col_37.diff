@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace * with + in percentile
+@@ -30,17 +30,17 @@
+     k: f64,
+ }
+ 
+ fn percentile(mut v: Vec<f64>, p: f64) -> Option<f64> {
+     if v.is_empty() {
+         return None;
+     }
+     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+-    let idx = ((v.len() - 1) as f64 * p).round() as usize;
++    let idx = ((v.len() - 1) as f64 + /* ~ changed by cargo-mutants ~ */ p).round() as usize;
+     Some(v[idx])
+ }
+ 
+ fn median(v: Vec<f64>) -> Option<f64> {
+     percentile(v, 0.5)
+ }
+ 
+ fn main() -> anyhow::Result<()> {

@@ -1,0 +1,115 @@
+--- engine/src/executor.rs
++++ replace Executor::refresh_orders -> Result<Vec<(String, i64)>> with Ok(vec![("xyzzy".into(), -1)])
+@@ -1204,111 +1204,17 @@
+     /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
+     pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
+         let v = self.info.open_orders(&self.user).await?;
+         let arr = v.as_array().cloned().unwrap_or_default();
+         Ok(self.parse_open_orders(&arr))
+     }
+ 
+     pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
+-        let v = self.info.open_orders(&self.user).await?;
+-        let arr = v.as_array().cloned().unwrap_or_default();
+-        let mut candidates: Vec<(String, i64)> = Vec::new();
+-        let rows = self.parse_open_orders(&arr);
+-        for row in rows {
+-            let (cn, oid) = (row.coin.clone(), row.oid);
+-            // BORSA STOP'LARINI `reduceOnly + limitPx` EŞLEŞMESİYLE TANI:
+-            //
+-            // Tespit `isTrigger || triggerPx` alanlarına bakamaz — REST
+-            // `openOrders` yanıtı bu alanları GÖNDERMEZ (ham yanıt örnek):
+-            // {'coin':'GMT','side':'B','limitPx':'0.009562','sz':'5539.0',
+-            // 'oid':61642165356,'reduceOnly':True,'isTrigger':None,'triggerPx':None}
+-            // Yani REST taraması stop'ları ASLA tanımıyordu → `sl_orders`
+-            // hiç dolmuyordu → `sync_exchange_sl` her döngü "eksik stop" sanıp
+-            // `ensure_sl`'ı çağırıyor → aynı pozisyona **ikinci** stop asılıyordu
+-            // (Not: GMT oid=…61867 ve …165356, LAYER …61871 ve …166722
+-            // aynı anda borsada duruyor).
+-            //
+-            // DOĞRU KURAL: **dinlenen (resting) + `reduceOnly` emir stop'tur.**
+-            // Gerekçe: bot'un diğer tüm reduce-only emirleri **IOC**'dur
+-            // (`flatten_all`, `Action::ExitNow` → `tif: Tif::Ioc`), IOC hiç
+-            // dinlenmez → `openOrders`'a girmez. Giriş emirleri de
+-            // `reduce_only: false`'dur. Yani defterde kalan tek reduce-only
+-            // emir sınıfı stop'tur.
+-            let reduce_only = row.reduce_only;
+-            let is_buy = row.is_buy;
+-            let px = row.px;
+-            // **BİZİM TP'MİZ SL DEĞİLDİR**: reduce-only trigger-LIMIT
+-            // TP de dinlenir; "resting + reduceOnly = stop" ayrımı TEK
+-            // BAŞINA yeterli değildir — TP/SL ayrımı fiyat yakınlığıyla
+-            // (`is_our_tp_row`) yapılır; aksi halde dedupe TP veya SL'yi
+-            // yanlış aday sayıp iptal edebilir.
+-            //
+-            // RESTART DEVRALMA: `tp_last_px` RAM'de kaybolur;
+-            // cloid tuzu deterministiktir → RAM'siz tanıma + oid GERİ YÜKLEME
+-            // (körlemesine ikinci TP atma yasağı da buradan kapanır).
+-            let row_tp = is_our_tp_row(px, reduce_only, self.tp_last_px.get(&cn).copied())
+-                || cloid_is_tp(&cn, px, row.sz, row.cloid.as_deref());
+-            if row_tp {
+-                if reduce_only && self.tp_orders.get(&cn) != Some(&oid) {
+-                    self.tp_orders.insert(cn.clone(), oid);
+-                    if px > 0.0 {
+-                        self.tp_last_px.insert(cn.clone(), px);
+-                    }
+-                    tracing::info!(
+-                        "[TP] {cn} TP oid BORSADAN GERİ YÜKLENDİ (oid={oid}) — yeni emir ATILMADI"
+-                    );
+-                }
+-                continue;
+-            }
+-            let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
+-            if reduce_only {
+-                let has_pos = self
+-                    .positions
+-                    .get(&cn)
+-                    .map(|p| p.szi.abs() > 1e-12)
+-                    .unwrap_or(false);
+-                if !cn.is_empty() && has_pos {
+-                    // AYNI COİN İÇİN BİRDEN FAZLA STOP = ARTIK. Çözüm
+-                    // `dedupe_sl`'de: en yeni oid tutulur, eskileri iptal edilir.
+-                    //
+-                    // **TUTARLILIK ASSERT'İ**. `sl_orders[coin].px`'ye
+-                    // (yani `sl_last_px`'e) bak: ters çevrilmiş stop fiyatı
+-                    // %5 sapıyorsa bu emir **bizim stop'umuz değil**
+-                    // (yabancı/körelmiş emir). Not: `limitPx` = trigger ×
+-                    // 1.05/0.95 olduğu için ham karşılaştırma **her zaman**
+-                    // tutarsız döner — bu yüzden `open_orders`'a yazılan
+-                    // ham `px` ile karşılaştırıp TERS çeviriyoruz
+-                    // (bkz. `dedupe_sl`).
+-                    let known = self.sl_last_px.get(&cn).copied().unwrap_or(0.0);
+-                    if known > 0.0 {
+-                        let d = self.px_dec.get(&asset_id).copied().unwrap_or(6);
+-                        let trig = hyperliquid_api::round_px_for(
+-                            if is_buy { px / 1.05 } else { px / 0.95 },
+-                            d,
+-                        );
+-                        let dev = if trig > 0.0 {
+-                            (trig - known).abs() / known
+-                        } else {
+-                            1.0
+-                        };
+-                        if dev > 0.001 {
+-                            // sessiz "stop var" SANMA — koruma illüzyonu olurdu
+-                            tracing::warn!(
+-                                "[SL-WARN] {cn} yabancı/tutarsız reduce-only emir:                                  oid={oid} seviye={:.8} beklenen={:.8} sapma={:.2}%                                  → sl_orders'a SAYILMADI (koruma bu emirden gelmiyor)",
+-                                trig, known, dev * 100.0
+-                            );
+-                            continue;
+-                        }
+-                    }
+-                    candidates.push((cn, oid));
+-                }
+-            }
+-        }
+-        Ok(candidates)
++        Ok(vec![("xyzzy".into(), -1)]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Aynı coin için birden fazla duran stop varsa **yalnız en yenisini** bırak.
+     ///
+     /// İki reduce-only stop aynı pozisyonu kapatmaya çalışırsa borsa
+     /// birini `reduceOnlyCanceled` ile iptal eder; `sl_orders`
+     /// hangisinin ayakta kaldığını bilemez →
+     /// bir sonraki taramada üçüncüsü ekleniyor.

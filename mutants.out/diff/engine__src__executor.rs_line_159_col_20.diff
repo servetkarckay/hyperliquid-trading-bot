@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in place_sl_grid
+@@ -151,17 +151,17 @@
+                 reduce_only: true,
+                 cloid: Some(&cloid),
+             })
+             .await
+         {
+             Ok(st) if st.error(0).is_none() => return Ok(st.resting_oid(0).unwrap_or(0)),
+             Ok(st) => {
+                 last = st.error(0).unwrap_or("bilinmeyen").to_string();
+-                if !last.contains("invalid price") {
++                if  /* ~ changed by cargo-mutants ~ */last.contains("invalid price") {
+                     break;
+                 }
+                 dec -= 1;
+             }
+             Err(e) => {
+                 last = e.to_string();
+                 break;
+             }

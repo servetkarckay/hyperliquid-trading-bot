@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace > with == in is_our_tp_row
+@@ -83,17 +83,17 @@
+ ///
+ /// TP trigger-LIMIT'in REST `limitPx` değeri TP fiyatının KENDİSİDİR
+ /// (ölçek yok); `tp_last_px` ile ±%0.1 eşleşme ayırt edicidir
+ /// (SL trigger-MARKET'in `limitPx`'i trigger×1.05/0.95 → asla eşleşmez).
+ /// `None`/0 = tp_last_px bilinmiyor → "TP" denemez (SL dedupe'una gider;
+ /// oradaki SL-WARN seviye assert'i yine korur).
+ pub fn is_our_tp_row(row_px: f64, reduce_only: bool, tp_last_px: Option<f64>) -> bool {
+     let Some(want) = tp_last_px else { return false };
+-    reduce_only && want > 0.0 && row_px > 0.0 && (row_px - want).abs() / want <= 0.001
++    reduce_only && want > 0.0 && row_px == /* ~ changed by cargo-mutants ~ */ 0.0 && (row_px - want).abs() / want <= 0.001
+ }
+ 
+ /// `user` kanalından gelen gerçek dolum (borsa ort. fiyatı burada verir)
+ #[derive(Debug, Clone)]
+ pub struct FillEvent {
+     pub oid: i64,
+     pub coin: String,
+     pub px: f64,

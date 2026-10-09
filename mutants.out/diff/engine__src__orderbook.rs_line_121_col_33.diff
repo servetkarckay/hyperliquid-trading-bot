@@ -1,0 +1,21 @@
+--- engine/src/orderbook.rs
++++ replace || with && in LocalBook::apply_snapshot
+@@ -113,17 +113,17 @@
+                 })
+                 .unwrap_or_default()
+         };
+         self.bids = parse(&levels[0]);
+         self.asks = parse(&levels[1]);
+         self.server_time = time;
+         self.updated_at = Instant::now();
+         // koruma: bozuk snapshot (sadece tek taraf) kabul etme
+-        if self.bids.is_empty() || self.asks.is_empty() {
++        if self.bids.is_empty() && /* ~ changed by cargo-mutants ~ */ self.asks.is_empty() {
+             tracing::warn!(coin = %coin, "bos/tarafsiz book snapshot'u reddedildi");
+         }
+     }
+ 
+     pub fn best_bid(&self) -> Option<LevelF> {
+         self.bids.first().copied()
+     }
+     pub fn best_ask(&self) -> Option<LevelF> {

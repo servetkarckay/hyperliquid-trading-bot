@@ -1,0 +1,40 @@
+--- engine/src/engine_loop.rs
++++ replace EntryAttr::apply_real_fill -> bool with false
+@@ -167,36 +167,17 @@
+     /// analytical TP'yi **yeniden** türetir. `true` = kayma ölçülmüş ve
+     /// TP yeni doluma göre kalibre edilmiştir.
+     ///
+     /// Kayma ölçülür (`[SL] … kayma=%`) çünkü aynı değer stop fiyatını ve
+     /// R-çarpanını da besler. TP yeniden türetilmezse yanlış fiyatta kalır:
+     /// long'da dolum yukarı kaydıysa TP dolum-öncesi fiyatta kalır (kâr tarafında ama
+     /// gerekenden yakın), short'ta aşağı kaydıysa TP **zarar tarafına** düşer.
+     pub fn apply_real_fill(&mut self, rest_entry: f64, cfg: &AllocationConfig) -> bool {
+-        if rest_entry <= 0.0 || !rest_entry.is_finite() {
+-            return false;
+-        }
+-        let gap = (rest_entry - self.entry_px) / self.entry_px.abs().max(1e-12);
+-        if gap.abs() <= 1e-9 {
+-            return false;
+-        }
+-        let planned = self.entry_px;
+-        self.entry_px = rest_entry;
+-        let tp = self.set_analytical_tp(cfg);
+-        tracing::info!(
+-            "[SL] {} giriş fiyatı düzeltildi: karar(defter)={:.8} dolum(REST)={:.8} \
+-             kayma={:+.3}% → analytical TP={}",
+-            self.coin,
+-            planned,
+-            rest_entry,
+-            gap * 100.0,
+-            tp.map(|t| format!("{t:.8}")).unwrap_or_else(|| "-".into())
+-        );
+-        true
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Gerçek çıkış sebebi — MFE/MAE analizi için critical
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Default)]
+ pub enum ExitReason {
+     #[default]
+     Unknown,

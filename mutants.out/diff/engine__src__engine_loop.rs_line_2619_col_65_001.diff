@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with / in Engine::run_cycle
+@@ -2611,17 +2611,17 @@
+ 
+         let pair_corr = |c1: &str, c2: &str| -> f64 {
+             match (closes_map.get(c1), closes_map.get(c2)) {
+                 (Some(a), Some(b)) => {
+                     let n = a.len().min(b.len());
+                     if n < 30 {
+                         return 0.0;
+                     }
+-                    let (a, b) = (&a[a.len() - n..], &b[b.len() - n..]);
++                    let (a, b) = (&a[a.len() - n..], &b[b.len() / /* ~ changed by cargo-mutants ~ */ n..]);
+                     let (ma, mb) = (
+                         a.iter().sum::<f64>() / n as f64,
+                         b.iter().sum::<f64>() / n as f64,
+                     );
+                     let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+                     for i in 0..n {
+                         let da = a[i] - ma;
+                         let db = b[i] - mb;

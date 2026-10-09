@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::set_leverage_all
+@@ -484,17 +484,17 @@
+                         .await
+                     };
+                     match fut.await {
+                         Ok(Ok(v)) => {
+                             let ok = v
+                                 .get("response")
+                                 .and_then(|r| r.get("type"))
+                                 .and_then(|t| t.as_str())
+-                                == Some("ok");
++                                != /* ~ changed by cargo-mutants ~ */ Some("ok");
+                             if !ok {
+                                 Some(format!("{coin}: {v}"))
+                             } else {
+                                 None
+                             }
+                         }
+                         Ok(Err(e)) => Some(format!("{coin}: {e}")),
+                         Err(_) => Some(format!("{coin}: zaman aşımı (8 sn)")),

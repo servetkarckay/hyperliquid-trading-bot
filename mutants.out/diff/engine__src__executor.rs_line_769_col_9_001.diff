@@ -1,0 +1,56 @@
+--- engine/src/executor.rs
++++ replace Executor::ensure_sl -> Result<bool> with Ok(false)
+@@ -761,52 +761,17 @@
+     /// kendini sıfırlıyordu.
+     pub async fn ensure_sl(
+         &mut self,
+         coin: &str,
+         is_long: bool,
+         sz: f64,
+         sl_px: f64,
+     ) -> Result<bool> {
+-        if self.sl_orders.contains_key(coin) {
+-            return Ok(false); // zaten var
+-        }
+-        // SÜRE KAPISI: stop kısa süre önce kurulduysa tekrar deneme. WS
+-        // "open" bildirimi geç geliyor / reconnect'te `sl_orders` boşalıyor;
+-        // bu kapı olmadan aynı pozisyona ikinci stop asılıyordu.
+-        if let Some(&ts) = self.sl_armed_at.get(coin) {
+-            let age = (hyperliquid_api::now_ms() as i64 - ts as i64).unsigned_abs();
+-            if age < TS_GRACE_MS {
+-                return Ok(false);
+-            }
+-        }
+-        let Some((asset, szd)) = self.cached_asset(coin) else {
+-            bail!("{coin}: asset cache'te yok");
+-        };
+-        let qty = hyperliquid_api::round_sz_up(sz.abs(), szd);
+-        if qty.is_nan() || sl_px.is_nan() || qty <= 0.0 || sl_px <= 0.0 {
+-            return Ok(false); // hayalet koruması: 0-lot stop KONULMAZ
+-        }
+-        let is_buy = !is_long; // long -> satışta kapat
+-        let dec = self.px_dec.get(&asset).copied().unwrap_or(6);
+-        let ex = self.ex.clone();
+-        match place_sl_grid(&ex, asset, is_buy, qty, sl_px, dec, coin).await {
+-            Ok(oid) => {
+-                self.sl_orders.insert(coin.to_string(), oid);
+-                self.sl_armed_at
+-                    .insert(coin.to_string(), hyperliquid_api::now_ms());
+-                self.sl_last_px.insert(coin.to_string(), sl_px);
+-                tracing::info!(
+-                    "[SL] {coin} borsa stop {} oid={oid} px={sl_px:.6} sz={qty} (hane={dec})",
+-                    if is_buy { "AL" } else { "SAT" }
+-                );
+-                Ok(true)
+-            }
+-            Err(e) => Err(e),
+-        }
++        Ok(false) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **REDUCE-ONLY TP TRIGGER KUR** (`tpsl="tp"`, `is_market=false`).
+     ///
+     /// Idempotency (çift TP yasağı — SL ile aynı şema):
+     /// 1. `tp_orders`'da oid var → kur, tekrar ASMA,
+     /// 2. kısa süre önce kurulduysa (`tp_armed_at` + grace) → tekrar deneme,
+     /// 3. lot 0 / fiyat 0 → hayalet koruması, emir ATILMAZ.

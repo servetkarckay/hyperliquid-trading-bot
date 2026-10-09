@@ -1,0 +1,53 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::ingest_step -> Vec<Action> with vec![]
+@@ -1072,49 +1072,17 @@
+         let (meta, ctxs) = self.info.meta_and_asset_ctxs().await?;
+         let names: Vec<String> = meta.universe.iter().map(|m| m.name.clone()).collect();
+         self.ctx.apply_rest_snapshot(&names, &ctxs);
+         Ok(())
+     }
+ 
+     /// WS market verisi tüketimi
+     pub async fn ingest_step(&mut self, ev: data::StreamEvent) -> Vec<Action> {
+-        let mut acts = Vec::new();
+-        match ev {
+-            data::StreamEvent::Trade {
+-                coin,
+-                px,
+-                sz,
+-                ts,
+-                is_buy,
+-            } => {
+-                let _closed = self.agg.on_trade(&coin, px, sz, ts, is_buy);
+-                let now = hyperliquid_api::now_ms();
+-                if let Some(m) = self.machines.get_mut(&coin) {
+-                    acts.push(m.on_price_tick(px, now));
+-                }
+-            }
+-            data::StreamEvent::Ctx { .. } => self.ctx.apply_stream(&ev),
+-            data::StreamEvent::Book {
+-                coin, bids, asks, ..
+-            } => {
+-                if let (Some(b), Some(a)) = (bids.first(), asks.first()) {
+-                    let bsz: f64 = bids.iter().take(5).map(|x| x.1).sum();
+-                    let asz: f64 = asks.iter().take(5).map(|x| x.1).sum();
+-                    let imb = if bsz + asz > 0.0 {
+-                        (bsz - asz) / (bsz + asz)
+-                    } else {
+-                        0.0
+-                    };
+-                    self.books.insert(coin, (b.0, a.0, imb));
+-                }
+-            }
+-            data::StreamEvent::Mids { .. } => {}
+-        }
+-        acts
++        vec![] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// WS ingest — EMİR DURUM OLAYLARI (orderUpdates/userEvents):
+     /// dolum → makine; REDD → makine Flat; pozisyon kapanışı → tracker
+     pub fn ingest_oe(&mut self, channel: &str, data: &serde_json::Value) {
+         self.executor.handle_ws_event(channel, data);
+         // (oid, coin, dolan, kalan, ort.fiyat, red mi)
+         // (oid, coin, dolan, kalan, ort.fiyat, red mi, tp fill mi, sl fill mi, closedPnl)

@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace match guard e.kind() == std::io::ErrorKind::NotFound with true in main
+@@ -332,17 +332,17 @@
+                     "[LEARN] canlı ağırlık dosyası doğrulandı: {weights_in} → {} strateji; \
+                      dosyada OLMAYAN {} strateji AÇIKÇA nötr 1.0: {:?}",
+                     rep.applied,
+                     rep.defaulted.len(),
+                     rep.defaulted
+                 );
+             }
+         }
+-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => tracing::info!(
++        Err(e) if true /* ~ changed by cargo-mutants ~ */ => tracing::info!(
+             "[LEARN] ağırlık dosyası yok ({weights_in}) — nötr cold-start: {} strateji × w=1.0; persistence=ON",
+             strategy::STRATEGY_COUNT
+         ),
+         Err(e) => {
+             return Err(anyhow::anyhow!(
+                 "[LEARN] canlı ağırlık dosyası okunamadı ({weights_in}): {e}"
+             ))
+         }

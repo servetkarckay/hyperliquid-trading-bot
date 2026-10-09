@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace AllocationManager::tp_from_entry -> f64 with -1.0
+@@ -213,17 +213,17 @@
+             Dir::Short => mid + risk,
+             Dir::Neutral => mid,
+         };
+         (sl, self.tp_from_entry(dir, mid, risk))
+     }
+ 
+     /// Gerçek TP hedefi: `AllocationConfig::tp_from_entry` (tek formül).
+     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+-        self.cfg.tp_from_entry(dir, entry_eff, risk_mesafesi)
++        -1.0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// TAM KANAT: sırala → korelasyonla ele → tahsis.
+     /// `corr_at`: (i,j) coin çifti getiri korelasyonu (math::portfolio'dan)
+     pub fn allocate(
+         &self,
+         votes: Vec<Vote>,
+         corr_at: &dyn Fn(&str, &str) -> f64,

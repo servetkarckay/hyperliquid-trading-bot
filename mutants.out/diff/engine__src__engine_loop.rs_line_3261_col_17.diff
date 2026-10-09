@@ -1,0 +1,23 @@
+--- engine/src/engine_loop.rs
++++ delete match arm Action::Cancel(oid) in Engine::run_cycle
+@@ -3253,19 +3253,17 @@
+                         cloid: Some(crate::executor::make_cloid(
+                             &e.coin,
+                             xpx,
+                             xsz,
+                             (self.n_cycles << 16) | 0x7000 | (places.len() as u64 & 0x0fff),
+                         )),
+                     });
+                 }
+-                Action::Cancel(oid) => {
+-                    cancels.push((asset, oid));
+-                }
++                 /* ~ changed by cargo-mutants ~ */
+                 _ => {}
+             }
+         }
+ 
+         // ===== FAZ 4 — TEK ÇAĞRI YÜRÜT =====
+         if !places.is_empty() || !cancels.is_empty() {
+             let res = self.executor.batch_execute(&places, &cancels).await?;
+             // Exchange UNKNOWN (5xx/timeout) -> GERÇEK reconciliation.

@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace * with / in Executor::flatten_all
+@@ -622,17 +622,17 @@
+                 .copied()
+                 .filter(|x| *x > 0.0)
+                 .unwrap_or_else(|| self.positions.get(coin).map(|p| p.entry_px).unwrap_or(0.0));
+             if base <= 0.0 || !base.is_finite() {
+                 tracing::warn!("[FLAT] {coin}: fiyat yok, atlandı");
+                 continue;
+             }
+             let is_buy = *szi < 0.0;
+-            let px = if is_buy { base * 1.01 } else { base * 0.99 };
++            let px = if is_buy { base / /* ~ changed by cargo-mutants ~ */ 1.01 } else { base * 0.99 };
+             // NOT: `place_limit` adaptif fiyat tick keşfini KULLANMIYOR —
+             // 6 haneyi reddeden coin'lerde "invalid price" ile kapanabilir;
+             // girişlerde kanıtlanmış `batch_execute` yolu kullanılır.
+             if let Some((asset, szd)) = self.cached_asset(coin) {
+                 let qty = hyperliquid_api::round_sz_up(sz, szd);
+                 let w = hyperliquid_api::exchange_endpoint::WireOrder {
+                     asset,
+                     is_buy,

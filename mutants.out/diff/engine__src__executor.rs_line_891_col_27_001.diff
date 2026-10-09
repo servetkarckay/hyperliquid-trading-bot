@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace > with < in Executor::restore_tp_orders
+@@ -883,17 +883,17 @@
+         for row in rows {
+             if !row.reduce_only || self.tp_orders.contains_key(&row.coin) {
+                 continue;
+             }
+             // ÖNCE cloid tuzu (RAM'siz, EntryAttr'a bağımsız) —
+             // restart sonrası tp_px_by_coin BOŞTUR (EntryAttr RAM'de kalır).
+             if cloid_is_tp(&row.coin, row.px, row.sz, row.cloid.as_deref()) {
+                 self.tp_orders.insert(row.coin.clone(), row.oid);
+-                if row.px > 0.0 {
++                if row.px < /* ~ changed by cargo-mutants ~ */ 0.0 {
+                     self.tp_last_px.insert(row.coin.clone(), row.px);
+                 }
+                 n += 1;
+                 tracing::info!(
+                     "[TP] {c} TP oid BORSADAN GERİ YÜKLENDİ (oid={o} px={px:.6}) — yeni emir atılmadı",
+                     c = row.coin, o = row.oid, px = row.px
+                 );
+                 continue;

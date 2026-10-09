@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace != with == in Executor::apply_one_order_update
+@@ -1532,17 +1532,17 @@
+                 tracing::info!(
+                     oid,
+                     coin,
+                     sz = if sz > 0.0 { sz } else { osz },
+                     px,
+                     "emir doldu (orderUpdates)"
+                 );
+                 self.fill_count += 1;
+-            } else if status != "canceled" {
++            } else if status == /* ~ changed by cargo-mutants ~ */ "canceled" {
+                 tracing::warn!(oid, coin, status, "emir durumu");
+             }
+         }
+     }
+ 
+     fn apply_fill(&mut self, f: &Value) {
+         let coin = f["coin"].as_str().unwrap_or("").to_string();
+         let px: f64 = f["px"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);

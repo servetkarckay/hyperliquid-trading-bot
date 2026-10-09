@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace > with >= in AllocationManager::allocate
+@@ -333,17 +333,17 @@
+         // 3) KORELASYON FİLTRESİ: açgözlü seçim; benzer yüksek → katılmaz
+         let mut picked: Vec<Candidate> = Vec::with_capacity(self.cfg.top_n);
+         for c in cands {
+             if picked.len() >= self.cfg.top_n {
+                 break;
+             }
+             let too_close = picked
+                 .iter()
+-                .any(|p| corr_at(&p.coin, &c.coin).abs() > self.cfg.max_correlation);
++                .any(|p| corr_at(&p.coin, &c.coin).abs() >= /* ~ changed by cargo-mutants ~ */ self.cfg.max_correlation);
+             if !too_close {
+                 picked.push(c);
+             }
+         }
+ 
+         // 4) TAHSİS: conviction kare ağırlıklı (fractional Kelly dilimleri)
+         let sq: Vec<f64> = picked
+             .iter()

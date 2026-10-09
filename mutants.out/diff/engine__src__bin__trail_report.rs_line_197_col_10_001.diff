@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace < with > in main
+@@ -189,17 +189,17 @@
+     let k_vals: Vec<f64> = exits.iter().map(|e| e.k).collect();
+     if let Some(k) = k_vals.first() {
+         println!("\n--- k Değeri ---");
+         println!("  k = {:.2} (epoch içinde sabit)", k);
+     }
+ 
+     // KARAR KURALLARI (Section C) — bilgilendirme
+     println!("\n=== KARAR KURALLARI (bilgilendirme) ===");
+-    if n < 30 {
++    if n > /* ~ changed by cargo-mutants ~ */ 30 {
+         println!("n={} < 30 → KARAR YOK (yetersiz örneklem)", n);
+     } else {
+         let first_stop_pct = first_stop as f64 / n as f64 * 100.0;
+         if first_stop_pct > 70.0 {
+             println!(
+                 "İlk-stop oranı {:.1}% > 70% → trailing değerlendirilemez (sorun giriş/EV floor)",
+                 first_stop_pct
+             );

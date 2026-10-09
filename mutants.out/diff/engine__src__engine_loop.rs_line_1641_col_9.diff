@@ -1,0 +1,382 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::sync_exchange_sl with ()
+@@ -1633,378 +1633,17 @@
+     /// Açık her pozisyon için borsada reduce-only SL yoksa kurar; pozisyon
+     /// kapanmış (veya borsadan kalkmış) stop'u iptal eder. İdempotenttir:
+     /// `sl_orders` sayesinde her döngü güvenle çağrılabilir. SL fiyatı
+     /// girişte kaydedilen gerçek risk mesafesinden (`entry_attr.risk_px`)
+     /// gelir; kayıt yoksa %2'lik kurtarma stop'u konur.
+     pub async fn sync_exchange_sl(&mut self) {
+         // Önce arka planda (spawn) kurulan stop'ların oid'ini kayda al — yoksa
+         // `sl_orders` boş görünür ve aynı stop ikinci kez asılır.
+-        self.executor.drain_sl_results();
+-        // WS reconnect sonrası `sl_orders` bellekte kaybolur;
+-        // 502/connection reset). Borsa stop'ları `openOrders` taramasından
+-        // geri yüklemezsek motor aynı stop'u ikinci kez kuruyor.
+-        //
+-        // Tarama yalnız eksiklik varsa yapılır (döngü başına ek REST yok).
+-        // `dedupe_sl` aynı coin'de birden fazla stop bulursa **en yenisini
+-        // bırakıp öncekilerini iptal eder** — çift-stop birikimini
+-        // kendi kendine temizler.
+-        let open_pos = self
+-            .executor
+-            .positions()
+-            .values()
+-            .filter(|p| p.szi.abs() > 1e-12)
+-            .count();
+-        if self.executor.sl_orders.len() < open_pos {
+-            match self.executor.refresh_orders().await {
+-                Ok(cands) => {
+-                    let n = self.executor.dedupe_sl(cands).await;
+-                    if n > 0 {
+-                        tracing::info!("[SL] {n} artık stop temizlendi");
+-                    }
+-                }
+-                Err(e) => tracing::warn!("[SL] openOrders taraması başarısız: {e}"),
+-            }
+-        }
+-        let pos: Vec<(String, f64)> = self
+-            .executor
+-            .positions()
+-            .iter()
+-            .filter(|(_, p)| p.szi.abs() > 1e-12)
+-            .map(|(c, p)| (c.clone(), p.szi))
+-            .collect();
+-        for (coin, szi) in &pos {
+-            let sl_px = match self.entry_attr.get(coin) {
+-                Some(a) => {
+-                    let risk = if a.risk_px > 0.0 {
+-                        a.risk_px
+-                    } else {
+-                        a.entry_px.abs() * 0.02
+-                    };
+-                    if a.side.is_buy() {
+-                        a.entry_px - risk
+-                    } else {
+-                        a.entry_px + risk
+-                    }
+-                }
+-                None => {
+-                    // restart sonrası devralınan pozisyon: girişten %2
+-                    let e = self
+-                        .executor
+-                        .positions()
+-                        .get(coin)
+-                        .map(|p| p.entry_px)
+-                        .unwrap_or(0.0);
+-                    if e <= 0.0 || !e.is_finite() {
+-                        continue;
+-                    }
+-                    if *szi > 0.0 {
+-                        e * 0.98
+-                    } else {
+-                        e * 1.02
+-                    }
+-                }
+-            };
+-            if sl_px <= 0.0 || !sl_px.is_finite() {
+-                continue;
+-            }
+-            let is_long = *szi > 0.0;
+-
+-            // ================= TRAİLİNG STOP =================
+-            // 1) Mark ile tepe/dip güncelle, 2) hedef stop'u hesapla,
+-            // 3) yalnız **daha iyi** ise ve adım eşiğini geçiyorsa taşı.
+-            if self.loop_cfg.trail_on {
+-                let px = self
+-                    .ctx
+-                    .get(coin)
+-                    .map(|c| c.mark_px)
+-                    .filter(|m| *m > 0.0)
+-                    .or_else(|| self.executor.positions().get(coin).map(|p| p.entry_px))
+-                    .unwrap_or(0.0);
+-
+-                // ÖNCELİK: REST `entryPx` (gerçek dolum) > `entry_attr`
+-                // (karar anı defter fiyatı — kayma içerebilir). MFE/MAE bölmesi
+-                // ve tepe başlangıcı gerçek girişten olmalı.
+-                let pos_entry = self
+-                    .executor
+-                    .positions()
+-                    .get(coin)
+-                    .map(|p| p.entry_px)
+-                    .unwrap_or(0.0);
+-                let attr_entry = self.entry_attr.get(coin).map(|a| a.entry_px).unwrap_or(0.0);
+-                let entry_px = if pos_entry > 0.0 {
+-                    pos_entry
+-                } else {
+-                    attr_entry
+-                };
+-                // RESTART KURTARMASI: `trail` haritası RAM'de, restart'ta
+-                // boş. `cur_sl_px` tahminle (giriş ± ATR) dolarsa stop ilk
+-                // döngüde **gereksiz yere** aşağı çekilir ve koruma zayıflar.
+-                // `sl_last_px` borsadaki GERÇEK stop seviyesini tutar
+-                // (`openOrders` taraması + `ensure_sl`/`replace_sl` yazar).
+-                let cur_sl_init = self
+-                    .executor
+-                    .sl_last_px
+-                    .get(coin)
+-                    .copied()
+-                    .filter(|p| *p > 0.0)
+-                    .unwrap_or(sl_px);
+-                let t = self
+-                    .trail
+-                    .entry(coin.clone())
+-                    .or_insert_with(|| TrailState {
+-                        is_long,
+-                        entry_px,
+-                        atr_px: 0.0,
+-                        peak_px: px.max(entry_px),
+-                        worst_px: px.min(entry_px),
+-                        last_px: px,
+-                        cur_sl_px: cur_sl_init,
+-                        opened_ms: hyperliquid_api::now_ms(),
+-                        ratchets: 0,
+-                    });
+-                t.is_long = is_long;
+-                if px > 0.0 {
+-                    if is_long {
+-                        t.peak_px = t.peak_px.max(px);
+-                        t.worst_px = t.worst_px.min(px);
+-                    } else {
+-                        t.peak_px = t.peak_px.min(px);
+-                        t.worst_px = t.worst_px.max(px);
+-                    }
+-                    t.last_px = px;
+-                }
+-                // ATR güncel: yeni hesaplanmışsa al, yoksa giriş ATR'ına sabit.
+-                if let Some(a) = self.atr_px.get(coin).copied().filter(|a| *a > 0.0) {
+-                    t.atr_px = a;
+-                }
+-                if t.atr_px > 0.0 {
+-                    let dist = self.loop_cfg.trail_atr_k * t.atr_px;
+-                    let target = if is_long {
+-                        t.peak_px - dist
+-                    } else {
+-                        t.peak_px + dist
+-                    };
+-                    // GEVŞEME KAPISI: long için yeni stop ESKİDEN YÜKSEK,
+-                    // short için DAHA DÜŞÜK olmalı. Ayrıca pozisyon kapanmış
+-                    // stop'u (mark çok uzaklaşmış) yeniden açmayalım.
+-                    let better = if is_long {
+-                        target > t.cur_sl_px + self.loop_cfg.trail_min_step * t.atr_px
+-                    } else {
+-                        target < t.cur_sl_px - self.loop_cfg.trail_min_step * t.atr_px
+-                    };
+-                    if better && target > 0.0 {
+-                        match self
+-                            .executor
+-                            .replace_sl(coin, is_long, szi.abs(), target)
+-                            .await
+-                        {
+-                            Ok(_) => {
+-                                let t = self.trail.get_mut(coin).unwrap();
+-                                t.cur_sl_px = target;
+-                                t.ratchets += 1;
+-                            }
+-                            Err(e) => {
+-                                // BAŞARISIZLIKTA ESKİ STOP AYAKTA KALIR (replace_sl
+-                                // sırası sayesinde) → en kötü senaryo "trailing
+-                                // olmadı", "korumasız pozisyon" değil.
+-                                tracing::warn!(
+-                                    "[SL] {coin} trailing taşınamadı ({e}) — mevcut stop korunuyor"
+-                                );
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-
+-            // SON SAVUNMA: kayıt düşmüşse borsada gerçekten stop var mı diye
+-            // bak. WS olayı (`triggered`/`canceled`) `user` dolumundan dakikalar
+-            // önce geliyor; aradaki boşlukta motor aynı stop'u ikinci kez
+-            // kurabilir. `refresh_orders` trigger'ları `sl_orders`'a yazdığı
+-            // için `ensure_sl` idempotenttir — kayıt düşmüşse yenisi kurulumaz.
+-            //
+-            // Trailing bu noktadan sonra `cur_sl_px`'yi de günceller: ilk
+-            // kurulumdan sonra hedef seviye takip edilsin.
+-            // `ensure_sl` YENİ stop kurduysa `cur_sl_px`'i güncelle.
+-            // DİKKAT: idempotent dönüşte (`Ok(false)`) GÜNCELLEME YAPILMAZ —
+-            // aksi halde trailing'in bir önceki satırda yeni taşıdığı seviye
+-            // bir sonraki satırda sabit giriş stop'una geri yazılır ve
+-            // trailing her döngü kendini sıfırlar (ratchet kaybı).
+-            match self
+-                .executor
+-                .ensure_sl(coin, is_long, szi.abs(), sl_px)
+-                .await
+-            {
+-                Ok(true) => {
+-                    if let Some(t) = self.trail.get_mut(coin) {
+-                        t.cur_sl_px = sl_px;
+-                    }
+-                }
+-                Ok(false) => {}
+-                Err(e) => tracing::warn!("[SL] {coin}: borsa stop kurulamadı: {e}"),
+-            }
+-
+-            // GÖZLEMLENEBİLİRLİK: trailing kararının girdileri loglanır, yoksa
+-            // "neden ratchet olmadı" ayırt edilemiyor (gerçekte bu oldu).
+-            if self.loop_cfg.trail_on && self.n_cycles.is_multiple_of(6) {
+-                if let Some(t) = self.trail.get(coin) {
+-                    tracing::info!(
+-                        "[TRAIL] {coin} {} mark={:.8} tepe={:.8} (entry={:.8}) ATR={:.8} stop={:.8} hedef={:.8} ratchet={}",
+-                        if t.is_long { "LONG" } else { "SHORT" },
+-                        t.last_px, t.peak_px, t.entry_px, t.atr_px, t.cur_sl_px,
+-                        if t.is_long { t.peak_px - self.loop_cfg.trail_atr_k * t.atr_px }
+-                        else { t.peak_px + self.loop_cfg.trail_atr_k * t.atr_px },
+-                        t.ratchets,
+-                    );
+-                }
+-            }
+-        }
+-        let stale: Vec<String> = self
+-            .executor
+-            .sl_orders
+-            .keys()
+-            .filter(|c| !pos.iter().any(|(p, _)| p == *c))
+-            .cloned()
+-            .collect();
+-        for c in stale {
+-            self.executor.cancel_sl(&c).await;
+-        }
+-        // Giriş emri reddedildiyse/pozisyon açılmadıysa hedef SL bayatlar.
+-        // ÖNEMLİ: "pozisyon yok" diye ANINDA silinemez — WS dolumu
+-        // `run_cycle` bitmeden işlenemediği için (ana döngü `await` sırasında
+-        // `oe_rx`'i okumaz) hedef, dolumdan önce temizlenip SL hiç kurulmazdı.
+-        // Bu yüzden 10 dakikadan bayat kayıtlar temizlenir.
+-        let now = hyperliquid_api::now_ms();
+-        let stale_pending: Vec<String> = self
+-            .executor
+-            .pending_sl
+-            .iter()
+-            .filter(|(_, (_, ts))| (now as i64 - *ts as i64).unsigned_abs() > 600_000)
+-            .map(|(c, _)| c.clone())
+-            .collect();
+-        for c in stale_pending {
+-            self.executor.pending_sl.remove(&c);
+-            tracing::warn!("[SL] {c}: hedef stop 10 dk geçti, dolum gelmedi — temizlendi");
+-        }
+-
+-        // ============ F — GERÇEK TP EXECUTION (sync) ============
+-        // 1) arka planda kurulan TP'lerin oid'ini kayda al,
+-        // 2) pozisyonu olan ama TP'si olmayan coine TP kur (idempotent),
+-        // 3) kapanmış coinin TP'sini iptal et.
+-        self.executor.drain_tp_results();
+-        let open_pos_tp: Vec<(String, f64)> = self
+-            .executor
+-            .positions()
+-            .iter()
+-            .filter(|(_, p)| p.szi.abs() > 1e-12)
+-            .map(|(c, p)| (c.clone(), p.szi))
+-            .collect();
+-        // 2a) TP oid kaybı (restart/WS kopması): borsada dinlenen bizim TP'yi
+-        // TARA → oid geri yükle → **yeni emir ATILMAZ** (duplicate yasağı).
+-        if self.executor.tp_orders.len() < open_pos_tp.len() {
+-            match self.executor.fetch_open_order_rows().await {
+-                Ok(rows) => {
+-                    let want: HashMap<String, f64> = self
+-                        .entry_attr
+-                        .iter()
+-                        .filter_map(|(c, a)| a.tp_px.filter(|t| *t > 0.0).map(|t| (c.clone(), t)))
+-                        .collect();
+-                    let n = self.executor.restore_tp_orders(&rows, &want);
+-                    if n > 0 {
+-                        tracing::info!("[TP] {n} TP oid borsadan geri yüklendi");
+-                    }
+-                }
+-                Err(e) => tracing::warn!("[TP] openOrders taraması başarısız: {e}"),
+-            }
+-        }
+-        for (coin, szi) in &open_pos_tp {
+-            let tp_px = match self.entry_attr.get(coin) {
+-                Some(a) if a.tp_px.is_some() => a.tp_px.unwrap(),
+-                Some(a) => {
+-                    // dolum düzeltmesi gelmemişse: risk mesafesinden (tek formül)
+-                    let risk = if a.risk_px > 0.0 {
+-                        a.risk_px
+-                    } else {
+-                        a.entry_px.abs() * 0.02
+-                    };
+-                    let dir = if a.side.is_buy() {
+-                        Dir::Long
+-                    } else {
+-                        Dir::Short
+-                    };
+-                    self.am.cfg.tp_from_entry(dir, a.entry_px, risk)
+-                }
+-                None => {
+-                    // restart sonrası devralınan pozisyon: girişten %2×2 mesafe
+-                    let e = self
+-                        .executor
+-                        .positions()
+-                        .get(coin)
+-                        .map(|p| p.entry_px)
+-                        .unwrap_or(0.0);
+-                    if e <= 0.0 || !e.is_finite() {
+-                        continue;
+-                    }
+-                    if *szi > 0.0 {
+-                        e * 1.04
+-                    } else {
+-                        e * 0.96
+-                    }
+-                }
+-            };
+-            if tp_px <= 0.0 || !tp_px.is_finite() {
+-                continue;
+-            }
+-            let is_long = *szi > 0.0;
+-            // KÂR TARAFI KAPISI long TP > entry, short TP < entry.
+-            let entry_eff = self
+-                .executor
+-                .positions()
+-                .get(coin)
+-                .map(|p| p.entry_px)
+-                .filter(|e| *e > 0.0)
+-                .or_else(|| self.entry_attr.get(coin).map(|a| a.entry_px))
+-                .unwrap_or(0.0);
+-            if !tp_side_ok(is_long, tp_px, entry_eff) {
+-                tracing::warn!(
+-                    "[TP] {coin} TP kâr tarafında DEĞİL (tp={tp_px:.8} entry={entry_eff:.8}) — kurulmadı"
+-                );
+-                continue;
+-            }
+-            let sz = self
+-                .executor
+-                .positions()
+-                .get(coin)
+-                .map(|p| p.szi.abs())
+-                .unwrap_or(0.0);
+-            if let Err(e) = self.executor.ensure_tp(coin, is_long, sz, tp_px).await {
+-                tracing::warn!("[TP] {coin} TP kurulamadı: {e}");
+-            }
+-        }
+-        let stale_tp: Vec<String> = self
+-            .executor
+-            .tp_orders
+-            .keys()
+-            .filter(|c| !open_pos_tp.iter().any(|(p, _)| p == *c))
+-            .cloned()
+-            .collect();
+-        for c in stale_tp {
+-            self.executor.cancel_tp(&c).await;
+-        }
+-        let stale_pending_tp: Vec<String> = self
+-            .executor
+-            .pending_tp
+-            .iter()
+-            .filter(|(_, (_, ts))| (now as i64 - *ts as i64).unsigned_abs() > 600_000)
+-            .map(|(c, _)| c.clone())
+-            .collect();
+-        for c in stale_pending_tp {
+-            self.executor.pending_tp.remove(&c);
+-            tracing::warn!("[TP] {c}: hedef TP 10 dk geçti, dolum gelmedi — temizlendi");
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// ACİL DÜZLEŞTİRME (kill-switch / black-swan): tüm pozisyonları kapat.
+     pub async fn flatten_positions(&mut self) {
+         // Tüm açık pozisyonların exit_reason'ını EmergencyFlatten olarak işaretle
+         for attr in self.entry_attr.values_mut() {
+             attr.exit_reason = Some(ExitReason::EmergencyFlatten);
+         }

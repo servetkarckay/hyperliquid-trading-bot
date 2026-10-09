@@ -1,0 +1,21 @@
+--- engine/src/epoch.rs
++++ replace >= with < in LearningEpoch::record_completed_trade
+@@ -123,17 +123,17 @@
+     /// **GERÇEK kapanış** kaydı — bir pozisyon kapandıysa tam bir kez
+     /// çağrılır (sinyal/emir/fill sayısı DEĞİL).
+     ///
+     /// Dönüş: (yeni sayaç, bu kayıtla `ready_for_live`'a geçildi mi).
+     /// 100'e ulaşınca kalıcı duruma yazılır; **otomatik canlı emir YOK**.
+     pub fn record_completed_trade(&mut self) -> (u64, bool) {
+         self.completed_trade_count += 1;
+         let mut ready_now = false;
+-        if self.completed_trade_count >= LEARNING_TRADES_TARGET
++        if self.completed_trade_count < /* ~ changed by cargo-mutants ~ */ LEARNING_TRADES_TARGET
+             && self.status == EpochStatus::Learning
+         {
+             self.status = EpochStatus::ReadyForLive;
+             ready_now = true;
+         }
+         (self.completed_trade_count, ready_now)
+     }
+ 

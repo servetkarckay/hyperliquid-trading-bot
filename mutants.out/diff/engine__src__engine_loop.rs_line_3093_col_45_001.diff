@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with * in Engine::run_cycle
+@@ -3085,17 +3085,17 @@
+                     // ("could not immediately match against any resting orders").
+                     // TEK MALİYET MODELİ: band `CostModel::execution_band_bps`
+                     // (EV kapısıyla AYNI fee+slippage+spread). Ad-hoc ±%0.5/±%0.2
+                     // ikinci maliyet modeli KALDIRILDI; operasyonel taban
+                     // (EXECUTION_BAND_FLOOR_BPS=50 bps) ince testnet defterinde
+                     // dolum kaçışını önler (ince defterde agresif fiyat).
+                     let spread_bps_band = {
+                         let mid2 = if e.ask > 0.0 && e.bid > 0.0 {
+-                            (e.ask + e.bid) / 2.0
++                            (e.ask + e.bid) * /* ~ changed by cargo-mutants ~ */ 2.0
+                         } else {
+                             0.0
+                         };
+                         if mid2 > 0.0 {
+                             (e.ask - e.bid).abs() / mid2 * 10_000.0
+                         } else {
+                             0.0
+                         }

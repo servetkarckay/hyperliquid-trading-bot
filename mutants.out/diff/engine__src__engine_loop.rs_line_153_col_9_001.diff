@@ -1,0 +1,31 @@
+--- engine/src/engine_loop.rs
++++ replace EntryAttr::set_analytical_tp -> Option<f64> with Some(0.0)
+@@ -145,27 +145,17 @@
+ impl EntryAttr {
+     /// Analytical TP'yi **gerçek dolumdan** türetip kaydeder .
+     ///
+     /// `entry_px` = gerçek dolum (REST `entryPx`), `risk_px` = gerçek SL
+     /// mesafesi (stop entry'ye göre taşınır → kayma risk mesafesini değiştirmez).
+     /// Geçersiz giriş/risk'te `None` döner ve mevcut hedef **silinmez**
+     /// (yarım kalan veri, sıfırlanmış veriden daha dürüst).
+     pub fn set_analytical_tp(&mut self, cfg: &AllocationConfig) -> Option<f64> {
+-        let dir = if self.side.is_buy() {
+-            Dir::Long
+-        } else {
+-            Dir::Short
+-        };
+-        let tp = cfg.tp_from_entry(dir, self.entry_px, self.risk_px);
+-        if tp <= 0.0 || !tp.is_finite() {
+-            return None;
+-        }
+-        self.tp_px = Some(tp);
+-        Some(tp)
++        Some(0.0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// REST `entryPx` (gerçek dolum) geldiğinde `entry_px`'i düzeltir ve
+     /// analytical TP'yi **yeniden** türetir. `true` = kayma ölçülmüş ve
+     /// TP yeni doluma göre kalibre edilmiştir.
+     ///
+     /// Kayma ölçülür (`[SL] … kayma=%`) çünkü aynı değer stop fiyatını ve
+     /// R-çarpanını da besler. TP yeniden türetilmezse yanlış fiyatta kalır:

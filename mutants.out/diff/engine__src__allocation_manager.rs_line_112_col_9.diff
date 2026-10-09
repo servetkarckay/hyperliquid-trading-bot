@@ -1,0 +1,31 @@
+--- engine/src/allocation_manager.rs
++++ replace AllocationConfig::tp_from_entry -> f64 with 0.0
+@@ -104,27 +104,17 @@
+     /// TP asla girişin arkasına (zarar tarafına) düşmez.
+     ///
+     /// ✅ `TakeProfit` **GERÇEK kapanış kaynağıdır** giriş dolumunda
+     /// `pending_tp` mesafesiyle reduce-only TP trigger borsaya asılır
+     /// (`Executor::ensure_tp`), TP fill oid eşleşmesiyle
+     /// `exit_reason=TakeProfit` atanır. Bu formül hem plan hem gerçek emrin
+     /// TEK kaynağıdır.
+     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
+-        let risk = risk_mesafesi.abs();
+-        if entry_eff.is_nan() || risk.is_nan() || entry_eff <= 0.0 || risk <= 0.0 {
+-            return entry_eff;
+-        }
+-        let min_tp_dist = risk * 2.0;
+-        let tp_dist = ((self.tp_atr_mult / self.sl_atr_mult) * risk).max(min_tp_dist);
+-        match dir {
+-            Dir::Long => entry_eff + tp_dist,
+-            Dir::Short => entry_eff - tp_dist,
+-            Dir::Neutral => entry_eff,
+-        }
++        0.0 /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl Default for AllocationConfig {
+     fn default() -> Self {
+         Self {
+             top_n: 5,
+             max_correlation: 0.70,

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::budget_usd
+@@ -1604,17 +1604,17 @@
+     }
+ 
+     /// Bütçe: portfolyo-paylı f* (yetersiz stat yarımda sabit)
+     /// `ENGINE_BUDGET_USD` verilirse bakiye-oranı hesabı atlanır (küçük
+     /// hesaplarda $72 bütçe $10 eşiğine takılıp hattı boğuyordu).
+     fn budget_usd(&self) -> f64 {
+         if let Ok(v) = std::env::var("ENGINE_BUDGET_USD") {
+             if let Ok(x) = v.parse::<f64>() {
+-                if x > 0.0 {
++                if x >= /* ~ changed by cargo-mutants ~ */ 0.0 {
+                     return x.min(self.equity);
+                 }
+             }
+         }
+         let w = self.tracker.ensemble_weights();
+         let entered: Vec<&f64> = w
+             .values()
+             .filter(|x| **x > 0.040 && **x != crate::track::NEUTRAL_WEIGHT)

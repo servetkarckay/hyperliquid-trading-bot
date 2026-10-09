@@ -1,0 +1,35 @@
+--- engine/src/engine_loop.rs
++++ replace plan_tp_order -> Option<TpOrderPlan> with None
+@@ -583,31 +583,17 @@
+ /// Short için `tp_px >= entry` → `None`.
+ pub fn plan_tp_order(
+     has_position: bool,
+     is_long: bool,
+     entry_eff: f64,
+     sz: f64,
+     tp_px: f64,
+ ) -> Option<TpOrderPlan> {
+-    if !has_position
+-        || sz.is_nan()
+-        || tp_px.is_nan()
+-        || sz <= 0.0
+-        || tp_px <= 0.0
+-        || !tp_side_ok(is_long, tp_px, entry_eff)
+-    {
+-        return None;
+-    }
+-    Some(TpOrderPlan {
+-        is_long,
+-        sz,
+-        tp_px,
+-        reduce_only: true,
+-    })
++    None /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// G — **GİRİŞ FİYAT KONTRATI**: Long: SL < entry < TP (hepsi pozitif);
+ /// Short: TP < entry < SL. Bozuk kontrat (negatif fiyat — örn. ATR girişin
+ /// 50 katı) → emir ÜRETİLMEZ.
+ pub fn entry_contract_ok(is_long: bool, entry_eff: f64, sl_px: f64, tp_px: f64) -> bool {
+     if entry_eff <= 0.0 || !entry_eff.is_finite() {
+         return false;

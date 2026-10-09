@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::ingest_step
+@@ -1094,17 +1094,17 @@
+             }
+             data::StreamEvent::Ctx { .. } => self.ctx.apply_stream(&ev),
+             data::StreamEvent::Book {
+                 coin, bids, asks, ..
+             } => {
+                 if let (Some(b), Some(a)) = (bids.first(), asks.first()) {
+                     let bsz: f64 = bids.iter().take(5).map(|x| x.1).sum();
+                     let asz: f64 = asks.iter().take(5).map(|x| x.1).sum();
+-                    let imb = if bsz + asz > 0.0 {
++                    let imb = if bsz + asz < /* ~ changed by cargo-mutants ~ */ 0.0 {
+                         (bsz - asz) / (bsz + asz)
+                     } else {
+                         0.0
+                     };
+                     self.books.insert(coin, (b.0, a.0, imb));
+                 }
+             }
+             data::StreamEvent::Mids { .. } => {}

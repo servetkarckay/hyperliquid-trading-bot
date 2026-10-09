@@ -1,0 +1,83 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::write_ws_exit_record with ()
+@@ -1316,79 +1316,17 @@
+     fn write_ws_exit_record(
+         &mut self,
+         coin: &str,
+         attr: &EntryAttr,
+         r: f64,
+         excursion: Option<(f64, f64, TrailState)>,
+         pnl_resolved: bool,
+     ) {
+-        let exit_reason = attr.exit_reason.unwrap_or(ExitReason::Unknown);
+-        let exit_str = match exit_reason {
+-            ExitReason::StopLoss => "stop",
+-            ExitReason::TakeProfit => "tp",
+-            ExitReason::TrailingStop => "trailing",
+-            ExitReason::SignalExit => "signal",
+-            ExitReason::EmergencyFlatten => "emergency",
+-            ExitReason::Manual => "manual",
+-            ExitReason::Unknown => "unknown",
+-        };
+-        let (fav, adv, t) = match excursion {
+-            Some(x) => x,
+-            None => (
+-                0.0,
+-                0.0,
+-                TrailState {
+-                    is_long: attr.side.is_buy(),
+-                    entry_px: attr.entry_px,
+-                    atr_px: 0.0,
+-                    peak_px: attr.entry_px,
+-                    worst_px: attr.entry_px,
+-                    last_px: attr.entry_px,
+-                    cur_sl_px: attr.entry_px,
+-                    opened_ms: attr.ts,
+-                    ratchets: 0,
+-                },
+-            ),
+-        };
+-        let exit = TradeExit {
+-            ts: hyperliquid_api::now_ms(),
+-            epoch: self.epoch.clone(),
+-            git: self.git_sha.clone(),
+-            coin: coin.to_string(),
+-            side: if attr.side.is_buy() { "LONG" } else { "SHORT" }.into(),
+-            strategies: attr.voters.clone(),
+-            mfe_r: fav,
+-            mae_r: adv,
+-            dur_sn: (hyperliquid_api::now_ms() - t.opened_ms) / 1000,
+-            ratchet: t.ratchets,
+-            cikis: exit_str.into(),
+-            r_kapanis: r,
+-            atr_bps: if t.atr_px > 0.0 {
+-                t.atr_px / t.entry_px * 10_000.0
+-            } else {
+-                0.0
+-            },
+-            k: self.loop_cfg.trail_atr_k,
+-        };
+-        if let Err(e) = write_trade_exit(&self.trade_exits_path, &exit) {
+-            tracing::warn!("trade-exit yazılamadı ({coin}): {e}");
+-        }
+-        // TRADE-LEVEL PORTFOLIO OUTCOME — kapanan pozisyon başına TAM OLARAK
+-        // BİR kayıt (attribution'dan AYRI kalıcılık; aynı track_state.json'a
+-        // yazılır — ikinci gerçeklik kaynağı YOK). PnL çözülmeyen kapanış
+-        // fake 0R YAZMAZ. Bu nokta finalize başına TEK kez koşar (duplicate
+-        // fill tid_seen ile üst akışta düşer).
+-        if pnl_resolved {
+-            self.tracker
+-                .record_portfolio_outcome(hyperliquid_api::now_ms(), r);
+-        }
+-        // TradeExit yazıldıysa bu GERÇEK kapanış sayılır (birebir
+-        // tutarlılık: sayaç ↔ trade_exits.jsonl).
+-        self.record_completed_trade();
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **CANLI** ağırlık snapshot'ını yükle — `origin:"live"` zorunlu.
+     ///
+     /// Beklenen şema (bu, `tracker_weights_json`'ın **yazdığı** format):
+     /// ```json
+     /// { "origin":"live", "ts":…, "weights": { "Wyckoff": 0.83, "Dow Teorisi": 0.25 } }
+     /// ```

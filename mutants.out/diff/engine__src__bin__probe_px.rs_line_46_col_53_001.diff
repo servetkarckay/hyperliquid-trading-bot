@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_px.rs
++++ replace * with / in main
+@@ -38,17 +38,17 @@
+             .map(|(i, m)| (i as u32, m.szDecimals, m.maxLeverage))
+             .ok_or_else(|| anyhow::anyhow!("bilinmeyen coin: {coin2}"))?;
+         let mids2 = info.all_mids().await?;
+         let m2: f64 = mids2
+             .get(&coin2)
+             .and_then(|m| m.parse().ok())
+             .unwrap_or(0.0);
+         // alışta, mid'in %5 ALTINDA → asılı kalır (post-only değil, GTC)
+-        let px2 = hyperliquid_api::round_px_wire(m2 * 0.95);
++        let px2 = hyperliquid_api::round_px_wire(m2 / /* ~ changed by cargo-mutants ~ */ 0.95);
+         let sz2 = hyperliquid_api::round_sz_up(20.0 / m2, sd2);
+         let ex2 = Exchange::new(cfg)?;
+         let st = ex2.place_limit(a2, true, sz2, px2, Tif::Gtc, false).await?;
+         println!(
+             "REST {coin2}: px={px2:.6} sz={sz2} oid={:?} err={:?}",
+             st.resting_oid(0),
+             st.error(0)
+         );

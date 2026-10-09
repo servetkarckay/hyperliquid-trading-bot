@@ -1,0 +1,23 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::record_outcome_r with ()
+@@ -471,19 +471,17 @@
+     pub fn record_outcomes(&mut self, strategy_names: Vec<String>, ts: u64, win: bool) {
+         self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
+     }
+ 
+     /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).
+     pub fn record_outcome_r(&mut self, strategy_names: Vec<String>, ts: u64, r: f64) {
+         // STRATEJİ ATTRIBUTION — değişmedi: her voter kendi stats'ına
+         // aynı gerçek kapanışı alır (strategy-performance kaynağı).
+-        for name in strategy_names {
+-            self.stats.entry(name).or_default().record_r(ts, r);
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// GERÇEK PORTFOLIO OUTCOME — kapanan pozisyon başına TAM OLARAK BİR
+     /// kayıt (attribution'dan AYRI storage): Kelly/portfolio istatistik
+     /// kaynağı. WS close + REST recon aynı kapanışı İKİNCİ kez
+     /// kaydetmemeli (tid dedup üst akışta garanti; burada çağrı noktası
+     /// finalize başına tektir).
+     pub fn record_portfolio_outcome(&mut self, ts: u64, r: f64) {

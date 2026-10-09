@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ delete ! in main
+@@ -176,17 +176,17 @@
+         "BOT başlıyor: coins={} bar_interval={interval}s döngü={cycle_secs}s hist_bars={hist_bars} min_score={min_score}",
+         coins.len()
+     );
+     // ================= TRAILING STOP =================
+     // Varsayılan AÇIK. `TRAIL_ON=0` ile kapatılır (sabit stop davranışı).
+     // `TRAIL_ATR_K` stop mesafesinin ATR çarpanı; giriş stop'u ile aynı
+     // tutulur (1.5) ki trailing ilk adımda zaten gevşetmesin.
+     let trail_on = std::env::var("TRAIL_ON")
+-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
++        .map(|v| v != "0" &&  /* ~ changed by cargo-mutants ~ */v.eq_ignore_ascii_case("false"))
+         .unwrap_or(true);
+     let trail_atr_k: f64 = std::env::var("TRAIL_ATR_K")
+         .ok()
+         .and_then(|v| v.parse().ok())
+         .unwrap_or(1.5);
+     let trail_min_step: f64 = std::env::var("TRAIL_MIN_STEP")
+         .ok()
+         .and_then(|v| v.parse().ok())

@@ -1,0 +1,21 @@
+--- engine/src/epoch.rs
++++ replace != with == in assert_testnet_endpoint
+@@ -61,17 +61,17 @@
+ 
+ /// TESTNET epoch'u canlı endpoint'e karşı BAŞLAMAZ (yapısal kapı).
+ ///
+ /// Kural: `environment == "testnet"` iken `NETWORK != "testnet"` veya
+ /// API url'si mainnet hostu içeriyorsa → hata. Böylece testnet modunda
+ /// canlı endpoint'e emir gitmesi **yapısal olarak** engellenir (emir
+ /// hiç atılmadan süreç durur).
+ pub fn assert_testnet_endpoint(network: &str, api_url: &str, environment: &str) -> Result<()> {
+-    if environment != "testnet" {
++    if environment == /* ~ changed by cargo-mutants ~ */ "testnet" {
+         bail!("öğrenme dönemi environment=\"{environment}\" — yalnız testnet kabul edilir");
+     }
+     if network != "testnet" {
+         bail!(
+             "TESTNET öğrenme dönemi NETWORK={network:?} ile BAŞLAMAZ — canlı hesabı korumak için \
+              süreci düşürüyorum (NETWORK=testnet yapın)"
+         );
+     }

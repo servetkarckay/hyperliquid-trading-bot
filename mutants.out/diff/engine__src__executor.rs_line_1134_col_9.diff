@@ -1,0 +1,72 @@
+--- engine/src/executor.rs
++++ replace Executor::parse_open_orders -> Vec<OpenOrderRow> with vec![]
+@@ -1126,68 +1126,17 @@
+         Ok(n)
+     }
+ 
+     /// REST'ten açık emirleri yenile (ws kopması sonrası toparlama).
+     /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.
+     /// `refresh_orders` (stop adayları) ve `refresh_open_orders_all`
+     /// (reconciliation) aynı parser'ı kullanır — yeniden yazım yok.
+     fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Vec<OpenOrderRow> {
+-        let mut rows = Vec::new();
+-        self.open_orders.clear();
+-        for o in arr {
+-            let oid = match o["oid"].as_i64() {
+-                Some(x) => x,
+-                None => continue,
+-            };
+-            let cn = o["coin"].as_str().unwrap_or("").to_string();
+-            let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
+-            let is_buy = o["side"] == "B";
+-            let px = o["limitPx"]
+-                .as_str()
+-                .and_then(|s| s.parse().ok())
+-                .unwrap_or(0.0);
+-            let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
+-            // reconciliation EMIR cloid'i üzerinden eşleşir. REST
+-            // `openOrders` cloid'i `cloid` alanında döner.
+-            let cloid = o["cloid"].as_str().map(|s| s.to_string());
+-            self.open_orders.insert(
+-                oid,
+-                OrderInfo {
+-                    oid,
+-                    asset: asset_id,
+-                    coin: cn.clone(),
+-                    is_buy,
+-                    sz: o["origSz"]
+-                        .as_str()
+-                        .and_then(|s| s.parse().ok())
+-                        .unwrap_or(0.0),
+-                    px,
+-                    tif: Tif::Gtc,
+-                    reduce_only,
+-                    ts: o["timestamp"].as_u64().unwrap_or(0),
+-                },
+-            );
+-            // satır sz'i = origSz (borsadaki gerçek lot) — cloid tuzu
+-            // tanıması (coin+px+sz+tuz deterministiktir) origSz'ye ihtiyaç duyar.
+-            let row_sz = o["origSz"]
+-                .as_str()
+-                .and_then(|s| s.parse().ok())
+-                .unwrap_or(0.0);
+-            rows.push(OpenOrderRow {
+-                coin: cn,
+-                oid,
+-                cloid,
+-                is_buy,
+-                sz: row_sz,
+-                px,
+-                reduce_only,
+-            });
+-        }
+-        rows
++        vec![] /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// TÜM dinlenen açık emirleri `(coin, oid, cloid, reduce_only, ...)`
+     /// olarak döndürür.
+     ///
+     /// Neden ayrı API: [`Self::refresh_orders`] YALNIZ reduce-only (stop)
+     /// emirleri döndürür. UNKNOWN olan **giriş** emirleri `reduce_only=false`
+     /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman

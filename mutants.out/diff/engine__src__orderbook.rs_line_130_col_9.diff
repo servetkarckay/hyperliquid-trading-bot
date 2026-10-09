@@ -1,0 +1,21 @@
+--- engine/src/orderbook.rs
++++ replace LocalBook::best_ask -> Option<LevelF> with None
+@@ -122,17 +122,17 @@
+             tracing::warn!(coin = %coin, "bos/tarafsiz book snapshot'u reddedildi");
+         }
+     }
+ 
+     pub fn best_bid(&self) -> Option<LevelF> {
+         self.bids.first().copied()
+     }
+     pub fn best_ask(&self) -> Option<LevelF> {
+-        self.asks.first().copied()
++        None /* ~ changed by cargo-mutants ~ */
+     }
+     pub fn mid(&self) -> Option<f64> {
+         Some((self.best_bid()?.px + self.best_ask()?.px) / 2.0)
+     }
+     pub fn spread_bps(&self) -> Option<f64> {
+         let (b, a) = (self.best_bid()?.px, self.best_ask()?.px);
+         if b <= 0.0 {
+             return None;

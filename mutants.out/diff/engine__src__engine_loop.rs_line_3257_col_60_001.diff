@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace | with ^ in Engine::run_cycle
+@@ -3249,17 +3249,17 @@
+                         sz: xsz,
+                         px: xpx,
+                         tif: Tif::Ioc,
+                         reduce_only: true,
+                         cloid: Some(crate::executor::make_cloid(
+                             &e.coin,
+                             xpx,
+                             xsz,
+-                            (self.n_cycles << 16) | 0x7000 | (places.len() as u64 & 0x0fff),
++                            (self.n_cycles << 16) | 0x7000 ^ /* ~ changed by cargo-mutants ~ */ (places.len() as u64 & 0x0fff),
+                         )),
+                     });
+                 }
+                 Action::Cancel(oid) => {
+                     cancels.push((asset, oid));
+                 }
+                 _ => {}
+             }

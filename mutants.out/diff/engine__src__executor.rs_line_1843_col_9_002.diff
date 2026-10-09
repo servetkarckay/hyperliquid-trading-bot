@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace Executor::take_closed_pnl -> Option<f64> with Some(1.0)
+@@ -1835,17 +1835,17 @@
+     /// kapanış kaydının gerçek kaynağı bu haritadır.
+     pub fn closed_pnl_coins(&self) -> Vec<String> {
+         self.closed_pnl.keys().cloned().collect()
+     }
+ 
+     /// Coin'in biriken gerçekleşmiş PnL'ini oku ve SİL (pozisyon kapanınca
+     /// R-çarpanı bir kez hesaplanmalı; ikinci kez sayılırsa bias olur).
+     pub fn take_closed_pnl(&mut self, coin: &str) -> Option<f64> {
+-        self.closed_pnl.remove(coin)
++        Some(1.0) /* ~ changed by cargo-mutants ~ */
+     }
+     pub fn fill_count(&self) -> usize {
+         self.fill_count
+     }
+     pub fn user(&self) -> &str {
+         &self.user
+     }
+ }

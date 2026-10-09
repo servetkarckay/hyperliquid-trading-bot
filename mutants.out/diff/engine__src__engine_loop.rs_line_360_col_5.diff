@@ -1,0 +1,30 @@
+--- engine/src/engine_loop.rs
++++ replace risk_lock_positions_left -> String with String::new()
+@@ -352,26 +352,17 @@
+ pub(crate) fn place_arm_gate(
+     coin_pre_pending: bool,
+     m: Option<&crate::state_machine::PositionStateMachine>,
+ ) -> bool {
+     m.is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending()) && coin_pre_pending
+ }
+ 
+ pub fn risk_lock_positions_left(left: &[(String, f64)]) -> String {
+-    if left.is_empty() {
+-        return "[]".to_string();
+-    }
+-    format!(
+-        "[{}]",
+-        left.iter()
+-            .map(|(c, sz)| format!("({c},{sz},{})", if *sz > 0.0 { "long" } else { "short" }))
+-            .collect::<Vec<_>>()
+-            .join(",")
+-    )
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Canlı dosyada **OLMAYAN** stratejiler (sessiz "nötr" yok — açıkça raporlanır).
+ ///
+ /// Üretimde `Engine::load_live_weights` ve testler aynı fonksiyonu çağırır.
+ pub fn missing_live_strategies(
+     strategy_names: &[String],
+     live: &HashMap<String, f64>,

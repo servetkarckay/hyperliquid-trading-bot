@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::count -> usize with 0
+@@ -720,17 +720,17 @@
+                 _ => NEUTRAL_WEIGHT,
+             };
+             raw.insert(name.clone(), w);
+         }
+         raw
+     }
+ 
+     pub fn count(&self) -> usize {
+-        self.stats.len()
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Özet: (n, win_rate, profit_factor, ΣR)
+     pub fn summary(&self, name: &str) -> (usize, f64, f64, f64) {
+         match self.stats.get(name) {
+             None => (0, 0.0, 0.0, 0.0),
+             Some(st) => (
+                 st.rs.len(),

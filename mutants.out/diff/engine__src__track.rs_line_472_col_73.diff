@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ delete - in StrategyTracker::record_outcomes
+@@ -464,17 +464,17 @@
+             self.max_consecutive_losses.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+             f(self.mfe_r, 2),
+             f(self.mae_r, 2),
+         )
+     }
+ }
+ impl StrategyTracker {
+     pub fn record_outcomes(&mut self, strategy_names: Vec<String>, ts: u64, win: bool) {
+-        self.record_outcome_r(strategy_names, ts, if win { 1.0 } else { -1.0 });
++        self.record_outcome_r(strategy_names, ts, if win { 1.0 } else {  /* ~ changed by cargo-mutants ~ */1.0 });
+     }
+ 
+     /// Gerçek R-çarpanıyla kayıt (PF tabanlı terfi/ceza için).
+     pub fn record_outcome_r(&mut self, strategy_names: Vec<String>, ts: u64, r: f64) {
+         // STRATEJİ ATTRIBUTION — değişmedi: her voter kendi stats'ına
+         // aynı gerçek kapanışı alır (strategy-performance kaynağı).
+         for name in strategy_names {
+             self.stats.entry(name).or_default().record_r(ts, r);

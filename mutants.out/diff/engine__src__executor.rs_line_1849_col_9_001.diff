@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace Executor::user -> &str with "xyzzy"
+@@ -1841,17 +1841,17 @@
+     /// R-çarpanı bir kez hesaplanmalı; ikinci kez sayılırsa bias olur).
+     pub fn take_closed_pnl(&mut self, coin: &str) -> Option<f64> {
+         self.closed_pnl.remove(coin)
+     }
+     pub fn fill_count(&self) -> usize {
+         self.fill_count
+     }
+     pub fn user(&self) -> &str {
+-        &self.user
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// `openOrders` REST taramasından bir satır. UNKNOWN reconciliation
+ /// `cloid` üzerinden eşleşir — `coin` tek başına YETMEZ (aynı coin için
+ /// birden fazla giriş emri olabilir).
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct OpenOrderRow {

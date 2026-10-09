@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace == with != in Executor::coin_of
+@@ -2095,17 +2095,17 @@
+             .map(|(_, (_, d, _))| *d)
+             .unwrap_or(0)
+     }
+ 
+     /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+     pub fn coin_of(&self, asset: u32) -> String {
+         self.assets
+             .iter()
+-            .find(|(_, (a, _, _))| *a == asset)
++            .find(|(_, (a, _, _))| *a != /* ~ changed by cargo-mutants ~ */ asset)
+             .map(|(c, _)| c.clone())
+             .unwrap_or_else(|| format!("#{asset}"))
+     }
+ }
+ 
+ impl Executor {
+     /// açık emir akışı: (coin, oid) — watchdog usage
+     pub fn open_orders_view(&self) -> Vec<(String, i64)> {

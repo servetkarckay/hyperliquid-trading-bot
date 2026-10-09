@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace < with == in Executor::batch_execute
+@@ -1997,17 +1997,17 @@
+                 // daha İNCE ızgaraya geç (0-lot fiyat asla gönderilmez).
+                 let raw_px = places[i].px;
+                 let mut dec = self.px_dec_for(wires[i].asset);
+                 let mut tries = 0;
+                 while err
+                     .as_deref()
+                     .map(|e| e.contains("invalid price"))
+                     .unwrap_or(false)
+-                    && tries < 6
++                    && tries == /* ~ changed by cargo-mutants ~ */ 6
+                 {
+                     let nxt = dec.saturating_sub(1);
+                     let cand = hyperliquid_api::round_px_for(raw_px, nxt);
+                     if cand <= 0.0 {
+                         // bu ızgara fiyatı temsil edemiyor -> daha ince ızgara
+                         if dec >= 8 {
+                             break;
+                         }

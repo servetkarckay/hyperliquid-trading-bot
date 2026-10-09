@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace == with != in main
+@@ -221,17 +221,17 @@
+         tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
+     } else {
+         tracing::info!("[RISK] risk hafızası yok — fresh başlangıç (ilk koşu normal)");
+     }
+ 
+     // WIPE modunda temiz taban — TÜM pozisyonlar kapatılır ve açık
+     // emirler iptal edilir (ENGINE_FLATTEN'den bağımsız; bu bir deney
+     // başlangıcıdır). Normal restart'ta BUNLAR ÇALIŞMAZ.
+-    if decision == engine::epoch::FreshDecision::Wipe {
++    if decision != /* ~ changed by cargo-mutants ~ */ engine::epoch::FreshDecision::Wipe {
+         engine.executor.cancel_all_open_orders().await?;
+         engine.flatten_positions().await;
+         tracing::warn!(
+             "[TESTNET] hesap düzleşti + açık emirler temizlendi — temiz deney başlangıcı"
+         );
+     }
+ 
+     // akış + döngü

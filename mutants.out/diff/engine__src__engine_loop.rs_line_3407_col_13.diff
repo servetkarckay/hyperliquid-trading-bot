@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete field portfolio_win_rate from struct MarketInput expression in Engine::strategy_status_lines
+@@ -3399,17 +3399,17 @@
+     /// D — **strateji durum raporu** (`ACTIVE` / `AUXILIARY` / `DATA-MISSING`).
+     ///
+     /// Her strateji KENDİ durumunu bildirir (`Strategy::status`); temsili
+     /// girdi yalnız gerçek motor state'inden doldurulur (iv yok, portfolio
+     /// istatistiği tracker'dan). SAHTE veri üretilmez.
+     pub fn strategy_status_lines(&self) -> String {
+         let input = MarketInput {
+             iv: None,
+-            portfolio_win_rate: self.tracker.portfolio_stats().map(|s| s.0),
++             /* ~ changed by cargo-mutants ~ */
+             portfolio_wl_ratio: self.tracker.portfolio_stats().map(|s| s.1),
+             ..Default::default()
+         };
+         self.strategies
+             .iter()
+             .map(|s| format!("{:<24} {}", s.name(), s.status(&input).label()))
+             .collect::<Vec<_>>()
+             .join(

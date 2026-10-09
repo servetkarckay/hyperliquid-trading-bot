@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::sync_exchange_sl
+@@ -1872,17 +1872,17 @@
+         // `run_cycle` bitmeden işlenemediği için (ana döngü `await` sırasında
+         // `oe_rx`'i okumaz) hedef, dolumdan önce temizlenip SL hiç kurulmazdı.
+         // Bu yüzden 10 dakikadan bayat kayıtlar temizlenir.
+         let now = hyperliquid_api::now_ms();
+         let stale_pending: Vec<String> = self
+             .executor
+             .pending_sl
+             .iter()
+-            .filter(|(_, (_, ts))| (now as i64 - *ts as i64).unsigned_abs() > 600_000)
++            .filter(|(_, (_, ts))| (now as i64 - *ts as i64).unsigned_abs() < /* ~ changed by cargo-mutants ~ */ 600_000)
+             .map(|(c, _)| c.clone())
+             .collect();
+         for c in stale_pending {
+             self.executor.pending_sl.remove(&c);
+             tracing::warn!("[SL] {c}: hedef stop 10 dk geçti, dolum gelmedi — temizlendi");
+         }
+ 
+         // ============ F — GERÇEK TP EXECUTION (sync) ============

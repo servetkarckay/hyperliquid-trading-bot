@@ -1,0 +1,31 @@
+--- engine/src/engine_loop.rs
++++ replace entry_contract_ok -> bool with true
+@@ -604,27 +604,17 @@
+         reduce_only: true,
+     })
+ }
+ 
+ /// G — **GİRİŞ FİYAT KONTRATI**: Long: SL < entry < TP (hepsi pozitif);
+ /// Short: TP < entry < SL. Bozuk kontrat (negatif fiyat — örn. ATR girişin
+ /// 50 katı) → emir ÜRETİLMEZ.
+ pub fn entry_contract_ok(is_long: bool, entry_eff: f64, sl_px: f64, tp_px: f64) -> bool {
+-    if entry_eff <= 0.0 || !entry_eff.is_finite() {
+-        return false;
+-    }
+-    if sl_px <= 0.0 || !sl_px.is_finite() || tp_px <= 0.0 || !tp_px.is_finite() {
+-        return false;
+-    }
+-    if is_long {
+-        sl_px < entry_eff && tp_px > entry_eff
+-    } else {
+-        tp_px < entry_eff && sl_px > entry_eff
+-    }
++    true /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Kâr tarafı kapısı: long → TP > entry, short → TP < entry.
+ pub fn tp_side_ok(is_long: bool, tp_px: f64, entry_eff: f64) -> bool {
+     if tp_px.is_nan() || entry_eff.is_nan() || tp_px <= 0.0 || entry_eff <= 0.0 {
+         return false;
+     }
+     if is_long {

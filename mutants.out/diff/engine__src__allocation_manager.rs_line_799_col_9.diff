@@ -1,0 +1,25 @@
+--- engine/src/allocation_manager.rs
++++ replace CostModel::from_env -> Self with Default::default()
+@@ -791,21 +791,17 @@
+ impl Default for CostModel {
+     fn default() -> Self {
+         Self::from_env()
+     }
+ }
+ 
+ impl CostModel {
+     pub fn from_env() -> Self {
+-        Self {
+-            fee_bps: env_f64("EV_TAKER_FEE_BPS", DEFAULT_TAKER_FEE_BPS),
+-            base_slip_bps: env_f64("EV_SLIPPAGE_BPS", DEFAULT_SLIPPAGE_BPS),
+-            ev_min_dist_bps: env_f64("EV_MIN_DIST_BPS", 75.0),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Testler için deterministik kurucu (ENV'e bakmaz).
+     pub fn new(fee_bps: f64, base_slip_bps: f64, ev_min_dist_bps: f64) -> Self {
+         Self {
+             fee_bps,
+             base_slip_bps,
+             ev_min_dist_bps,

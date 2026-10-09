@@ -1,0 +1,470 @@
+
+*** engine/src/allocation_manager.rs:233:9: replace AllocationManager::allocate -> Vec<Candidate> with vec![Default::default()]
+
+*** mutation diff:
+--- engine/src/allocation_manager.rs
++++ replace AllocationManager::allocate -> Vec<Candidate> with vec![Default::default()]
+@@ -225,250 +225,17 @@
+     /// `corr_at`: (i,j) coin çifti getiri korelasyonu (math::portfolio'dan)
+     pub fn allocate(
+         &self,
+         votes: Vec<Vote>,
+         corr_at: &dyn Fn(&str, &str) -> f64,
+         budget_usd: f64,
+     ) -> Vec<Candidate> {
+         // 1) adaylar: yönlü + min conviction
+-        let n_votes_in = votes.len();
+-        let mut cands: Vec<Candidate> = votes
+-            .into_iter()
+-            .filter(|v| v.dir != Dir::Neutral && v.mid > 0.0)
+-            .map(|v| {
+-                // oy ağırlıkları: açık keşif kümesi vs kurulmuş
+-                // BAĞIMSIZLIK DÜZELTMESİ: genişlik ödülü HAM oy sayısına değil,
+-                // oyların BİLGİ KÜMESİ sayısına göre — aynı kümeden 5 strateji =
+-                // aynı faktörün 5 formülasyonu = 1 bağımsız kanıt.
+-                let n_voters_raw = v.voters.len();
+-                let distinct_clusters = {
+-                    let mut cs = std::collections::HashSet::new();
+-                    for n in &v.voters {
+-                        cs.insert(strategy::info_cluster(n));
+-                    }
+-                    cs.len()
+-                };
+-                let mut kw_sum = 0.0;
+-                let mut n_explore = 0usize;
+-                for n in &v.voters {
+-                    let w = v.weights.get(n).copied().unwrap_or(0.0);
+-                    if v.explore.contains(n) {
+-                        n_explore += 1;
+-                    }
+-                    kw_sum += w;
+-                }
+-                let kw = if n_voters_raw == 0 {
+-                    0.0
+-                } else {
+-                    kw_sum / n_voters_raw as f64
+-                };
+-                let explorer_share = n_explore as f64 / n_voters_raw.max(1) as f64;
+-                let w_total: f64 = v.weights.values().sum::<f64>();
+-                let mut conv =
+-                    self.conviction(kw_sum, w_total, distinct_clusters, v.atr_pct, v.score.abs());
+-                // karıştırıcılık cezası: keşif oyu inandırıcılığı düşürür
+-                conv *= 1.0 - self.cfg.explore_discount * explorer_share;
+-                let atr_usd = v.atr_pct * v.mid;
+-                let (sl, tp) = self.sl_tp(v.dir, v.mid, atr_usd);
+-                Candidate {
+-                    coin: v.coin,
+-                    dir: v.dir,
+-                    score: v.score,
+-                    votes: v.voters.len(),
+-                    kelly_weight: kw,
+-                    atr_pct: v.atr_pct,
+-                    conviction: conv,
+-                    allocated_usd: 0.0,
+-                    voters: v.voters.clone(),
+-                    sl_px: sl,
+-                    tp_px: tp,
+-                    explorer_share,
+-                    capped: false,
+-                }
+-            })
+-            // Keşif adayı (yalnız keşif oyu): conviction taban ağırlığı yüzünden
+-            // matematiksel olarak min_conviction'ın altında kalır — göreli kapı
+-            // burada işe yaramaz. Risk zaten sermaye tavanıyla (mutlak $ + bütçe
+-            // payı) sınırlı, bu yüzden sadece "pozitif sinyal" yeterli.
+-            .collect();
+-        // teşhis: filtre BÜTÜN adayları eliyorsa en güçlü 5 oyun sayılarıyla
+-        // raporla (kapı eşiğine ne kadar uzakta?)
+-        let mut pre = cands.clone();
+-        pre.sort_by(|a, b| b.conviction.total_cmp(&a.conviction));
+-        cands.retain(|c| {
+-            c.conviction >= self.cfg.min_conviction
+-                || (c.explorer_share >= 1.0 && c.conviction > 0.0)
+-        });
+-        tracing::info!(
+-            "[AL] oy={} pre={} kapı_sonrası={} min={:.2} ilk3={:?}",
+-            n_votes_in,
+-            pre.len(),
+-            cands.len(),
+-            self.cfg.min_conviction,
+-            pre.iter()
+-                .take(3)
+-                .map(|c| format!(
+-                    "{}:conv={:.3} sh={:.1}",
+-                    c.coin, c.conviction, c.explorer_share
+-                ))
+-                .collect::<Vec<_>>()
+-        );
+-        if cands.is_empty() && !pre.is_empty() {
+-            tracing::info!(
+-                "aday yok (min_conviction={:.3}): {}",
+-                self.cfg.min_conviction,
+-                pre.iter()
+-                    .take(5)
+-                    .map(|c| format!(
+-                        "{} sh={:.1} w={:.3} conv={:.4}",
+-                        c.coin, c.explorer_share, c.kelly_weight, c.conviction
+-                    ))
+-                    .collect::<Vec<_>>()
+-                    .join(" | ")
+-            );
+-        }
+-
+-        // 2) sırala (korelasyonlu mega-bahis ilk elemede zayıf olan gider)
+-        cands.sort_by(|a, b| b.conviction.total_cmp(&a.conviction));
+-
+-        // 3) KORELASYON FİLTRESİ: açgözlü seçim; benzer yüksek → katılmaz
+-        let mut picked: Vec<Candidate> = Vec::with_capacity(self.cfg.top_n);
+-        for c in cands {
+-            if picked.len() >= self.cfg.top_n {
+-                break;
+-            }
+-            let too_close = picked
+-                .iter()
+-                .any(|p| corr_at(&p.coin, &c.coin).abs() > self.cfg.max_correlation);
+-            if !too_close {
+-                picked.push(c);
+-            }
+-        }
+-
+-        // 4) TAHSİS: conviction kare ağırlıklı (fractional Kelly dilimleri)
+-        let sq: Vec<f64> = picked
+-            .iter()
+-            .map(|c| (c.conviction * c.conviction).max(1e-6))
+-            .collect();
+-        let total: f64 = sq.iter().sum();
+-        for (i, c) in picked.iter_mut().enumerate() {
+-            c.allocated_usd = budget_usd * sq[i] / total.max(1e-6);
+-        }
+-        // 5) KEŞİF SERMAYE TAVANI: bütçenin `explore_cap_frac`'i kadarını geçemez;
+-        // saf keşif (tek başına keşif oyu) aday ayrıca mutlak tavana tabidir.
+-        // Keşif havuzu borsanın $10 min notional'ına DÜŞEMEZ: bütçe $72 iken
+-        // %5 = $3.60 → keşif adayı her zaman elenir, şerit matematiksel olarak
+-        // ölü kalır.
+-        //
+-        // Taban POZİSYON BAŞINADIR: havuz iki keşifçiye bölününce her biri
+-        // $7.50'ye düşüyor ve ikisi de eleniyordu (Not: "2 aday $10 altı
+-        // tahsisle elendi"). Bu yüzden taban = keşifçi sayısı × $10.
+-        let n_explore = picked.iter().filter(|c| c.explorer_share > 0.0).count();
+-        // HAVUZ MATEMATİĞİ: iki kısıt birlikte tutarlıdır —
+-        // `explore_budget ≤ bütçe×%5` ve taban ≤ havuz; finanse edilebilir
+-        // keşifçi = min(N, ⌊havuz/$10⌋). (bütçe×%5 havuzun tamamını aşamaz;
+-        // taban havuzu aşamaz — 13 keşifçi × $10 = $130 gibi %5'i aşan
+-        // taban matematiksel olarak finansman dışıdır.)
+-        // Havuz asla %5'i aşmaz, taban asla havuzu aşamaz.
+-        let cap_usd = budget_usd * self.cfg.explore_cap_frac;
+-        let max_funded = if cap_usd >= MIN_NOTIONAL_USD {
+-            ((cap_usd / MIN_NOTIONAL_USD).floor() as usize).max(1)
+-        } else {
+-            0
+-        };
+-        if n_explore > 0 && max_funded == 0 {
+-            tracing::warn!(
+-                "[AL] keşif havuzu ${cap_usd:.2} < ${MIN_NOTIONAL_USD:.0} — bu döngü keşif şeridi KAPALI"
+-            );
+-        }
+-        // Havuz = %5 tavanı (sert üst sınır). Taban ($10/kişi) havuzu
+-        // AŞAMAZ: `max_funded` bunu zaten garanti eder, çünkü
+-        // max_funded = ⌊havuz/$10⌋ → havuz ≥ max_funded × $10.
+-        let explore_budget = cap_usd;
+-        let mut used = 0.0;
+-        let mut funded = 0usize;
+-        for c in picked.iter_mut() {
+-            if c.explorer_share <= 0.0 {
+-                continue;
+-            }
+-            if funded >= max_funded {
+-                // tavan doldu: kalan keşifçiler ELENİR (sessizce değil, loglanır)
+-                c.allocated_usd = 0.0;
+-                c.capped = true;
+-                tracing::info!(
+-                    "[AL] keşif tavanı dolu — {max_funded} kişi × ${MIN_NOTIONAL_USD:.0} = ${:.2} (havuz), artık yer yok — {} elendi",
+-                    max_funded as f64 * MIN_NOTIONAL_USD,
+-                    c.coin
+-                );
+-                continue;
+-            }
+-            let cap = if c.explorer_share >= 1.0 {
+-                self.cfg.explore_max_usd.min(explore_budget)
+-            } else {
+-                explore_budget
+-            };
+-            let allow = (explore_budget - used).max(0.0);
+-            let cap = cap.min(allow);
+-            if cap < MIN_NOTIONAL_USD {
+-                c.allocated_usd = 0.0;
+-                c.capped = true;
+-                tracing::info!("[AL] keşif {} elendi (havuz kaldı ${cap:.2})", c.coin);
+-                continue;
+-            }
+-            if cap < c.allocated_usd {
+-                c.allocated_usd = cap;
+-                c.capped = true;
+-            }
+-            used += c.allocated_usd;
+-            funded += 1;
+-        }
+-        // 5b) keşifçilere eşit taban payı: havuz N kişiye bölününce de her biri
+-        // $10'un üstünde kalmalı (yukarıdaki taban tek başına yetmiyor:
+-        // conviction farkı yüzünden biri $3 alıp eleniyordu).
+-        // YALNIZCA finanse edilenler arasında bölüşülür.
+-        let n_ex = funded.max(1);
+-        let min_each = explore_budget / n_ex as f64;
+-        if n_ex > 1 {
+-            for c in picked
+-                .iter_mut()
+-                .filter(|c| c.explorer_share > 0.0 && c.allocated_usd > 0.0)
+-            {
+-                if c.allocated_usd < min_each {
+-                    c.allocated_usd = min_each;
+-                    c.capped = true;
+-                }
+-            }
+-        }
+-        // 5c) POZİSYON BAŞINA TAVAN: tahsis risk kapısıyla aynı tavanı
+-        // aşamaz. Aksi halde tek güçlü aday TÜM bütçeyi alıyor
+-        // (aksi halde tek güçlü aday coin-tavanına takılır ve sinyal
+-        // tahsis alamadan boşa gider).
+-        for c in picked.iter_mut() {
+-            if c.allocated_usd > self.cfg.max_position_usd {
+-                tracing::info!(
+-                    "[AL] {} tahsisi ${:.0} → ${:.0} (pozisyon tavanı)",
+-                    c.coin,
+-                    c.allocated_usd,
+-                    self.cfg.max_position_usd
+-                );
+-                c.allocated_usd = self.cfg.max_position_usd;
+-                c.capped = true;
+-            }
+-        }
+-        // 6) MİN NOTİONAL: borsanın $10 altı emri reddi — sıfır/ mikro tahsisleri ele
+-        let before = picked.len();
+-        picked.retain(|c| c.allocated_usd >= MIN_NOTIONAL_USD);
+-        if before != picked.len() {
+-            tracing::info!(
+-                "[AL] {} aday $10 altı tahsisle elendi",
+-                before - picked.len()
+-            );
+-        }
+-        picked
++        vec![Default::default()] /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
+     fn w(v: &[(&str, f64)]) -> HashMap<String, f64> {
+
+
+*** /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --no-run --verbose --package=engine@0.1.0
+       Fresh unicode-ident v1.0.26
+       Fresh proc-macro2 v1.0.107
+       Fresh quote v1.0.47
+       Fresh cfg-if v1.0.5
+       Fresh syn v3.0.6
+       Fresh libc v0.2.189
+       Fresh zeroize v1.9.0
+       Fresh synstructure v0.14.0
+       Fresh subtle v2.6.1
+       Fresh smallvec v1.16.2
+       Fresh getrandom v0.2.17
+       Fresh pin-project-lite v0.2.17
+       Fresh zerofrom-derive v0.1.8
+       Fresh version_check v0.9.5
+       Fresh zerofrom v0.1.8
+       Fresh yoke-derive v0.8.4
+       Fresh bytes v1.12.1
+       Fresh stable_deref_trait v1.2.1
+       Fresh futures-core v0.3.34
+       Fresh yoke v0.8.3
+       Fresh typenum v1.20.1
+       Fresh zerovec-derive v0.11.6
+       Fresh generic-array v0.14.9
+       Fresh itoa v1.0.18
+       Fresh scopeguard v1.2.0
+       Fresh futures-sink v0.3.34
+       Fresh const-oid v0.9.6
+       Fresh lock_api v0.4.14
+       Fresh parking_lot_core v0.9.12
+       Fresh zerovec v0.11.8
+       Fresh errno v0.3.14
+       Fresh displaydoc v0.2.7
+       Fresh memchr v2.8.3
+       Fresh signal-hook-registry v1.4.8
+       Fresh parking_lot v0.12.5
+       Fresh socket2 v0.6.5
+       Fresh tokio-macros v2.7.2
+       Fresh mio v1.2.3
+       Fresh shlex v2.0.1
+       Fresh once_cell v1.21.4
+       Fresh find-msvc-tools v0.1.14
+       Fresh tokio v1.53.1
+       Fresh cc v1.5.1
+       Fresh futures-channel v0.3.34
+       Fresh tinystr v0.8.4
+       Fresh block-buffer v0.10.4
+       Fresh crypto-common v0.1.6
+       Fresh rand_core v0.6.4
+       Fresh futures-macro v0.3.34
+       Fresh syn v2.0.119
+       Fresh litemap v0.8.3
+       Fresh writeable v0.6.4
+       Fresh futures-io v0.3.34
+       Fresh futures-task v0.3.34
+       Fresh slab v0.4.12
+       Fresh icu_locale_core v2.3.0
+       Fresh futures-util v0.3.34
+       Fresh digest v0.10.7
+       Fresh zerotrie v0.2.5
+       Fresh potential_utf v0.1.6
+       Fresh http v1.5.0
+       Fresh rustls-pki-types v1.15.1
+       Fresh utf8_iter v1.0.4
+       Fresh icu_collections v2.3.0
+       Fresh icu_provider v2.3.1
+       Fresh untrusted v0.9.0
+       Fresh percent-encoding v2.3.2
+       Fresh autocfg v1.5.1
+       Fresh ring v0.17.14
+       Fresh icu_normalizer_data v2.3.0
+       Fresh icu_properties_data v2.3.0
+       Fresh icu_normalizer v2.3.0
+       Fresh icu_properties v2.3.0
+       Fresh rustls-webpki v0.103.15
+       Fresh serde_core v1.0.229
+       Fresh httparse v1.10.1
+       Fresh http-body v1.1.0
+       Fresh tracing-core v0.1.36
+       Fresh rustls v0.23.45
+       Fresh num-traits v0.2.19
+       Fresh idna_adapter v1.2.2
+       Fresh form_urlencoded v1.2.2
+       Fresh tracing-attributes v0.1.31
+       Fresh der v0.7.10
+       Fresh serde_derive v1.0.229
+       Fresh log v0.4.34
+       Fresh try-lock v0.2.5
+       Fresh tower-service v0.3.3
+       Fresh serde v1.0.229
+       Fresh want v0.3.1
+       Fresh tracing v0.1.44
+       Fresh zerocopy v0.8.59
+       Fresh idna v1.1.0
+       Fresh webpki-roots v1.0.9
+       Fresh cpufeatures v0.2.17
+       Fresh equivalent v1.0.2
+       Fresh atomic-waker v1.1.2
+       Fresh hashbrown v0.17.1
+       Fresh indexmap v2.14.2
+       Fresh hyper v1.11.1
+       Fresh url v2.5.8
+       Fresh ppv-lite86 v0.2.21
+       Fresh zmij v1.0.23
+       Fresh spki v0.7.3
+       Fresh tokio-rustls v0.26.6
+       Fresh ff v0.13.1
+       Fresh sync_wrapper v1.0.2
+       Fresh ipnet v2.12.2
+       Fresh base64 v0.23.1
+       Fresh tower-layer v0.3.3
+       Fresh regex-syntax v0.8.11
+       Fresh ryu v1.0.23
+       Fresh base16ct v0.2.0
+       Fresh tower v0.5.3
+       Fresh sec1 v0.7.3
+       Fresh regex-automata v0.4.18
+       Fresh hyper-util v0.1.21
+       Fresh group v0.13.0
+       Fresh serde_json v1.0.151
+       Fresh rand_chacha v0.3.1
+       Fresh pkcs8 v0.10.2
+       Fresh hmac v0.12.1
+       Fresh thiserror-impl v1.0.69
+       Fresh crypto-bigint v0.5.5
+       Fresh bitflags v2.13.2
+       Fresh lazy_static v1.5.0
+       Fresh sharded-slab v0.1.7
+       Fresh tower-http v0.6.11
+       Fresh thiserror v1.0.69
+       Fresh elliptic-curve v0.13.8
+       Fresh rfc6979 v0.4.0
+       Fresh rand v0.8.8
+       Fresh hyper-rustls v0.27.10
+       Fresh anyhow v1.0.104
+       Fresh matchers v0.2.0
+       Fresh serde_urlencoded v0.7.1
+       Fresh sha1 v0.10.7
+       Fresh tracing-log v0.2.0
+       Fresh http-body-util v0.1.5
+       Fresh signature v2.2.0
+       Fresh thread_local v1.1.10
+       Fresh byteorder v1.5.0
+       Fresh base64 v0.22.1
+       Fresh data-encoding v2.11.1
+       Fresh nu-ansi-term v0.50.3
+       Fresh utf-8 v0.7.6
+       Fresh tracing-subscriber v0.3.23
+       Fresh tungstenite v0.24.0
+       Fresh reqwest v0.12.28
+       Fresh ecdsa v0.16.9
+       Fresh crunchy v0.2.4
+       Fresh rustversion v1.0.23
+       Fresh sha2 v0.10.9
+       Fresh webpki-roots v0.26.11
+       Fresh num-integer v0.1.47
+       Fresh rmp v0.8.15
+       Fresh futures-executor v0.3.34
+       Fresh tokio-util v0.7.19
+       Fresh fastrand v2.5.0
+       Fresh either v1.18.0
+       Fresh dotenvy v0.15.7
+       Fresh combine v4.6.8
+       Fresh backon v1.6.0
+       Fresh utils v0.1.0 (/root/hyperliquid/utils)
+       Fresh itertools v0.13.0
+       Fresh num-bigint v0.4.8
+       Fresh rmp-serde v1.3.1
+       Fresh futures v0.3.34
+       Fresh arc-swap v1.9.2
+       Fresh k256 v0.13.4
+       Fresh tokio-tungstenite v0.24.0
+       Fresh tiny-keccak v2.0.2
+       Fresh async-trait v0.1.92
+       Fresh hex v0.4.3
+       Fresh math v0.1.0 (/root/hyperliquid/math)
+       Fresh redis v0.27.6
+       Fresh hyperliquid-api v0.1.0 (/root/hyperliquid/api)
+       Fresh iana-time-zone v0.1.65
+       Fresh data v0.1.0 (/root/hyperliquid/data)
+       Fresh chrono v0.4.45
+       Fresh strategy v0.1.0 (/root/hyperliquid/strategy)
+       Dirty engine v0.1.0 (/root/hyperliquid/engine): the file `engine/src/allocation_manager.rs` has changed (1791465109.425327958s, 15s after last build at 1791465094.087027652s)
+   Compiling engine v0.1.0 (/root/hyperliquid/engine)
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=83e1abeae746962d -C extra-filename=-5f82f619233d9186 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=91161187e1b14dde -C extra-filename=-0f99fb4ac83a7c8a --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rmeta --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rmeta --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rmeta --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rmeta --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rmeta --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rmeta --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rmeta --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rmeta --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rmeta --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rmeta --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rmeta --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rmeta --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rmeta -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+error[E0277]: the trait bound `Candidate: Default` is not satisfied
+   --> engine/src/allocation_manager.rs:233:14
+    |
+233 |         vec![Default::default()] /* ~ changed by cargo-mutants ~ */
+    |              ^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `Default` is not implemented for `Candidate`
+   --> engine/src/allocation_manager.rs:28:1
+    |
+ 28 | pub struct Candidate {
+    | ^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `engine` (lib) due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=91161187e1b14dde -C extra-filename=-0f99fb4ac83a7c8a --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rmeta --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rmeta --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rmeta --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rmeta --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rmeta --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rmeta --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rmeta --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rmeta --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rmeta --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rmeta --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rmeta --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rmeta --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rmeta -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out` (exit status: 1)
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `engine` (lib test) due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=83e1abeae746962d -C extra-filename=-5f82f619233d9186 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out` (exit status: 1)
+
+*** result: Failure(101)

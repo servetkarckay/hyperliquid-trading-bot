@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ replace < with <= in Executor::ensure_tp
+@@ -820,17 +820,17 @@
+         sz: f64,
+         tp_px: f64,
+     ) -> Result<bool> {
+         if self.tp_orders.contains_key(coin) {
+             return Ok(false); // zaten var — körlemesine duplicate YOK
+         }
+         if let Some(&ts) = self.tp_armed_at.get(coin) {
+             let age = (hyperliquid_api::now_ms() as i64 - ts as i64).unsigned_abs();
+-            if age < TS_GRACE_MS {
++            if age <= /* ~ changed by cargo-mutants ~ */ TS_GRACE_MS {
+                 return Ok(false);
+             }
+         }
+         let Some((asset, szd)) = self.cached_asset(coin) else {
+             bail!("{coin}: asset cache'te yok");
+         };
+         let qty = hyperliquid_api::round_sz_up(sz.abs(), szd);
+         if qty.is_nan() || tp_px.is_nan() || qty <= 0.0 || tp_px <= 0.0 {

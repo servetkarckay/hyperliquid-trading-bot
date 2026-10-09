@@ -1,0 +1,21 @@
+--- engine/src/bin/trail_report.rs
++++ replace < with <= in main
+@@ -123,17 +123,17 @@
+         *by_exit.entry(e.cikis.clone()).or_default() += 1;
+     }
+     println!("\n--- Çıkış Sebebi ---");
+     for (k, v) in by_exit {
+         println!("  {}: {} ({:.1}%)", k, v, v as f64 / n as f64 * 100.0);
+     }
+ 
+     // 3) İlk-stop oranı (MFE < 0.5R)
+-    let first_stop = exits.iter().filter(|e| e.mfe_r < 0.5).count();
++    let first_stop = exits.iter().filter(|e| e.mfe_r <= /* ~ changed by cargo-mutants ~ */ 0.5).count();
+     println!("\n--- İlk-Stop Oranı (MFE<0.5R) ---");
+     println!(
+         "  {}/{} = {:.1}%",
+         first_stop,
+         n,
+         first_stop as f64 / n as f64 * 100.0
+     );
+ 

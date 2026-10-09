@@ -1,0 +1,32 @@
+--- engine/src/executor.rs
++++ replace Executor::save_px_dec -> std::io::Result<()> with Ok(())
+@@ -544,28 +544,17 @@
+         self.px_dec.get(&asset).copied().unwrap_or(6)
+     }
+ 
+     /// Öğrenilen tick hassasiyetini diske yaz (restart'ta unutulmasın).
+     /// Coin'in tick'i meta'da YOK; "invalid price" reddedince ızgara yürüyerek
+     /// bulunuyor. Öğrenme süreci her açılışta tekrar "invalid price" faturası
+     /// demek (kısmen `open_orders` taramasından da yeniden kuruluyor).
+     pub fn save_px_dec(&self, path: &str) -> std::io::Result<()> {
+-        if self.px_dec.is_empty() {
+-            return Ok(());
+-        }
+-        let map: std::collections::BTreeMap<String, u32> = self
+-            .assets
+-            .iter()
+-            .filter_map(|(name, (a, _, _))| self.px_dec.get(a).map(|d| (name.clone(), *d)))
+-            .collect();
+-        if let Some(p) = std::path::Path::new(path).parent() {
+-            let _ = std::fs::create_dir_all(p);
+-        }
+-        std::fs::write(path, serde_json::to_string(&map).unwrap_or_default())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn load_px_dec(&mut self, path: &str) {
+         let Ok(s) = std::fs::read_to_string(path) else {
+             return;
+         };
+         let Ok(map) = serde_json::from_str::<HashMap<String, u32>>(&s) else {
+             return;

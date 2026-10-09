@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace weights_json -> String with String::new()
+@@ -930,17 +930,17 @@
+     s.push_str("  }\n}");
+     s
+ }
+ 
+ /// Backtest çıktısı formatı — **üretilmez**; yalnız reddedilmek üzere
+ /// tanımlı ki `origin` alanı yanlışlıkla taşınmasın.
+ #[deprecated(note = "backtest kaldırıldı; canlı formatı `live_weights_json`")]
+ pub fn weights_json(weights: &HashMap<String, f64>) -> String {
+-    live_weights_json(weights, 0)
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// **[LEARN] tablosu**: strateji | w | n | win% | PF | ΣR.
+ pub fn learn_table(tracker: &StrategyTracker, weights: &HashMap<String, f64>) -> String {
+     let mut names: Vec<&String> = weights.keys().collect();
+     names.sort();
+     let mut lines = Vec::with_capacity(names.len());
+     for k in names {

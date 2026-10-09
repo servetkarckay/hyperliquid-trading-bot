@@ -1,0 +1,22 @@
+--- engine/src/track.rs
++++ replace Health::reset with ()
+@@ -1528,18 +1528,17 @@
+     }
+ 
+     /// Giriş emri serbest mi?
+     pub fn entries_allowed(&self) -> bool {
+         self.mode == Mode::Normal
+     }
+ 
+     pub fn reset(&mut self) {
+-        self.mode = Mode::Normal;
+-        self.crit_streak = 0;
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[cfg(test)]
+ mod health_tests {
+     use super::*;
+ 
+     #[test]

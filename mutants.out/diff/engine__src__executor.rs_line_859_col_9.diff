@@ -1,0 +1,29 @@
+--- engine/src/executor.rs
++++ replace Executor::cancel_tp with ()
+@@ -851,25 +851,17 @@
+                 Ok(true)
+             }
+             Err(e) => Err(e),
+         }
+     }
+ 
+     /// TP trigger'ı iptal et (pozisyon kapanınca / SL dolduğunda).
+     pub async fn cancel_tp(&mut self, coin: &str) {
+-        self.tp_armed_at.remove(coin);
+-        if let Some(oid) = self.tp_orders.remove(coin) {
+-            // İptal sonucu YUTULMAZ: başarısız iptal = borsada KALINTI emir
+-            // riski (yeni pozisyon eski TP'yle çakışabilir) — görünür olmalı.
+-            match self.cancel(coin, oid).await {
+-                Ok(_) => tracing::info!("[TP] {coin} borsa TP iptal edildi oid={oid}"),
+-                Err(e) => tracing::warn!("[TP] {coin} borsa TP İPTAL EDİLEMEDİ oid={oid}: {e} — kalıntı emir riski, manuel kontrol"),
+-            }
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **TP OID GERİ YÜKLEME** (restart / WS kopması sonrası).
+     ///
+     /// Kural (körlemesine duplicate etme yasağı): `openOrders` taramasında
+     /// AYNI coin için reduce-only + fiyatı `tp_px` ile ±%0.1 eşleşen emir
+     /// varsa → **bizim TP'mizdir**, oid kaydedilir, YENİ EMİR ATILMAZ.
+     /// Eşleşmeyen reduce-only emirlere dokunulmaz (SL taraması onları

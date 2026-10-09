@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::apply_effective_weights
+@@ -1548,17 +1548,17 @@
+             let tracker = &self.tracker;
+             merge_effective_weights(
+                 &tracker_w,
+                 &self.live_weights,
+                 &|name: &str| tracker.evidence_n(name),
+                 self.learn_pol.min_n,
+             )
+         };
+-        if !merged.unknown.is_empty() {
++        if  /* ~ changed by cargo-mutants ~ */merged.unknown.is_empty() {
+             tracing::warn!(
+                 "[LEARN] canlı ağırlık dosyasındaki {} strateji registry'de YOK → ensemble'a girmedi: {:?}",
+                 merged.unknown.len(),
+                 merged.unknown
+             );
+         }
+ 
+         let n_w = merged.ensemble_weights.len();

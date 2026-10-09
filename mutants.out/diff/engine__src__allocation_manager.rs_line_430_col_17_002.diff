@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace > with >= in AllocationManager::allocate
+@@ -422,17 +422,17 @@
+             funded += 1;
+         }
+         // 5b) keşifçilere eşit taban payı: havuz N kişiye bölününce de her biri
+         // $10'un üstünde kalmalı (yukarıdaki taban tek başına yetmiyor:
+         // conviction farkı yüzünden biri $3 alıp eleniyordu).
+         // YALNIZCA finanse edilenler arasında bölüşülür.
+         let n_ex = funded.max(1);
+         let min_each = explore_budget / n_ex as f64;
+-        if n_ex > 1 {
++        if n_ex >= /* ~ changed by cargo-mutants ~ */ 1 {
+             for c in picked
+                 .iter_mut()
+                 .filter(|c| c.explorer_share > 0.0 && c.allocated_usd > 0.0)
+             {
+                 if c.allocated_usd < min_each {
+                     c.allocated_usd = min_each;
+                     c.capped = true;
+                 }

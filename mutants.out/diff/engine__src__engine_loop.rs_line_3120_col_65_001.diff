@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace * with / in Engine::run_cycle
+@@ -3112,17 +3112,17 @@
+                         }
+                         _ => {
+                             let f = band / 10_000.0;
+                             let raw = if side_sm.is_buy() {
+                                 entry_px * (1.0 + f)
+                             } else {
+                                 entry_px * (1.0 - f)
+                             };
+-                            raw.clamp(entry_px * 0.97, entry_px * 1.03)
++                            raw.clamp(entry_px * 0.97, entry_px / /* ~ changed by cargo-mutants ~ */ 1.03)
+                         }
+                     };
+                     // Fiyat kapısı: kitap/closure olmayan yeni listelenmiş
+                     // coinlerde entry_px=0 çıkıyor ve borsa "Order has invalid
+                     // price." diyordu. Sıfır/NaN fiyatla emir ATILMAZ.
+                     if ord_px <= 1e-9 || !ord_px.is_finite() {
+                         tracing::warn!("{}: fiyat geçersiz ({:.8}) — emir atlandı", e.coin, ord_px);
+                         if let Some(m) = self.machines.get_mut(&e.coin) {

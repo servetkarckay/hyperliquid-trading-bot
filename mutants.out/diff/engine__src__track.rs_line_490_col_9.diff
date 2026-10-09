@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::record_portfolio_outcome with ()
+@@ -482,17 +482,17 @@
+     }
+ 
+     /// GERÇEK PORTFOLIO OUTCOME — kapanan pozisyon başına TAM OLARAK BİR
+     /// kayıt (attribution'dan AYRI storage): Kelly/portfolio istatistik
+     /// kaynağı. WS close + REST recon aynı kapanışı İKİNCİ kez
+     /// kaydetmemeli (tid dedup üst akışta garanti; burada çağrı noktası
+     /// finalize başına tektir).
+     pub fn record_portfolio_outcome(&mut self, ts: u64, r: f64) {
+-        self.portfolio.record(ts, r);
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn portfolio_n(&self) -> usize {
+         self.portfolio.n()
+     }
+ 
+     /// **Kanıt sayacı** (`n`) — stratejinin gerçek canlı işlem sayısı.
+     ///

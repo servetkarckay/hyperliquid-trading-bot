@@ -1,0 +1,44 @@
+--- engine/src/epoch.rs
++++ replace LearningEpoch::load -> anyhow::Result<Option<Self>> with Ok(None)
+@@ -157,40 +157,17 @@
+     /// - `Ok(None)`     → dosya YOK (ilk çalıştırma; çağıran yeni dönem açar),
+     /// - `Err(…)`       → dosya VAR ama BOZUK/uyumsuz: çağıran AÇILIŞI
+     ///   DURDURMAK ZORUNDA — sessizce yeni epoch açmak işlem sayacını
+     ///   0'a sıfırlar (persistence açığı).
+     ///
+     /// Doğrulamalar: JSON parse + şema alanları (environment yalnız
+     /// "testnet" — canlı ortam kaydı bu build'de geçersiz).
+     pub fn load(path: &str) -> anyhow::Result<Option<Self>> {
+-        let txt = match std::fs::read_to_string(path) {
+-            Ok(t) => t,
+-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+-            Err(e) => anyhow::bail!("öğrenme dönemi dosyası okunamadı ({path}): {e}"),
+-        };
+-        let e: LearningEpoch = serde_json::from_str(&txt).map_err(|err| {
+-            anyhow::anyhow!(
+-                "öğrenme dönemi dosyası BOZUK ({path}): {err} — sayaç sıfırlamasın diye                  açılış durduruldu; dosyayı onarın (atomik yazım zaten tmp+rename)"
+-            )
+-        })?;
+-        if e.environment != "testnet" {
+-            anyhow::bail!(
+-                "öğrenme dönemi dosyası environment=\"{}\" — yalnız \"testnet\" geçerli ({path})",
+-                e.environment
+-            );
+-        }
+-        if e.completed_trade_count < e.starting_trade_count {
+-            anyhow::bail!(
+-                "öğrenme dönemi dosyası tutarsız: completed={} < starting={} ({path})",
+-                e.completed_trade_count,
+-                e.starting_trade_count
+-            );
+-        }
+-        Ok(Some(e))
++        Ok(None) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
+     /// Kapanan pozisyon 1 trade sayılır; açık pozisyon sayılmaz (sayaç

@@ -1,0 +1,102 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 1.0)]), HashSet::from_iter([String::new()]), vec![])
+@@ -521,98 +521,17 @@
+         &self,
+         names: &[String],
+         pol: &LearnPolicy,
+     ) -> (
+         HashMap<String, f64>,
+         std::collections::HashSet<String>,
+         Vec<ExploreEvent>,
+     ) {
+-        let mut out: HashMap<String, f64> = HashMap::new();
+-        let mut explorers: std::collections::HashSet<String> = std::collections::HashSet::new();
+-        let mut events: Vec<ExploreEvent> = Vec::new();
+-        let mut all: Vec<String> = names.to_vec();
+-        // diskten yüklenmiş ama listede olmayan strateji varsa onu da izle
+-        for k in self.stats.keys() {
+-            if !all.contains(k) {
+-                all.push(k.clone());
+-            }
+-        }
+-        all.sort();
+-
+-        for name in all {
+-            let n = self.stats.get(&name).map(|x| x.rs.len()).unwrap_or(0);
+-            let wr = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.win_rate(0))
+-                .unwrap_or(0.0);
+-            let pf = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.profit_factor())
+-                .unwrap_or(0.0);
+-            let sum_r: f64 = self
+-                .stats
+-                .get(&name)
+-                .map(|x| x.rs.iter().sum())
+-                .unwrap_or(0.0);
+-
+-            // nötr cold-start: kanıt yok → 1.0
+-            if pol.frozen(n) {
+-                out.insert(name.clone(), COLD_START_WEIGHT);
+-                if n < pol.full_n {
+-                    explorers.insert(name);
+-                }
+-                continue;
+-            }
+-
+-            // f* = p − (1−p)/b, b = 1.8 varsayılan pay
+-            let f = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.kelly(DEFAULT_PAYOFF, pol.min_n))
+-                .unwrap_or(0.0);
+-            // nötr=1.0 çevresinde normalize: f* oranı 1.0'a göre
+-            let to = if pol.full(n) && wr < 0.35 {
+-                // tam kural: kanıt var ve berbat → SUSTUR
+-                0.0
+-            } else if f <= 0.0 {
+-                WEIGHT_CLAMP_LO
+-            } else {
+-                // f* ∈ (0, ~1]; 1.0'a bölerek nötre göre ölçekliyoruz.
+-                // f*=0.5 → w=0.5×KELLY_SCALE...
+-                (1.0 + f).clamp(WEIGHT_CLAMP_LO, WEIGHT_CLAMP_HI)
+-            };
+-            let to = if pol.full(n) && wr < 0.35 { 0.0 } else { to };
+-            if n < pol.full_n {
+-                explorers.insert(name.clone());
+-            }
+-            // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
+-            if (to - COLD_START_WEIGHT).abs() > 1e-9 {
+-                events.push(ExploreEvent {
+-                    strategy: name.clone(),
+-                    verdict: if to == 0.0 {
+-                        ExploreVerdict::Demote
+-                    } else if f > 0.0 && to > COLD_START_WEIGHT {
+-                        ExploreVerdict::Promote
+-                    } else {
+-                        ExploreVerdict::Hold
+-                    },
+-                    from: COLD_START_WEIGHT,
+-                    to,
+-                    trades: n as u64,
+-                    win_rate: wr,
+-                    profit_factor: pf,
+-                });
+-                let _ = sum_r;
+-            }
+-            out.insert(name, to);
+-        }
+-        (out, explorers, events)
++        (HashMap::from_iter([(String::new(), 1.0)]), HashSet::from_iter([String::new()]), vec![]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **KEŞİF KUYRUĞU**: veri açlığı olan stratejiler.
+     ///
+     /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
+     /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
+     /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
+     ///

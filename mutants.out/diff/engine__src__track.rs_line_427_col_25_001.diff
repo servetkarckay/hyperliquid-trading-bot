@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace / with * in PerformanceMetrics::from_rs
+@@ -419,17 +419,17 @@
+             } else {
+                 streak = 0;
+             }
+         }
+         Self {
+             trades: rs.len(),
+             win_rate: Some(wins.len() as f64 / rs.len() as f64),
+             profit_factor: Some(if loss_sum > 0.0 {
+-                win_sum / loss_sum
++                win_sum * /* ~ changed by cargo-mutants ~ */ loss_sum
+             } else if win_sum > 0.0 {
+                 10.0
+             } else {
+                 0.0
+             }),
+             expectancy_r: Some(rs.iter().sum::<f64>() / rs.len() as f64),
+             avg_win_r: if wins.is_empty() {
+                 None

@@ -1,0 +1,25 @@
+--- engine/src/executor.rs
++++ replace Executor::coin_of -> String with "xyzzy".into()
+@@ -2093,21 +2093,17 @@
+             .iter()
+             .find(|(_, (a, _, _))| *a == asset)
+             .map(|(_, (_, d, _))| *d)
+             .unwrap_or(0)
+     }
+ 
+     /// asset id -> coin. Bilinmiyse `#<id>` (log'da kaybolmasin diye).
+     pub fn coin_of(&self, asset: u32) -> String {
+-        self.assets
+-            .iter()
+-            .find(|(_, (a, _, _))| *a == asset)
+-            .map(|(c, _)| c.clone())
+-            .unwrap_or_else(|| format!("#{asset}"))
++        "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl Executor {
+     /// açık emir akışı: (coin, oid) — watchdog usage
+     pub fn open_orders_view(&self) -> Vec<(String, i64)> {
+         self.open_orders
+             .values()

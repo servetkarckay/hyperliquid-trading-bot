@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in Executor::ensure_leverage
+@@ -525,17 +525,17 @@
+             None => leverage,
+         };
+         let v = self.ex.update_leverage(asset, true, lev).await?;
+         let good = v
+             .get("response")
+             .and_then(|r| r.get("type"))
+             .and_then(|t| t.as_str())
+             .is_some_and(|t| t == "ok" || t == "default");
+-        if !good {
++        if  /* ~ changed by cargo-mutants ~ */good {
+             tracing::warn!("{coin}: kaldıraç reddedildi {v}");
+             return Ok(()); // emir yine de gitsin; emir değeri kaldıraçtan bağımsız
+         }
+         self.lev_done.insert(coin.to_string());
+         tracing::info!("{coin}: kaldıraç {lev}x cross ayarlandı");
+         Ok(())
+     }
+ 

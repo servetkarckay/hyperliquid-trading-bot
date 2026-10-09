@@ -1,0 +1,23 @@
+--- engine/src/engine_loop.rs
++++ replace apply_exit_reason with ()
+@@ -684,19 +684,17 @@
+     if was_manual_exit {
+         return Some(ExitReason::Manual);
+     }
+     None
+ }
+ 
+ /// F — exit_reason yazımı **first-write-wins** (çift atama/ezme yasağı).
+ pub fn apply_exit_reason(cur: &mut Option<ExitReason>, new: ExitReason) {
+-    if cur.is_none() {
+-        *cur = Some(new);
+-    }
++    () /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// **GİRİŞ KAPISI — gerçek runtime durumu.**
+ ///
+ /// `entries_allowed` bir **alan değildir**; `health_ok && !risk_locked`
+ /// denkleminden **türetilir**. Bu ayrım bilinçlidir: `entries_allowed`
+ /// alan olarak saklansa auto-unlock yolu `health_ok=false` iken bile
+ /// girişe izin yazabilir; türetilen değer denklemi YALNIZ gerçek

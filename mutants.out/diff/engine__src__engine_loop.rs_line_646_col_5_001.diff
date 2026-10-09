@@ -1,0 +1,24 @@
+--- engine/src/engine_loop.rs
++++ replace should_place_tp -> bool with false
+@@ -638,20 +638,17 @@
+ ///
+ /// `already_registered` (tp_orders'ta oid var) veya borsada dinleniyor
+ /// (`resting_on_exchange`) → kurma; grace süresi dolmadıysa → kurma.
+ pub fn should_place_tp(
+     already_registered: bool,
+     resting_on_exchange: bool,
+     armed_recently: bool,
+ ) -> bool {
+-    if already_registered || resting_on_exchange || armed_recently {
+-        return false;
+-    }
+-    true
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// F — **ÇIKIŞ SEBEBİ = GERÇEK KAYNAK** (saf fonksiyon, birebir eşleşme):
+ ///
+ /// | gerçek kaynak | ExitReason |
+ /// |---|---|
+ /// | TP trigger fill (`is_tp_fill`) | `TakeProfit` |
+ /// | SL trigger fill (`is_sl_fill`) | ratchet>0 → `TrailingStop`, değilse `StopLoss` |

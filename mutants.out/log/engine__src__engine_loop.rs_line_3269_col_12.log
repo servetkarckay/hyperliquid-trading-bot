@@ -1,0 +1,667 @@
+
+*** engine/src/engine_loop.rs:3269:12: delete ! in Engine::run_cycle
+
+*** mutation diff:
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::run_cycle
+@@ -3261,17 +3261,17 @@
+                 Action::Cancel(oid) => {
+                     cancels.push((asset, oid));
+                 }
+                 _ => {}
+             }
+         }
+ 
+         // ===== FAZ 4 — TEK ÇAĞRI YÜRÜT =====
+-        if !places.is_empty() || !cancels.is_empty() {
++        if  /* ~ changed by cargo-mutants ~ */places.is_empty() || !cancels.is_empty() {
+             let res = self.executor.batch_execute(&places, &cancels).await?;
+             // Exchange UNKNOWN (5xx/timeout) -> GERÇEK reconciliation.
+             // Kontrol `error` string'i üzerinden DEĞİL, `BatchOut::unknown`
+             // bayrağı üzerinden yapılır (string parsing ile kontrol yok).
+             // Eşleşme `coin`e değil `cloid`e yapılır: aynı coin için birden
+             // fazla giriş emri olabilir, coin tek başına yanlış emri bağlar.
+             for r in res.iter().filter(|r| r.unknown) {
+                 let Some(cloid) = r.cloid.clone() else {
+
+
+*** /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --no-run --verbose --package=engine@0.1.0
+       Fresh unicode-ident v1.0.26
+       Fresh proc-macro2 v1.0.107
+       Fresh quote v1.0.47
+       Fresh cfg-if v1.0.5
+       Fresh syn v3.0.6
+       Fresh libc v0.2.189
+       Fresh zeroize v1.9.0
+       Fresh synstructure v0.14.0
+       Fresh smallvec v1.16.2
+       Fresh subtle v2.6.1
+       Fresh getrandom v0.2.17
+       Fresh pin-project-lite v0.2.17
+       Fresh zerofrom-derive v0.1.8
+       Fresh version_check v0.9.5
+       Fresh zerofrom v0.1.8
+       Fresh yoke-derive v0.8.4
+       Fresh stable_deref_trait v1.2.1
+       Fresh bytes v1.12.1
+       Fresh futures-core v0.3.34
+       Fresh yoke v0.8.3
+       Fresh typenum v1.20.1
+       Fresh zerovec-derive v0.11.6
+       Fresh generic-array v0.14.9
+       Fresh const-oid v0.9.6
+       Fresh itoa v1.0.18
+       Fresh scopeguard v1.2.0
+       Fresh futures-sink v0.3.34
+       Fresh lock_api v0.4.14
+       Fresh parking_lot_core v0.9.12
+       Fresh zerovec v0.11.8
+       Fresh errno v0.3.14
+       Fresh displaydoc v0.2.7
+       Fresh memchr v2.8.3
+       Fresh signal-hook-registry v1.4.8
+       Fresh parking_lot v0.12.5
+       Fresh socket2 v0.6.5
+       Fresh tokio-macros v2.7.2
+       Fresh mio v1.2.3
+       Fresh once_cell v1.21.4
+       Fresh shlex v2.0.1
+       Fresh find-msvc-tools v0.1.14
+       Fresh tokio v1.53.1
+       Fresh cc v1.5.1
+       Fresh futures-channel v0.3.34
+       Fresh tinystr v0.8.4
+       Fresh block-buffer v0.10.4
+       Fresh crypto-common v0.1.6
+       Fresh rand_core v0.6.4
+       Fresh futures-macro v0.3.34
+       Fresh syn v2.0.119
+       Fresh futures-io v0.3.34
+       Fresh slab v0.4.12
+       Fresh futures-task v0.3.34
+       Fresh writeable v0.6.4
+       Fresh litemap v0.8.3
+       Fresh futures-util v0.3.34
+       Fresh icu_locale_core v2.3.0
+       Fresh digest v0.10.7
+       Fresh zerotrie v0.2.5
+       Fresh potential_utf v0.1.6
+       Fresh http v1.5.0
+       Fresh rustls-pki-types v1.15.1
+       Fresh utf8_iter v1.0.4
+       Fresh icu_collections v2.3.0
+       Fresh icu_provider v2.3.1
+       Fresh untrusted v0.9.0
+       Fresh autocfg v1.5.1
+       Fresh percent-encoding v2.3.2
+       Fresh ring v0.17.14
+       Fresh icu_properties_data v2.3.0
+       Fresh icu_normalizer_data v2.3.0
+       Fresh rustls-webpki v0.103.15
+       Fresh icu_normalizer v2.3.0
+       Fresh icu_properties v2.3.0
+       Fresh httparse v1.10.1
+       Fresh serde_core v1.0.229
+       Fresh http-body v1.1.0
+       Fresh tracing-core v0.1.36
+       Fresh num-traits v0.2.19
+       Fresh rustls v0.23.45
+       Fresh idna_adapter v1.2.2
+       Fresh form_urlencoded v1.2.2
+       Fresh tracing-attributes v0.1.31
+       Fresh der v0.7.10
+       Fresh serde_derive v1.0.229
+       Fresh try-lock v0.2.5
+       Fresh tower-service v0.3.3
+       Fresh log v0.4.34
+       Fresh want v0.3.1
+       Fresh serde v1.0.229
+       Fresh tracing v0.1.44
+       Fresh idna v1.1.0
+       Fresh zerocopy v0.8.59
+       Fresh webpki-roots v1.0.9
+       Fresh atomic-waker v1.1.2
+       Fresh equivalent v1.0.2
+       Fresh hashbrown v0.17.1
+       Fresh cpufeatures v0.2.17
+       Fresh hyper v1.11.1
+       Fresh indexmap v2.14.2
+       Fresh url v2.5.8
+       Fresh ppv-lite86 v0.2.21
+       Fresh zmij v1.0.23
+       Fresh spki v0.7.3
+       Fresh tokio-rustls v0.26.6
+       Fresh ff v0.13.1
+       Fresh sync_wrapper v1.0.2
+       Fresh ryu v1.0.23
+       Fresh regex-syntax v0.8.11
+       Fresh tower-layer v0.3.3
+       Fresh base16ct v0.2.0
+       Fresh ipnet v2.12.2
+       Fresh base64 v0.23.1
+       Fresh hyper-util v0.1.21
+       Fresh sec1 v0.7.3
+       Fresh tower v0.5.3
+       Fresh regex-automata v0.4.18
+       Fresh group v0.13.0
+       Fresh serde_json v1.0.151
+       Fresh rand_chacha v0.3.1
+       Fresh pkcs8 v0.10.2
+       Fresh hmac v0.12.1
+       Fresh thiserror-impl v1.0.69
+       Fresh crypto-bigint v0.5.5
+       Fresh lazy_static v1.5.0
+       Fresh bitflags v2.13.2
+       Fresh sharded-slab v0.1.7
+       Fresh tower-http v0.6.11
+       Fresh rfc6979 v0.4.0
+       Fresh thiserror v1.0.69
+       Fresh elliptic-curve v0.13.8
+       Fresh rand v0.8.8
+       Fresh anyhow v1.0.104
+       Fresh matchers v0.2.0
+       Fresh hyper-rustls v0.27.10
+       Fresh serde_urlencoded v0.7.1
+       Fresh sha1 v0.10.7
+       Fresh tracing-log v0.2.0
+       Fresh http-body-util v0.1.5
+       Fresh signature v2.2.0
+       Fresh thread_local v1.1.10
+       Fresh base64 v0.22.1
+       Fresh nu-ansi-term v0.50.3
+       Fresh byteorder v1.5.0
+       Fresh data-encoding v2.11.1
+       Fresh utf-8 v0.7.6
+       Fresh tungstenite v0.24.0
+       Fresh tracing-subscriber v0.3.23
+       Fresh reqwest v0.12.28
+       Fresh ecdsa v0.16.9
+       Fresh crunchy v0.2.4
+       Fresh rustversion v1.0.23
+       Fresh sha2 v0.10.9
+       Fresh webpki-roots v0.26.11
+       Fresh rmp v0.8.15
+       Fresh num-integer v0.1.47
+       Fresh futures-executor v0.3.34
+       Fresh tokio-util v0.7.19
+       Fresh fastrand v2.5.0
+       Fresh dotenvy v0.15.7
+       Fresh either v1.18.0
+       Fresh utils v0.1.0 (/root/hyperliquid/utils)
+       Fresh backon v1.6.0
+       Fresh itertools v0.13.0
+       Fresh combine v4.6.8
+       Fresh rmp-serde v1.3.1
+       Fresh num-bigint v0.4.8
+       Fresh futures v0.3.34
+       Fresh tokio-tungstenite v0.24.0
+       Fresh arc-swap v1.9.2
+       Fresh k256 v0.13.4
+       Fresh tiny-keccak v2.0.2
+       Fresh async-trait v0.1.92
+       Fresh hex v0.4.3
+       Fresh math v0.1.0 (/root/hyperliquid/math)
+       Fresh redis v0.27.6
+       Fresh hyperliquid-api v0.1.0 (/root/hyperliquid/api)
+       Fresh iana-time-zone v0.1.65
+       Fresh data v0.1.0 (/root/hyperliquid/data)
+       Fresh chrono v0.4.45
+       Fresh strategy v0.1.0 (/root/hyperliquid/strategy)
+       Dirty engine v0.1.0 (/root/hyperliquid/engine): the file `engine/src/engine_loop.rs` has changed (1791480498.510323378s, 15s after last build at 1791480483.725018708s)
+   Compiling engine v0.1.0 (/root/hyperliquid/engine)
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=83e1abeae746962d -C extra-filename=-5f82f619233d9186 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=91161187e1b14dde -C extra-filename=-0f99fb4ac83a7c8a --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rmeta --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rmeta --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rmeta --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rmeta --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rmeta --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rmeta --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rmeta --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rmeta --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rmeta --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rmeta --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rmeta --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rmeta --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rmeta -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name trail_report --edition=2021 engine/src/bin/trail_report.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=f27b6cc360db4534 -C extra-filename=-3cf8415053990d80 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern engine=/root/hyperliquid/target/debug/deps/libengine-0f99fb4ac83a7c8a.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name probe_smoke --edition=2021 engine/src/bin/probe_smoke.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=9383879a7d4ce637 -C extra-filename=-bbafe9c17ec4f850 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern engine=/root/hyperliquid/target/debug/deps/libengine-0f99fb4ac83a7c8a.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name bot --edition=2021 engine/src/bin/bot.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=273c2cd7bc89974c -C extra-filename=-9707795ebf3f8fc6 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern engine=/root/hyperliquid/target/debug/deps/libengine-0f99fb4ac83a7c8a.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name probe_px --edition=2021 engine/src/bin/probe_px.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=31661ccd7539260e -C extra-filename=-1bec98def73190ff --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern engine=/root/hyperliquid/target/debug/deps/libengine-0f99fb4ac83a7c8a.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.44s
+  Executable `/root/hyperliquid/target/debug/deps/engine-5f82f619233d9186`
+  Executable `/root/hyperliquid/target/debug/deps/bot-9707795ebf3f8fc6`
+  Executable `/root/hyperliquid/target/debug/deps/probe_px-1bec98def73190ff`
+  Executable `/root/hyperliquid/target/debug/deps/probe_smoke-bbafe9c17ec4f850`
+  Executable `/root/hyperliquid/target/debug/deps/trail_report-3cf8415053990d80`
+
+*** result: Success
+
+*** /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --verbose --package=engine@0.1.0
+       Fresh unicode-ident v1.0.26
+       Fresh proc-macro2 v1.0.107
+       Fresh quote v1.0.47
+       Fresh cfg-if v1.0.5
+       Fresh syn v3.0.6
+       Fresh libc v0.2.189
+       Fresh zeroize v1.9.0
+       Fresh synstructure v0.14.0
+       Fresh subtle v2.6.1
+       Fresh smallvec v1.16.2
+       Fresh getrandom v0.2.17
+       Fresh pin-project-lite v0.2.17
+       Fresh zerofrom-derive v0.1.8
+       Fresh version_check v0.9.5
+       Fresh zerofrom v0.1.8
+       Fresh yoke-derive v0.8.4
+       Fresh stable_deref_trait v1.2.1
+       Fresh futures-core v0.3.34
+       Fresh bytes v1.12.1
+       Fresh yoke v0.8.3
+       Fresh typenum v1.20.1
+       Fresh zerovec-derive v0.11.6
+       Fresh generic-array v0.14.9
+       Fresh scopeguard v1.2.0
+       Fresh futures-sink v0.3.34
+       Fresh itoa v1.0.18
+       Fresh const-oid v0.9.6
+       Fresh parking_lot_core v0.9.12
+       Fresh lock_api v0.4.14
+       Fresh zerovec v0.11.8
+       Fresh errno v0.3.14
+       Fresh displaydoc v0.2.7
+       Fresh memchr v2.8.3
+       Fresh signal-hook-registry v1.4.8
+       Fresh parking_lot v0.12.5
+       Fresh tokio-macros v2.7.2
+       Fresh socket2 v0.6.5
+       Fresh mio v1.2.3
+       Fresh shlex v2.0.1
+       Fresh once_cell v1.21.4
+       Fresh find-msvc-tools v0.1.14
+       Fresh tokio v1.53.1
+       Fresh cc v1.5.1
+       Fresh futures-channel v0.3.34
+       Fresh tinystr v0.8.4
+       Fresh crypto-common v0.1.6
+       Fresh block-buffer v0.10.4
+       Fresh rand_core v0.6.4
+       Fresh futures-macro v0.3.34
+       Fresh syn v2.0.119
+       Fresh slab v0.4.12
+       Fresh litemap v0.8.3
+       Fresh writeable v0.6.4
+       Fresh futures-io v0.3.34
+       Fresh futures-task v0.3.34
+       Fresh icu_locale_core v2.3.0
+       Fresh futures-util v0.3.34
+       Fresh digest v0.10.7
+       Fresh zerotrie v0.2.5
+       Fresh potential_utf v0.1.6
+       Fresh http v1.5.0
+       Fresh rustls-pki-types v1.15.1
+       Fresh utf8_iter v1.0.4
+       Fresh icu_collections v2.3.0
+       Fresh icu_provider v2.3.1
+       Fresh percent-encoding v2.3.2
+       Fresh autocfg v1.5.1
+       Fresh untrusted v0.9.0
+       Fresh ring v0.17.14
+       Fresh icu_properties_data v2.3.0
+       Fresh icu_normalizer_data v2.3.0
+       Fresh httparse v1.10.1
+       Fresh icu_normalizer v2.3.0
+       Fresh icu_properties v2.3.0
+       Fresh serde_core v1.0.229
+       Fresh rustls-webpki v0.103.15
+       Fresh http-body v1.1.0
+       Fresh tracing-core v0.1.36
+       Fresh rustls v0.23.45
+       Fresh num-traits v0.2.19
+       Fresh idna_adapter v1.2.2
+       Fresh form_urlencoded v1.2.2
+       Fresh tracing-attributes v0.1.31
+       Fresh der v0.7.10
+       Fresh serde_derive v1.0.229
+       Fresh log v0.4.34
+       Fresh tower-service v0.3.3
+       Fresh try-lock v0.2.5
+       Fresh want v0.3.1
+       Fresh serde v1.0.229
+       Fresh tracing v0.1.44
+       Fresh idna v1.1.0
+       Fresh zerocopy v0.8.59
+       Fresh webpki-roots v1.0.9
+       Fresh atomic-waker v1.1.2
+       Fresh cpufeatures v0.2.17
+       Fresh hashbrown v0.17.1
+       Fresh equivalent v1.0.2
+       Fresh hyper v1.11.1
+       Fresh indexmap v2.14.2
+       Fresh url v2.5.8
+       Fresh ppv-lite86 v0.2.21
+       Fresh zmij v1.0.23
+       Fresh spki v0.7.3
+       Fresh tokio-rustls v0.26.6
+       Fresh ff v0.13.1
+       Fresh sync_wrapper v1.0.2
+       Fresh base64 v0.23.1
+       Fresh ipnet v2.12.2
+       Fresh base16ct v0.2.0
+       Fresh regex-syntax v0.8.11
+       Fresh ryu v1.0.23
+       Fresh tower-layer v0.3.3
+       Fresh regex-automata v0.4.18
+       Fresh tower v0.5.3
+       Fresh sec1 v0.7.3
+       Fresh hyper-util v0.1.21
+       Fresh group v0.13.0
+       Fresh pkcs8 v0.10.2
+       Fresh rand_chacha v0.3.1
+       Fresh serde_json v1.0.151
+       Fresh hmac v0.12.1
+       Fresh crypto-bigint v0.5.5
+       Fresh thiserror-impl v1.0.69
+       Fresh bitflags v2.13.2
+       Fresh lazy_static v1.5.0
+       Fresh sharded-slab v0.1.7
+       Fresh tower-http v0.6.11
+       Fresh elliptic-curve v0.13.8
+       Fresh thiserror v1.0.69
+       Fresh rfc6979 v0.4.0
+       Fresh rand v0.8.8
+       Fresh anyhow v1.0.104
+       Fresh hyper-rustls v0.27.10
+       Fresh matchers v0.2.0
+       Fresh serde_urlencoded v0.7.1
+       Fresh sha1 v0.10.7
+       Fresh tracing-log v0.2.0
+       Fresh http-body-util v0.1.5
+       Fresh signature v2.2.0
+       Fresh thread_local v1.1.10
+       Fresh utf-8 v0.7.6
+       Fresh base64 v0.22.1
+       Fresh byteorder v1.5.0
+       Fresh nu-ansi-term v0.50.3
+       Fresh data-encoding v2.11.1
+       Fresh tracing-subscriber v0.3.23
+       Fresh tungstenite v0.24.0
+       Fresh reqwest v0.12.28
+       Fresh ecdsa v0.16.9
+       Fresh crunchy v0.2.4
+       Fresh rustversion v1.0.23
+       Fresh sha2 v0.10.9
+       Fresh webpki-roots v0.26.11
+       Fresh rmp v0.8.15
+       Fresh num-integer v0.1.47
+       Fresh futures-executor v0.3.34
+       Fresh tokio-util v0.7.19
+       Fresh fastrand v2.5.0
+       Fresh dotenvy v0.15.7
+       Fresh either v1.18.0
+       Fresh combine v4.6.8
+       Fresh backon v1.6.0
+       Fresh itertools v0.13.0
+       Fresh utils v0.1.0 (/root/hyperliquid/utils)
+       Fresh futures v0.3.34
+       Fresh num-bigint v0.4.8
+       Fresh rmp-serde v1.3.1
+       Fresh tokio-tungstenite v0.24.0
+       Fresh arc-swap v1.9.2
+       Fresh k256 v0.13.4
+       Fresh tiny-keccak v2.0.2
+       Fresh async-trait v0.1.92
+       Fresh hex v0.4.3
+       Fresh math v0.1.0 (/root/hyperliquid/math)
+       Fresh redis v0.27.6
+       Fresh hyperliquid-api v0.1.0 (/root/hyperliquid/api)
+       Fresh iana-time-zone v0.1.65
+       Fresh data v0.1.0 (/root/hyperliquid/data)
+       Fresh chrono v0.4.45
+       Fresh strategy v0.1.0 (/root/hyperliquid/strategy)
+       Fresh engine v0.1.0 (/root/hyperliquid/engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.37s
+     Running `/root/hyperliquid/target/debug/deps/engine-5f82f619233d9186`
+
+running 216 tests
+test allocation_manager::cluster_tests::ayni_kume_genislik_odulu_cogaltmaz ... ok
+test allocation_manager::ev_tests::basabaş_wr_matematiği_kapinin_gerekcesi ... ok
+test allocation_manager::ev_tests::dusuk_volatilite_skip_uretiyor ... ok
+test allocation_manager::ev_tests::ev_kapisi_clamp_degil_skip ... ok
+test allocation_manager::ev_tests::high_expected_slippage_skips_trade ... ok
+test allocation_manager::ev_tests::high_spread_skips_trade ... ok
+test allocation_manager::ev_tests::kayma_tp_kar_tarafinda_kalir ... ok
+test allocation_manager::ev_tests::spread_tek_modelden_floor_buyur ... ok
+test allocation_manager::ev_tests::taban_maliyetin_ucun_kati ... ok
+test allocation_manager::ev_tests::tp_duzeltilmis_giristen_turetilir ... ok
+test allocation_manager::ev_tests::tp_min_mesafe_iki_kati_risk ... ok
+test allocation_manager::ev_tests::ev_and_execution_use_same_cost_model ... ok
+test allocation_manager::ev_tests::yuksek_volatilite_gecer ... ok
+test allocation_manager::tests::atr_risk_marji_skoru_dusturur ... ok
+test allocation_manager::tests::kesif_tabani_havuzu_asamaz ... ok
+test allocation_manager::tests::kesif_toplam_butce_asamaz ... ok
+test allocation_manager::tests::korelasyon_bahisini_eler ... ok
+test allocation_manager::tests::kurulmus_strateji_keşif_indiriminden_etkilenmez ... ok
+test allocation_manager::tests::saf_kesif_tavana_tapilir ... ok
+test allocation_manager::tests::saf_keşif_mutlak_tavana_tapilir ... ok
+test allocation_manager::tests::tahsis_pozisyon_tavanini_asmaz ... ok
+test allocation_manager::tests::yonsuz_oylar_ele ... ok
+test allocation_manager::tests::tahsis_en_yuksek_skora_en_fazla ... ok
+test e2e_matrix::e2e_matrix_tests::s01_successful_long ... ok
+test e2e_matrix::e2e_matrix_tests::s03_rejected_entry_back_to_flat ... ok
+test e2e_matrix::e2e_matrix_tests::s04_leverage_rejection_no_entry_intent ... ok
+test e2e_matrix::e2e_matrix_tests::s05_partial_fill_uc_kademe ... ok
+test e2e_matrix::e2e_matrix_tests::s06_full_fill_tek_status ... ok
+test e2e_matrix::e2e_matrix_tests::s07_timeout_response_yok_grace_temizligi ... ok
+test e2e_matrix::e2e_matrix_tests::s08_accepted_response_lost_unknown ... ok
+test e2e_matrix::e2e_matrix_tests::s02_successful_short ... ok
+test e2e_matrix::e2e_matrix_tests::s09_unknown_eventually_filled ... ok
+test e2e_matrix::e2e_matrix_tests::s10_unknown_never_filled_bounded ... ok
+test e2e_matrix::e2e_matrix_tests::s12_stop_loss_outcome ... ok
+test e2e_matrix::e2e_matrix_tests::s13_take_profit_outcome ... ok
+test e2e_matrix::e2e_matrix_tests::s14_trailing_stop_kapanis ... ok
+test e2e_matrix::e2e_matrix_tests::s15_restart_open_position_recover ... ok
+test e2e_matrix::e2e_matrix_tests::s16_restart_pending_order_restore ... ok
+test e2e_matrix::e2e_matrix_tests::s11_duplicate_fill_pnl_tek ... ok
+test e2e_matrix::e2e_matrix_tests::s17_storage_failure_continue ... ok
+test e2e_matrix::e2e_matrix_tests::s18_max_exposure_red ... ok
+test e2e_matrix::e2e_matrix_tests::s20_malformed_data_skip_davranışı ... ok
+test e2e_matrix::e2e_matrix_tests::s19_drawdown_halt_entries_kapali ... ok
+test engine_loop::boot_order_tests::boot_temizligi_pozisyon_haritasi_ile_kosar ... ok
+test engine_loop::cycle_projection_tests::ayni_coin_mevcut_uzerine_toplanir ... ok
+test engine_loop::cycle_projection_tests::ayni_coin_position_limiti ... ok
+test engine_loop::cycle_projection_tests::cycle_ici_toplam_tavan_asilamaz ... ok
+test engine_loop::cycle_projection_tests::exit_maruziyet_eklemez ... ok
+test engine_loop::cycle_projection_tests::mevcut_pozisyon_yeni_emir_toplam_gorur ... ok
+test engine_loop::cycle_projection_tests::tam_tavan_kabul ... ok
+test engine_loop::deadlock_fix_tests::cycle_bası_bekleyen_hâlâ_bloke ... ok
+test engine_loop::deadlock_fix_tests::oid0_grace_flat_döner ... ok
+test engine_loop::deadlock_fix_tests::taze_karar_aynı_cycle_engellenmez ... ok
+test engine_loop::deadlock_fix_tests::place_kapisı_pre_pending_kullanmalı ... ok
+test engine_loop::dedupe_tp_tests::dedupe_sl_kendi_tp_orderini_iptal_etmez ... ok
+test engine_loop::exit_engine_tests::exit_signal_closes_long ... ok
+test engine_loop::exit_engine_tests::exit_signal_closes_short ... ok
+test engine_loop::exit_engine_tests::exit_signal_flat_produces_no_order ... ok
+test engine_loop::exit_engine_tests::multiple_exit_votes_are_idempotent ... ok
+test engine_loop::dedupe_tp_tests::dedupe_baglantisi_kaynak_taramasi ... ok
+test engine_loop::fill_protection_tests::open_fill_arms_entry_protection ... ok
+test engine_loop::exit_intent_wire_tests::engine_kural_fonksiyonlarina_dogrudan_cagri_yapmaz ... ok
+test engine_loop::golden_path_tests::golden_path_tam_zincir ... ok
+test engine_loop::lifecycle_contract_tests::tam_yasam_dongusu_flat_to_flat ... ok
+test engine_loop::lifecycle_contract_tests::unknown_bulunamadi_sadece_oid_sifir_pendingde_flat ... ok
+test engine_loop::live_weights_tests::evidence_n_frozen_karariyla_ayni_girdiyi_verir ... ok
+test engine_loop::live_weights_tests::live_weights_invalid_number_rejected ... ok
+test engine_loop::live_weights_tests::live_weights_json_round_trip_uyumlu ... ok
+test engine_loop::live_weights_tests::live_weights_missing_strategy_defaults_explicitly ... ok
+test engine_loop::live_weights_tests::live_weights_not_overwritten_by_cold_start ... ok
+test engine_loop::live_weights_tests::live_weights_numeric_values_really_reach_ensemble ... ok
+test engine_loop::live_weights_tests::live_weights_origin_live_required ... ok
+test engine_loop::live_weights_tests::live_weights_tracker_kaniti_ustune_yazar_bilinmeyen_raporlanir ... ok
+test engine_loop::fill_protection_tests::zero_pnl_close_does_not_arm_entry_protection ... ok
+test engine_loop::metrics_tests::metrikler_gercek_r_dizisinden_hesaplanir ... ok
+test engine_loop::mutation_hardening_tests::health_ws_recent_ve_cycle_ok_mutantlari ... ok
+test engine_loop::metrics_tests::kanit_yoksa_metrik_uydurulmaz ... ok
+test engine_loop::mutation_hardening_tests::metrik_kayip_yok_pf_sapir_10 ... ok
+test engine_loop::mutation_hardening_tests::metrik_mae_ve_passthrough ... ok
+test engine_loop::mutation_hardening_tests::metrik_sifir_islemi_tarf ... ok
+test engine_loop::mutation_hardening_tests::on_price_tick_kisa_retracement_yuksek_hane_mutant_yakalar ... ok
+test engine_loop::mutation_hardening_tests::pendingexit_oid0_statustakilamaz ... ok
+test engine_loop::mutation_hardening_tests::record_outcomes_bool_wrapper ... ok
+test engine_loop::recon_contract_tests::closing_fill_zero_pnl_is_not_open_fill ... ok
+test engine_loop::recon_contract_tests::external_close_reconciles_machine_to_flat ... ok
+test engine_loop::recon_contract_tests::sl_fill_closes_machine_to_flat ... ok
+test engine_loop::recon_contract_tests::tp_fill_closes_machine_to_flat ... ok
+test engine_loop::recon_pending_tests::duplicate_retry_emir_oncelikli ... ok
+test engine_loop::recon_pending_tests::gecikmeli_gorunurluk ... ok
+test engine_loop::recon_pending_tests::place_dalinda_recon_gate_kaynakta_var ... ok
+test engine_loop::recon_pending_tests::recon_attempts_artar ... ok
+test engine_loop::recon_path_tests::recon_dedupe_oncesi_drain_yapar ... ok
+test engine_loop::recon_pending_tests::recon_fill_inposition_gecer ... ok
+test engine_loop::recon_pending_tests::recon_state_akisi ... ok
+test engine_loop::recon_pending_tests::timeout_fill_gerceklesmis ... ok
+test engine_loop::recon_pending_tests::timeout_order_borsada_var ... ok
+test engine_loop::recon_pending_tests::timeout_order_gercekten_yok ... ok
+test engine_loop::recover_attr_tests::devralinan_pozisyona_sentetik_attr_uretilir ... ok
+test engine_loop::restart_inherit_tests::restart_sonrasi_tp_geri_yuklenir_ram_bagimsiz ... ok
+test engine_loop::restart_inherit_tests::tp_order_cloid_tuzuyla_taninir ... ok
+test engine_loop::risk_lock_tests::basarili_dongu_sayaci_sifirlar ... ok
+test engine_loop::risk_lock_tests::emin_olunamayan_hata_daha_spesifik_geceni_yener ... ok
+test engine_loop::risk_lock_tests::emin_olunamayan_hata_kritik_sayilir ... ok
+test engine_loop::risk_lock_tests::entries_allowed_denklemi_truth_table ... ok
+test engine_loop::risk_lock_tests::entries_allowed_her_zaman_health_ve_lock_denklemidir ... ok
+test engine_loop::risk_lock_tests::exits_only_kipinde_giris_yok_cikis_var ... ok
+test engine_loop::risk_lock_tests::exits_only_yalnizca_place_i_bloklar ... ok
+test engine_loop::risk_lock_tests::gate_baslangic_degerleri_acik_belirtilmis ... ok
+test engine_loop::risk_lock_tests::gecici_rest_hatalari_sayilmaz ... ok
+test engine_loop::risk_lock_tests::karar_kritik_hatalar_sayilir_ve_kill_switch_uretiyor ... ok
+test engine_loop::risk_lock_tests::reconnect_sayisi_tek_basina_kill_yapmaz ... ok
+test engine_loop::risk_lock_tests::risk_lock_dogrulanmamis_flat_sayaci_ilerletmez ... ok
+test engine_loop::risk_lock_tests::risk_lock_flat_iken_health_false_girisi_acmaz ... ok
+test engine_loop::risk_lock_tests::risk_lock_health_tarafindan_geri_acilamaz ... ok
+test engine_loop::risk_lock_tests::risk_lock_iki_flat_dongude_acilir ... ok
+test engine_loop::risk_lock_tests::risk_lock_log_format_pozisyonlari_birebir_yazar ... ok
+test engine_loop::risk_lock_tests::risk_lock_pozisyon_devam_ediyorsa_kalir ... ok
+test engine_loop::risk_lock_tests::risk_lock_step_kilit_kapaliyken_etkisiz ... ok
+test engine_loop::risk_lock_tests::unlock_risk_sagliksizken_giris_acmaz ... ok
+test engine_loop::risk_lock_tests::entries_allowed_alan_olarak_saklanmaz ... ok
+test engine_loop::risk_lock_tests::ws_hata_firtinasi_botu_oldurmez_exits_only_gecer ... ok
+test engine_loop::sl_tp_contract_tests::sl_tp_rr_contract_matrix ... ok
+test engine_loop::tp_entry_tests::allocation_tp_entry_eff_ile_baglanir ... ok
+test engine_loop::tp_entry_tests::allocation_tp_kaymada_risk_mesafesi_degismez ... ok
+test engine_loop::tp_entry_tests::allocation_tp_kaymasiz_giriste_degismez ... ok
+test engine_loop::tp_execution_tests::tp_fill_sets_exit_reason_take_profit ... ok
+test engine_loop::tp_execution_tests::tp_not_created_on_flat_position ... ok
+test engine_loop::tp_execution_tests::tp_order_long_profit_side ... ok
+test engine_loop::tp_execution_tests::tp_order_reduce_only ... ok
+test engine_loop::tp_execution_tests::tp_order_short_profit_side ... ok
+test engine_loop::tp_execution_tests::tp_orders_map_zaten_varysa_ensure_tp_kurma ... ok
+test engine_loop::tp_execution_tests::tp_reconciliation_does_not_duplicate ... ok
+test engine_loop::tp_execution_tests::tp_sl_same_position_no_duplicate_exit_state ... ok
+test engine_loop::trail_tests::ilk_adim_zaten_gevsetmez_giris_stopuyla_ayni_kalir ... ok
+test engine_loop::trail_tests::long_trailing_yukarı_ratchet_eder ... ok
+test engine_loop::trail_tests::mfe_mae_r_cinsinden_isaretli ... ok
+test engine_loop::trail_tests::min_adim_esigi_kucuk_iletlemeyi_bloklar ... ok
+test engine_loop::trail_tests::short_mfe_tersi_yonlu_hesaplanir ... ok
+test engine_loop::trail_tests::short_trailing_asagi_ratchet_eder ... ok
+test engine_loop::trail_tests::tp_sabit_kalir_trailing_yok ... ok
+test engine_loop::trail_tests::trailing_asla_gevsetmez ... ok
+test engine_loop::ws_finalize_tests::ws_closing_fill_finalizes_immediately ... ok
+test epoch::tests::duplicate_fill_ikinci_kez_sayilmaz ... ok
+test epoch::tests::engine_new_corrupt_path_propagates_error ... ok
+test epoch::tests::corrupt_json_does_not_reset_counter ... ok
+test epoch::tests::fresh_start_karar_tablosu ... ok
+test epoch::tests::fresh_start_eski_state_temizligi_dosya_uygulama ... ok
+test epoch::tests::kapanan_pozisyon_bir_trade_sayilir ... ok
+test epoch::tests::restart_sonrasi_sayac_korunur ... ok
+test epoch::tests::testnet_modunda_live_endpoint_e_emir_gonderilemez ... ok
+test epoch::tests::yuz_gecisi_dogru ... ok
+test epoch::tests::yuz_olmadan_ready_olusmaz ... ok
+test executor::cloid_tests::cloid_16_hane_hex_uretir_ve_deterministiktir ... ok
+test executor::cloid_tests::farkli_coin_farkli_cloid ... ok
+test executor::recon_tests::ayni_coin_farkli_cloid_eslesmez ... ok
+test executor::recon_tests::refresh_orders_entry_emrini_gormez_hepsi_gorur ... ok
+test executor::recon_tests::unknown_cloid_borsada_varsa_baglanir ... ok
+test executor::senaryo_tests::bos_dizi_bos_haritada_kapanis_bildirmesidir ... ok
+test executor::recon_tests::unknown_cloid_yoksa_flat_revert ... ok
+test executor::senaryo_tests::dolu_dizi_harita_kurar_ve_szi_parsing_dogru ... ok
+test executor::senaryo_tests::gecerli_bos_dizi_flat_hesabi_temsil_ed_er_flat ... ok
+test executor::senaryo_tests::suregre_kapisi_tekrar_kurmayi_engeller ... ok
+test executor::sl_side_tests::bozuk_risk_degerinde_de_stop_dogru_tarafta ... ok
+test executor::sl_side_tests::ioc_kaymasi_stopu_yan_tarafa_tasimaz ... ok
+test executor::sl_side_tests::kayma_ne_kadar_buyuk_olursa_olsun_stop_lehli_tarafta_kalir ... ok
+test executor::sl_side_tests::risk_mesafesi_cok_kucukse_minimum_yuzde025_uygulanir ... ok
+test executor::stop_px_tests::rest_limit_px_ters_cevirilir_yoksa_yuzde5_kayik ... ok
+test executor::stop_px_tests::yon_karistirilirsa_hata_isaret_degistirir ... ok
+test executor::tick_tests::cancel_sonucu_yutulamaz ... ok
+test executor::tick_tests::fiyat_tick_kurali ... ok
+test risk_manager::persistence_tests::bozuk_risk_hafizasi_yuklenmez ... ok
+test risk_manager::tests::dinamik_pozisyon_sayisi_asla_configi_gecmez ... ok
+test risk_manager::persistence_tests::restart_peak_hafizasini_sifirlamaz ... ok
+test risk_manager::tests::pozisyon_sayisi_bakiyeye_gore_dinamik_kisalir ... ok
+test risk_manager::tests::min_notional_alti_emir_reddedilir ... ok
+test state_machine::tests::kismi_dolum_ve_timeout ... ok
+test state_machine::tests::recovery_kurulumu ... ok
+test state_machine::tests::reddedilme_flata_doner ... ok
+test state_machine::tests::servis_flat_to_pending_to_inposition ... ok
+test state_machine::tests::ters_sinyal_pozisyonu_kapar ... ok
+test state_machine::tests::trailing_stop_iklil ... ok
+test track::health_tests::basarili_dongu_sayaci_sifirlar ... ok
+test track::health_tests::emin_olunamayan_hata_kritik_sayilir ... ok
+test track::health_tests::emin_olunamayan_hata_daha_spesifik_geceni_yener ... ok
+test track::health_tests::exits_only_kipinde_giris_yok_cikis_var ... ok
+test track::health_tests::gecici_rest_hatalari_sayilmaz ... ok
+test track::health_tests::karar_kritik_hatalar_sayilir_ve_kill_switch_uretiyor ... ok
+test track::health_tests::reconnect_sayisi_tek_basina_kill_yapmaz ... ok
+test track::health_tests::ws_hata_firtinasi_botu_oldurmaz_exits_only_gecer ... ok
+test track::portfolio_tests::iki_trade_farkli_kombinasyonlar ... ok
+test track::portfolio_tests::kelly_gercek_portfolio_sample ... ok
+test track::portfolio_tests::portfolio_n1_attribution_n4 ... ok
+test track::portfolio_tests::restart_sonrasi_duplicate_olmamali ... ok
+test track::tests::ayni_dongude_iki_kesifciye_sira_gelmez ... ok
+test track::tests::bes_islem_sifir_kazanc_agirligi_olmez ... ok
+test track::tests::clamp_ust_tavanini_asmaz ... ok
+test track::tests::dosya_yoksa_hepsi_netir_bir ... ok
+test track::tests::full_n_ulasilan_kuyruktan_disiyor ... ok
+test track::tests::kuyruk_veri_acligi_olana_girer_full_n_disi_da_hazir_bekler ... ok
+test track::tests::live_json_origin_live_uretir ... ok
+test track::tests::on_islem_arasi_dinamik_clamp_araliginda ... ok
+test track::portfolio_tests::pnl_cozulmeyen_portfolio_yazmaz ... ok
+test track::tests::otuz_islem_iyi_kazanc_agirligi_buyur ... ok
+test track::tests::otuz_islem_dusuk_kazanc_susturur ... ok
+test track::tests::oyun_disi_strateji_listeye_girilir ... ok
+test track::tests::pencere_100_kaydirma ... ok
+test track::tests::tid_seen_aynı_tid_ikinci_kez_atlanır ... ok
+test track::tests::track_state_olmayan_dosya_sessizce_nutre_duser ... ok
+test track::tests::sinyal_utermeyene_zorla_islem_acilmaz ... ok
+test track::tests::track_state_origin_degilse_reddedilir ... ok
+test track::tests::track_state_origin_ve_schema_dogruysa_yuklenir ... ok
+test track::tests::track_state_r_hist_eksikse_strateji_atlanir_sentetik_r_yok ... ok
+test track::tests::track_state_schema_version_uyusmazsa_reddedilir ... ok
+test track::tests::track_state_sparse_json_roundtrip ... ok
+test track::tests::track_state_yaz_ok_roundtrip ... ok
+test track::tests::write_trade_exit_jsonl_append_only ... ok
+
+test result: ok. 216 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running `/root/hyperliquid/target/debug/deps/bot-9707795ebf3f8fc6`
+
+running 2 tests
+test supervisor_tests::kullanici_akis_supervisor_dongusu_mevcut ... ok
+test supervisor_tests::kullanici_akis_spawn_ok_yutma_yasak ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running `/root/hyperliquid/target/debug/deps/probe_px-1bec98def73190ff`
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running `/root/hyperliquid/target/debug/deps/probe_smoke-bbafe9c17ec4f850`
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running `/root/hyperliquid/target/debug/deps/trail_report-3cf8415053990d80`
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests engine
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustdoc --edition=2021 --crate-type lib --color auto --crate-name engine --test engine/src/lib.rs --test-run-directory /root/hyperliquid/engine -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern engine=/root/hyperliquid/target/debug/deps/libengine-0f99fb4ac83a7c8a.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L dependency=/root/hyperliquid/target/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human`
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+*** result: Success

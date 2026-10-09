@@ -1,0 +1,22 @@
+--- engine/src/risk_manager.rs
++++ replace RiskManager::resume with ()
+@@ -174,18 +174,17 @@
+         if self.halted.is_some() {
+             tracing::error!("risk hafızası yüklendi — trading HALTED (operatör resume gerekli)");
+         }
+         true
+     }
+ 
+     /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
+     pub fn resume(&mut self) {
+-        self.peak_equity = self.current_equity;
+-        self.halted = None;
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// SABİT pozisyon sayısı yerine bakiyeye göre dinamik üst sınır:
+     /// `min(cfg_max, floor(equity / equity_per_position))`.
+     /// $111 bakiyeyle 5 pozisyon açmak 5×$10'luk zorunlu minimuma takılırdı.
+     pub fn max_positions(&self, equity: f64, cfg_max: usize) -> usize {
+         let by_equity = (equity / self.cfg.equity_per_position_usd.max(1.0)).floor();
+         (by_equity as usize).min(cfg_max)

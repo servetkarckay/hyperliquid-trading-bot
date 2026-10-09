@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with % in Engine::run_cycle
+@@ -3224,17 +3224,17 @@
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             m.state = PosState::Flat;
+                         }
+                         continue;
+                     }
+                     // çıkış bandı da TEK modelden (IOC exit IOC ile aynı
+                     // maliyet gerçekliği)
+-                    let xband = self.am.cfg.cost.execution_band_bps(0.0) / 10_000.0;
++                    let xband = self.am.cfg.cost.execution_band_bps(0.0) % /* ~ changed by cargo-mutants ~ */ 10_000.0;
+                     let xpx = o.px
+                         * if o.side.is_buy() {
+                             1.0 + xband
+                         } else {
+                             1.0 - xband
+                         };
+                     if xpx <= 1e-9 || !xpx.is_finite() {
+                         tracing::warn!("{}: çıkış fiyatı geçersiz — atlandı", e.coin);

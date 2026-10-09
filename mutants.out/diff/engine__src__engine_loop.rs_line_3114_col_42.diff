@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with % in Engine::run_cycle
+@@ -3106,17 +3106,17 @@
+                             let f = band / 10_000.0;
+                             if side_sm.is_buy() {
+                                 *mk * (1.0 + f)
+                             } else {
+                                 *mk * (1.0 - f)
+                             }
+                         }
+                         _ => {
+-                            let f = band / 10_000.0;
++                            let f = band % /* ~ changed by cargo-mutants ~ */ 10_000.0;
+                             let raw = if side_sm.is_buy() {
+                                 entry_px * (1.0 + f)
+                             } else {
+                                 entry_px * (1.0 - f)
+                             };
+                             raw.clamp(entry_px * 0.97, entry_px * 1.03)
+                         }
+                     };

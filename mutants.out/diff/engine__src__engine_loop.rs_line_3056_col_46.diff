@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace == with != in Engine::run_cycle
+@@ -3048,17 +3048,17 @@
+                     if let Err(err) = self.executor.ensure_leverage(&coin_lv, lev).await {
+                         tracing::warn!("{coin_lv}: kaldıraç ayarlanamadı ({err})");
+                     }
+                     let mut attr = EntryAttr {
+                         coin: e.coin.clone(),
+                         ts: hyperliquid_api::now_ms(),
+                         voters: selected
+                             .iter()
+-                            .find(|c| c.coin == e.coin)
++                            .find(|c| c.coin != /* ~ changed by cargo-mutants ~ */ e.coin)
+                             .map(|c| c.voters.clone())
+                             .unwrap_or_default(),
+                         side: side_sm,
+                         entry_px,
+                         risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
+                         size: sz,
+                         // Analytical TP, tahsis anında karar fiyatından türetilir
+                         tp_px: None,

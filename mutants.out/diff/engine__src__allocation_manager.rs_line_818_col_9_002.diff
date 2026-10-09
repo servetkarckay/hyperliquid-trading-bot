@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace CostModel::expected_slippage_bps -> f64 with -1.0
+@@ -810,17 +810,17 @@
+             base_slip_bps,
+             ev_min_dist_bps,
+         }
+     }
+ 
+     /// **BEKLENEN KAYMA** — IOC emri dinlenen defterin yarım spread'ini de
+     /// öder. `spread_bps` ≤ 0 (defter yok) → taban kayma.
+     pub fn expected_slippage_bps(&self, spread_bps: f64) -> f64 {
+-        self.base_slip_bps + 0.5 * spread_bps.max(0.0)
++        -1.0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **TEK YÖN maliyet** (bps): fee + beklenen kayma + spread.
+     pub fn execution_cost_bps(&self, spread_bps: f64) -> f64 {
+         self.fee_bps + self.expected_slippage_bps(spread_bps) + spread_bps.max(0.0)
+     }
+ 
+     /// Round-trip maliyet (bps): 2 × tek yön.

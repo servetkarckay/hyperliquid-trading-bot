@@ -1,0 +1,35 @@
+--- engine/src/executor.rs
++++ replace Executor::cancel_all -> Result<usize> with Ok(0)
+@@ -1104,31 +1104,17 @@
+                 ),
+             }
+         }
+         Ok(n)
+     }
+ 
+     /// Coin'deki tüm açık emirleri iptal et -> iptal edilen sayı
+     pub async fn cancel_all(&mut self, coin: &str) -> Result<usize> {
+-        self.refresh_orders().await?;
+-        let oids: Vec<i64> = self
+-            .open_orders
+-            .values()
+-            .filter(|o| o.coin == coin)
+-            .map(|o| o.oid)
+-            .collect();
+-        let mut n = 0;
+-        for oid in oids {
+-            match self.cancel(coin, oid).await {
+-                Ok(()) => n += 1,
+-                Err(e) => tracing::warn!(coin, oid, "iptal hatası: {e}"),
+-            }
+-        }
+-        Ok(n)
++        Ok(0) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// REST'ten açık emirleri yenile (ws kopması sonrası toparlama).
+     /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.
+     /// `refresh_orders` (stop adayları) ve `refresh_open_orders_all`
+     /// (reconciliation) aynı parser'ı kullanır — yeniden yazım yok.
+     fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Vec<OpenOrderRow> {
+         let mut rows = Vec::new();

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::run_cycle
+@@ -2624,17 +2624,17 @@
+                     let (mut sab, mut saa, mut sbb) = (0.0, 0.0, 0.0);
+                     for i in 0..n {
+                         let da = a[i] - ma;
+                         let db = b[i] - mb;
+                         sab += da * db;
+                         saa += da * da;
+                         sbb += db * db;
+                     }
+-                    if saa > 0.0 && sbb > 0.0 {
++                    if saa >= /* ~ changed by cargo-mutants ~ */ 0.0 && sbb > 0.0 {
+                         sab / (saa.sqrt() * sbb.sqrt())
+                     } else {
+                         0.0
+                     }
+                 }
+                 _ => 0.0,
+             }
+         };

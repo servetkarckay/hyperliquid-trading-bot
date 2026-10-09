@@ -1,0 +1,21 @@
+--- engine/src/executor.rs
++++ delete ! in Executor::restore_tp_orders
+@@ -876,17 +876,17 @@
+     /// ele alır).
+     pub fn restore_tp_orders(
+         &mut self,
+         rows: &[OpenOrderRow],
+         tp_px_by_coin: &HashMap<String, f64>,
+     ) -> usize {
+         let mut n = 0usize;
+         for row in rows {
+-            if !row.reduce_only || self.tp_orders.contains_key(&row.coin) {
++            if  /* ~ changed by cargo-mutants ~ */row.reduce_only || self.tp_orders.contains_key(&row.coin) {
+                 continue;
+             }
+             // ÖNCE cloid tuzu (RAM'siz, EntryAttr'a bağımsız) —
+             // restart sonrası tp_px_by_coin BOŞTUR (EntryAttr RAM'de kalır).
+             if cloid_is_tp(&row.coin, row.px, row.sz, row.cloid.as_deref()) {
+                 self.tp_orders.insert(row.coin.clone(), row.oid);
+                 if row.px > 0.0 {
+                     self.tp_last_px.insert(row.coin.clone(), row.px);

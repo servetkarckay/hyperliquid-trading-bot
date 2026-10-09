@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace EntryGate::flat_count -> u32 with 0
+@@ -737,17 +737,17 @@
+         self.health_ok
+     }
+ 
+     pub fn is_locked(&self) -> bool {
+         self.risk_locked
+     }
+ 
+     pub fn flat_count(&self) -> u32 {
+-        self.flat_count
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Sağlık bitini güncelle. `entries_allowed` otomatik türetilir.
+     pub fn set_health_ok(&mut self, health_ok: bool) {
+         self.health_ok = health_ok;
+     }
+ 
+     /// Kilidi AÇ: düz `entries_allowed = false` YAZILMAZ — denklem kendiliğinden

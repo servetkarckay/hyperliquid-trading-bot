@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace * with + in Engine::sync_exchange_sl
+@@ -1939,17 +1939,17 @@
+                         .positions()
+                         .get(coin)
+                         .map(|p| p.entry_px)
+                         .unwrap_or(0.0);
+                     if e <= 0.0 || !e.is_finite() {
+                         continue;
+                     }
+                     if *szi > 0.0 {
+-                        e * 1.04
++                        e + /* ~ changed by cargo-mutants ~ */ 1.04
+                     } else {
+                         e * 0.96
+                     }
+                 }
+             };
+             if tp_px <= 0.0 || !tp_px.is_finite() {
+                 continue;
+             }

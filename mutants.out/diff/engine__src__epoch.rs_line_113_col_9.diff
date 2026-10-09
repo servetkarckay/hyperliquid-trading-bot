@@ -1,0 +1,28 @@
+--- engine/src/epoch.rs
++++ replace LearningEpoch::new_testnet -> Self with Default::default()
+@@ -105,24 +105,17 @@
+     }
+     FreshDecision::Wipe
+ }
+ 
+ impl LearningEpoch {
+     /// Yeni TESTNET öğrenme dönemi: `starting_trade_count = 0`,
+     /// nötr başlangıç (tüm stratejiler w=1.0 — tracker boş açılır).
+     pub fn new_testnet(epoch_id: String, started_at: u64) -> Self {
+-        Self {
+-            epoch_id,
+-            environment: "testnet".into(),
+-            started_at,
+-            starting_trade_count: 0,
+-            completed_trade_count: 0,
+-            status: EpochStatus::Learning,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **GERÇEK kapanış** kaydı — bir pozisyon kapandıysa tam bir kez
+     /// çağrılır (sinyal/emir/fill sayısı DEĞİL).
+     ///
+     /// Dönüş: (yeni sayaç, bu kayıtla `ready_for_live`'a geçildi mi).
+     /// 100'e ulaşınca kalıcı duruma yazılır; **otomatik canlı emir YOK**.
+     pub fn record_completed_trade(&mut self) -> (u64, bool) {

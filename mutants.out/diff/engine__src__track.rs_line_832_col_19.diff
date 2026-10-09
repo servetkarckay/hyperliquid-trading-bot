@@ -1,0 +1,21 @@
+--- engine/src/track.rs
++++ replace != with == in StrategyTracker::load_state
+@@ -824,17 +824,17 @@
+             return false;
+         };
+         let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else {
+             tracing::warn!("[LEARN] {path} bozuk JSON — nötr cold-start");
+             return false;
+         };
+         // Provenans kapısı
+         let origin = v.get("origin").and_then(|x| x.as_str()).unwrap_or("");
+-        if origin != "live" {
++        if origin == /* ~ changed by cargo-mutants ~ */ "live" {
+             tracing::warn!(
+                 "[LEARN] {path} origin='{origin}' != 'live' — REDDEDİLDİ, nötr cold-start"
+             );
+             return false;
+         }
+         let schema = v
+             .get("schema_version")
+             .and_then(|x| x.as_u64())

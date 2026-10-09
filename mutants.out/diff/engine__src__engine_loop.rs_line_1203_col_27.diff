@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace || with && in Engine::ingest_oe
+@@ -1195,17 +1195,17 @@
+                         && matches!(m.state, PosState::Flat)
+                     {
+                         exited_now = true;
+                     }
+                 }
+             }
+             // ÇIKIŞ SEBEBİ GERÇEK KAYNAKTAN: TP/SL fill oid eşleşmesi
+             // (MFE pozitif diye TakeProfit YAZILMAZ — bayrak yoksa dokunma).
+-            if is_tp_fill || is_sl_fill {
++            if is_tp_fill && /* ~ changed by cargo-mutants ~ */ is_sl_fill {
+                 if let Some(attr) = self.entry_attr.get_mut(&coin) {
+                     let ratchets = self.trail.get(&coin).map(|t| t.ratchets).unwrap_or(0);
+                     if let Some(reason) =
+                         exit_reason_from_fill(is_tp_fill, is_sl_fill, ratchets, false, false)
+                     {
+                         apply_exit_reason(&mut attr.exit_reason, reason);
+                     }
+                 }

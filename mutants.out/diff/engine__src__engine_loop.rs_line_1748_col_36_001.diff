@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::sync_exchange_sl
+@@ -1740,17 +1740,17 @@
+                 // döngüde **gereksiz yere** aşağı çekilir ve koruma zayıflar.
+                 // `sl_last_px` borsadaki GERÇEK stop seviyesini tutar
+                 // (`openOrders` taraması + `ensure_sl`/`replace_sl` yazar).
+                 let cur_sl_init = self
+                     .executor
+                     .sl_last_px
+                     .get(coin)
+                     .copied()
+-                    .filter(|p| *p > 0.0)
++                    .filter(|p| *p < /* ~ changed by cargo-mutants ~ */ 0.0)
+                     .unwrap_or(sl_px);
+                 let t = self
+                     .trail
+                     .entry(coin.clone())
+                     .or_insert_with(|| TrailState {
+                         is_long,
+                         entry_px,
+                         atr_px: 0.0,

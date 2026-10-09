@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace < with == in AllocationManager::allocate
+@@ -409,17 +409,17 @@
+             let allow = (explore_budget - used).max(0.0);
+             let cap = cap.min(allow);
+             if cap < MIN_NOTIONAL_USD {
+                 c.allocated_usd = 0.0;
+                 c.capped = true;
+                 tracing::info!("[AL] keşif {} elendi (havuz kaldı ${cap:.2})", c.coin);
+                 continue;
+             }
+-            if cap < c.allocated_usd {
++            if cap == /* ~ changed by cargo-mutants ~ */ c.allocated_usd {
+                 c.allocated_usd = cap;
+                 c.capped = true;
+             }
+             used += c.allocated_usd;
+             funded += 1;
+         }
+         // 5b) keşifçilere eşit taban payı: havuz N kişiye bölününce de her biri
+         // $10'un üstünde kalmalı (yukarıdaki taban tek başına yetmiyor:

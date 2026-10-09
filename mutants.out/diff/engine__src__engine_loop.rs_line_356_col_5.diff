@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace place_arm_gate -> bool with true
+@@ -348,17 +348,17 @@
+ /// doğrulayarak log sözleşmesini sabitler.
+ /// PLACE KAPISI (ölü-kilit fiksli): bloklar YALNIZ cycle-başı bekleyen
+ /// makineyi. Aynı cycle'da evals'in ürettiği taze karar (Pending{oid:0})
+ /// İLK GİRİŞTİR — geçmelidir; aksi halde batch asla gönderilmez.
+ pub(crate) fn place_arm_gate(
+     coin_pre_pending: bool,
+     m: Option<&crate::state_machine::PositionStateMachine>,
+ ) -> bool {
+-    m.is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending()) && coin_pre_pending
++    true /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ pub fn risk_lock_positions_left(left: &[(String, f64)]) -> String {
+     if left.is_empty() {
+         return "[]".to_string();
+     }
+     format!(
+         "[{}]",

@@ -1,0 +1,55 @@
+--- engine/src/executor.rs
++++ replace Executor::parse_positions -> HashMap<String, Position> with HashMap::new()
+@@ -380,51 +380,17 @@
+             closed_pnl: HashMap::new(),
+             fill_count: 0,
+         })
+     }
+ 
+     /// `clearinghouseState.assetPositions` dizisini pozisyon haritasına çevir
+     /// (saf fonksiyon — testnet'te görülemeyen "boş hesap" senaryosu test edilir).
+     pub fn parse_positions(arr: &[serde_json::Value]) -> HashMap<String, Position> {
+-        let mut next: HashMap<String, Position> = HashMap::with_capacity(arr.len());
+-        for ap in arr {
+-            let p = &ap["position"];
+-            let Some(coin) = p["coin"].as_str().filter(|c| !c.is_empty()) else {
+-                continue;
+-            };
+-            next.insert(
+-                coin.to_string(),
+-                Position {
+-                    szi: p["szi"]
+-                        .as_str()
+-                        .and_then(|s| s.parse().ok())
+-                        .unwrap_or(0.0),
+-                    entry_px: p["entryPx"]
+-                        .as_str()
+-                        .and_then(|s| s.parse().ok())
+-                        .unwrap_or(0.0),
+-                    position_value: p["positionValue"]
+-                        .as_str()
+-                        .and_then(|s| s.parse().ok())
+-                        .unwrap_or(0.0),
+-                    unrealized_pnl: p["unrealizedPnl"]
+-                        .as_str()
+-                        .and_then(|s| s.parse().ok())
+-                        .unwrap_or(0.0),
+-                    leverage: p["leverage"]["value"]
+-                        .as_u64()
+-                        .map(|v| v as f64)
+-                        .unwrap_or(1.0),
+-                    liquidation_px: p["liquidationPx"].as_str().and_then(|s| s.parse().ok()),
+-                    coin: coin.to_string(),
+-                },
+-            );
+-        }
+-        next
++        HashMap::new() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// `clearinghouseState.assetPositions` dizisinden haritayı yeniden kur.
+     pub fn sync_positions_from(&mut self, arr: &[serde_json::Value]) -> Vec<String> {
+         let next = Self::parse_positions(arr);
+         // BOŞ DİZİ = HATA DEĞİL, GERÇEKTİR.
+         //
+         // Kontrat: "boş dizi → hata, haritayı koru" ayrımı DONMUŞ harita

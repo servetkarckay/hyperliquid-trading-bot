@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with / in Engine::ingest_oe
+@@ -1230,17 +1230,17 @@
+                         let fav = if t.is_long {
+                             (t.peak_px - t.entry_px) / risk
+                         } else {
+                             (t.entry_px - t.peak_px) / risk
+                         };
+                         let adv = if t.is_long {
+                             (t.worst_px - t.entry_px) / risk
+                         } else {
+-                            (t.entry_px - t.worst_px) / risk
++                            (t.entry_px / /* ~ changed by cargo-mutants ~ */ t.worst_px) / risk
+                         };
+                         (fav, adv, t)
+                     });
+                     if let Some(attr) = self.entry_attr.remove(&coin) {
+                         let risk_usd = attr.risk_px * attr.size.abs().max(f64::EPSILON);
+                         let r = fill_pnl / risk_usd.max(f64::EPSILON);
+                         self.tracker.record_outcome_r(
+                             attr.voters.clone(),

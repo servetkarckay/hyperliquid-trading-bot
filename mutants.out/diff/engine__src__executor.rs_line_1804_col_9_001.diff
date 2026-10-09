@@ -1,0 +1,32 @@
+--- engine/src/executor.rs
++++ replace Executor::drain_sl_results -> usize with 1
+@@ -1796,28 +1796,17 @@
+     }
+ 
+     /// Arka planda kurulan stop'ların oid'ini `sl_orders`'a yaz.
+     ///
+     /// `tokio::spawn` içinden `&mut self` geçemez; bu kanal tek yazma yoludur.
+     /// `run_cycle` başında çağrılır. Çağrılmazsa kurulan stop hiç kayıt
+     /// altına alınmaz ve motor aynı stop'u ikinci kez asabilir.
+     pub fn drain_sl_results(&mut self) -> usize {
+-        let mut n = 0usize;
+-        while let Ok((coin, oid, px)) = self.sl_rx.try_recv() {
+-            self.sl_orders.insert(coin.clone(), oid);
+-            if px > 0.0 {
+-                self.sl_last_px.insert(coin, px);
+-            }
+-            n += 1;
+-        }
+-        if n > 0 {
+-            tracing::info!("[SL] {n} arka-plan stop kaydı tamamlandı (sl_orders)");
+-        }
+-        n
++        1 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// `user` kanalı dolumlarını makineye beslemek için al
+     pub fn drain_fills(&mut self) -> Vec<FillEvent> {
+         std::mem::take(&mut self.fills_q)
+     }
+ 
+     pub fn open_orders(&self) -> &HashMap<i64, OrderInfo> {

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with > in recon_decide
+@@ -517,17 +517,17 @@
+ /// recheck arası bekleme (delayed visibility penceresi).
+ pub const RECON_RECHECK_MS: u64 = 2_000;
+ 
+ pub fn recon_decide(has_order: bool, has_position: bool, attempts: u8) -> ReconAction {
+     if has_order {
+         ReconAction::LinkOid
+     } else if has_position {
+         ReconAction::ToPosition
+-    } else if attempts < RECON_MAX_ATTEMPTS {
++    } else if attempts > /* ~ changed by cargo-mutants ~ */ RECON_MAX_ATTEMPTS {
+         ReconAction::Retry
+     } else {
+         ReconAction::Flat
+     }
+ }
+ 
+ /// RECON — **pozisyon durum makinesini borsa haritasıyla senkronla**.
+ ///

@@ -1,0 +1,73 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::save_state -> std::io::Result<()> with Ok(())
+@@ -754,69 +754,17 @@
+ 
+     /// Tracker durumunu diske yaz (atomik: önce `.tmp`, sonra rename).
+     /// Provenans: `origin: "live"`, `schema_version: 1` — backtest çıkışı
+     /// yüklenemesin diye. **Gerçek R history** (`rs` vektörü) saklanır,
+     /// restart'ta birebir yüklenir — sentetik ±1R YOK. schema_version = 2.
+     /// Sparse JSON güvenliği: entry'ler önce toplanır, sonra join(",") —
+     /// indeks tabanlı virgül YOK (aynı yazım biçimi korunur).
+     pub fn save_state(&self, path: &str) -> std::io::Result<()> {
+-        use std::fmt::Write as _;
+-        let mut names: Vec<&String> = self.stats.keys().collect();
+-        names.sort();
+-        let mut entries: Vec<String> = Vec::new();
+-        for k in names {
+-            let st = &self.stats[k];
+-            if st.rs.is_empty() {
+-                continue;
+-            }
+-            let wr = st.win_rate(0).unwrap_or(0.0);
+-            let pf = st.profit_factor().unwrap_or(0.0);
+-            let sr: f64 = st.rs.iter().sum();
+-            let last = st.outcomes.last().map(|(t, _)| *t).unwrap_or(0);
+-            // R history array: [[ts, r], ...]
+-            let mut r_hist = String::new();
+-            for (idx, (ts, _win)) in st.outcomes.iter().enumerate() {
+-                let r = st.rs[idx];
+-                let _ = write!(r_hist, "[{ts},{r:.6}],");
+-            }
+-            if !r_hist.is_empty() {
+-                r_hist.pop(); // trailing comma
+-            }
+-            let mut entry = String::new();
+-            let _ = write!(
+-                entry,
+-                "    \"{k}\": {{\"n\":{},\"win\":{:.4},\"pf\":{:.4},\"sum_r\":{:.4},\"last_ts\":{},\"origin\":\"live\",\"schema_version\":2,\"r_hist\":[{r_hist}]}}",
+-                st.rs.len(),
+-                wr,
+-                pf,
+-                sr,
+-                last
+-            );
+-            entries.push(entry);
+-        }
+-        let strategies = entries.join(",\n");
+-        // GERÇEK trade-level portfolio history — AYNI dosyada ayrı alan
+-        // (ikinci gerçeklik kaynağı YOK; atomik yazım aynı tmp+rename).
+-        let port: Vec<String> = self
+-            .portfolio
+-            .trades
+-            .iter()
+-            .map(|(ts, r)| format!("[{ts},{r:.6}]"))
+-            .collect();
+-        let port_s = port.join(",");
+-        let s = format!("{{\n  \"origin\": \"live\",\n  \"schema_version\": 2,\n  \"portfolio\": [{port_s}],\n  \"strategies\": {{\n{strategies}\n  }}\n}}");
+-        if let Some(par) = std::path::Path::new(path).parent() {
+-            let _ = std::fs::create_dir_all(par);
+-        }
+-        // ATOMİK YAZIM: yarım yazılmış dosya = tüm öğrenme kaybı. tmp + rename.
+-        let tmp = format!("{path}.tmp");
+-        std::fs::write(&tmp, s.as_bytes())?;
+-        std::fs::rename(&tmp, path)?;
+-        Ok(())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Diskten yükle. Provenans kontrolü (schema v2):
+     /// `origin != "live"` → WARN + **reddet** (backtest çıkışı look-ahead biaslı)
+     /// `schema_version != 2` → WARN + **reddet** (v1 sentetik R içerir, v2 gerekli)
+     /// yoksa/bozuksa → false (ilk çalıştırma normal, cold-start)
+     /// **Gerçek R history** (`r_hist`) ZORUNLU — sentetik ±1R fallback YOK.
+     pub fn load_state(&mut self, path: &str) -> bool {

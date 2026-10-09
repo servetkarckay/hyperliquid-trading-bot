@@ -1,0 +1,30 @@
+--- engine/src/track.rs
++++ replace StrategyTracker::ensemble_weights -> HashMap<String, f64> with HashMap::from_iter([("xyzzy".into(), -1.0)])
+@@ -707,26 +707,17 @@
+         if act.is_empty() {
+             return None;
+         }
+         Some(act[cursor % act.len()].clone())
+     }
+ 
+     /// ensemble ağırlıkları: f*>0 → kelly pay; pencere yetersiz → nötr; kötü → 0
+     pub fn ensemble_weights(&self) -> HashMap<String, f64> {
+-        let mut raw: HashMap<String, f64> = HashMap::new();
+-        for (name, s) in &self.stats {
+-            let w = match s.kelly(DEFAULT_PAYOFF, 15) {
+-                Some(f) if f > 0.0 => f,
+-                Some(_) if s.outcomes.len() >= 15 => 0.0, // pencere dolu ama f* korkunç
+-                _ => NEUTRAL_WEIGHT,
+-            };
+-            raw.insert(name.clone(), w);
+-        }
+-        raw
++        HashMap::from_iter([("xyzzy".into(), -1.0)]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     pub fn count(&self) -> usize {
+         self.stats.len()
+     }
+ 
+     /// Özet: (n, win_rate, profit_factor, ΣR)
+     pub fn summary(&self, name: &str) -> (usize, f64, f64, f64) {

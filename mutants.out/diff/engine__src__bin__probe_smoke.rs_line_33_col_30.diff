@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_smoke.rs
++++ replace == with != in main
+@@ -25,17 +25,17 @@
+     let notional: f64 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(12.0);
+ 
+     let cfg = Config::from_env()?;
+     let info = Info::new(cfg.clone())?;
+     let meta = info.meta().await?;
+     let idx = meta
+         .universe
+         .iter()
+-        .position(|m| m.name == coin)
++        .position(|m| m.name != /* ~ changed by cargo-mutants ~ */ coin)
+         .ok_or_else(|| anyhow::anyhow!("coin yok: {coin}"))?;
+     println!("[SMOKE] coin={coin} assetIdx={idx} (testnet)");
+ 
+     // Orta fiyat öğren (borsa mids)
+     let mids = info.all_mids().await?;
+     let mid: f64 = mids
+         .get(&coin)
+         .and_then(|m: &String| m.parse().ok())

@@ -1,0 +1,24 @@
+--- engine/src/executor.rs
++++ replace Executor::asset_of -> Result<(u32, u32)> with Ok((1, 0))
+@@ -578,20 +578,17 @@
+             }
+         }
+         if n > 0 {
+             tracing::info!("[TICK] {n} coin'in tick hassasiyeti diskten geri yüklendi");
+         }
+     }
+ 
+     fn asset_of(&self, coin: &str) -> Result<(u32, u32)> {
+-        self.assets
+-            .get(coin)
+-            .map(|(a, d, _)| (*a, *d))
+-            .ok_or_else(|| anyhow!("bilinmeyen coin: {coin}"))
++        Ok((1, 0)) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// coin'in borsa tarafından izin verilen max kaldıracı
+     fn max_leverage_of(&self, coin: &str) -> Option<u32> {
+         self.assets.get(coin).map(|(_, _, m)| *m)
+     }
+ 
+     /// TÜM POZİSYONLARI KAPAT (testnet sıfırlama / temiz restart).

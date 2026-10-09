@@ -1,0 +1,318 @@
+
+*** engine/src/track.rs:529:9: replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 0.0)]), HashSet::from_iter(["xyzzy".into()]), vec![Default::default()])
+
+*** mutation diff:
+--- engine/src/track.rs
++++ replace StrategyTracker::effective_weights -> (HashMap<String, f64>, std::collections::HashSet<String>, Vec<ExploreEvent>,) with (HashMap::from_iter([(String::new(), 0.0)]), HashSet::from_iter(["xyzzy".into()]), vec![Default::default()])
+@@ -521,98 +521,17 @@
+         &self,
+         names: &[String],
+         pol: &LearnPolicy,
+     ) -> (
+         HashMap<String, f64>,
+         std::collections::HashSet<String>,
+         Vec<ExploreEvent>,
+     ) {
+-        let mut out: HashMap<String, f64> = HashMap::new();
+-        let mut explorers: std::collections::HashSet<String> = std::collections::HashSet::new();
+-        let mut events: Vec<ExploreEvent> = Vec::new();
+-        let mut all: Vec<String> = names.to_vec();
+-        // diskten yüklenmiş ama listede olmayan strateji varsa onu da izle
+-        for k in self.stats.keys() {
+-            if !all.contains(k) {
+-                all.push(k.clone());
+-            }
+-        }
+-        all.sort();
+-
+-        for name in all {
+-            let n = self.stats.get(&name).map(|x| x.rs.len()).unwrap_or(0);
+-            let wr = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.win_rate(0))
+-                .unwrap_or(0.0);
+-            let pf = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.profit_factor())
+-                .unwrap_or(0.0);
+-            let sum_r: f64 = self
+-                .stats
+-                .get(&name)
+-                .map(|x| x.rs.iter().sum())
+-                .unwrap_or(0.0);
+-
+-            // nötr cold-start: kanıt yok → 1.0
+-            if pol.frozen(n) {
+-                out.insert(name.clone(), COLD_START_WEIGHT);
+-                if n < pol.full_n {
+-                    explorers.insert(name);
+-                }
+-                continue;
+-            }
+-
+-            // f* = p − (1−p)/b, b = 1.8 varsayılan pay
+-            let f = self
+-                .stats
+-                .get(&name)
+-                .and_then(|x| x.kelly(DEFAULT_PAYOFF, pol.min_n))
+-                .unwrap_or(0.0);
+-            // nötr=1.0 çevresinde normalize: f* oranı 1.0'a göre
+-            let to = if pol.full(n) && wr < 0.35 {
+-                // tam kural: kanıt var ve berbat → SUSTUR
+-                0.0
+-            } else if f <= 0.0 {
+-                WEIGHT_CLAMP_LO
+-            } else {
+-                // f* ∈ (0, ~1]; 1.0'a bölerek nötre göre ölçekliyoruz.
+-                // f*=0.5 → w=0.5×KELLY_SCALE...
+-                (1.0 + f).clamp(WEIGHT_CLAMP_LO, WEIGHT_CLAMP_HI)
+-            };
+-            let to = if pol.full(n) && wr < 0.35 { 0.0 } else { to };
+-            if n < pol.full_n {
+-                explorers.insert(name.clone());
+-            }
+-            // DEĞİŞEN kararı logla (cold-start 1.0'den farklıysa)
+-            if (to - COLD_START_WEIGHT).abs() > 1e-9 {
+-                events.push(ExploreEvent {
+-                    strategy: name.clone(),
+-                    verdict: if to == 0.0 {
+-                        ExploreVerdict::Demote
+-                    } else if f > 0.0 && to > COLD_START_WEIGHT {
+-                        ExploreVerdict::Promote
+-                    } else {
+-                        ExploreVerdict::Hold
+-                    },
+-                    from: COLD_START_WEIGHT,
+-                    to,
+-                    trades: n as u64,
+-                    win_rate: wr,
+-                    profit_factor: pf,
+-                });
+-                let _ = sum_r;
+-            }
+-            out.insert(name, to);
+-        }
+-        (out, explorers, events)
++        (HashMap::from_iter([(String::new(), 0.0)]), HashSet::from_iter(["xyzzy".into()]), vec![Default::default()]) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **KEŞİF KUYRUĞU**: veri açlığı olan stratejiler.
+     ///
+     /// Yeni tanım: keşif hakkı "ağırlığı ~0 olan" değil, **veri açlığı** olan
+     /// stratejiye ait. Yani `n < LEARN_FULL_N` olanlar. Ölçek/sıralama:
+     /// önce en az veri görenler (`n` asc), sonra isim (deterministik).
+     ///
+
+
+*** /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --no-run --verbose --package=engine@0.1.0
+       Fresh unicode-ident v1.0.26
+       Fresh proc-macro2 v1.0.107
+       Fresh quote v1.0.47
+       Fresh cfg-if v1.0.5
+       Fresh syn v3.0.6
+       Fresh libc v0.2.189
+       Fresh zeroize v1.9.0
+       Fresh synstructure v0.14.0
+       Fresh subtle v2.6.1
+       Fresh smallvec v1.16.2
+       Fresh getrandom v0.2.17
+       Fresh pin-project-lite v0.2.17
+       Fresh zerofrom-derive v0.1.8
+       Fresh version_check v0.9.5
+       Fresh zerofrom v0.1.8
+       Fresh yoke-derive v0.8.4
+       Fresh stable_deref_trait v1.2.1
+       Fresh futures-core v0.3.34
+       Fresh bytes v1.12.1
+       Fresh yoke v0.8.3
+       Fresh typenum v1.20.1
+       Fresh zerovec-derive v0.11.6
+       Fresh generic-array v0.14.9
+       Fresh futures-sink v0.3.34
+       Fresh itoa v1.0.18
+       Fresh scopeguard v1.2.0
+       Fresh const-oid v0.9.6
+       Fresh lock_api v0.4.14
+       Fresh parking_lot_core v0.9.12
+       Fresh zerovec v0.11.8
+       Fresh displaydoc v0.2.7
+       Fresh errno v0.3.14
+       Fresh memchr v2.8.3
+       Fresh signal-hook-registry v1.4.8
+       Fresh parking_lot v0.12.5
+       Fresh mio v1.2.3
+       Fresh socket2 v0.6.5
+       Fresh tokio-macros v2.7.2
+       Fresh once_cell v1.21.4
+       Fresh find-msvc-tools v0.1.14
+       Fresh shlex v2.0.1
+       Fresh tokio v1.53.1
+       Fresh cc v1.5.1
+       Fresh futures-channel v0.3.34
+       Fresh tinystr v0.8.4
+       Fresh crypto-common v0.1.6
+       Fresh block-buffer v0.10.4
+       Fresh rand_core v0.6.4
+       Fresh futures-macro v0.3.34
+       Fresh syn v2.0.119
+       Fresh futures-io v0.3.34
+       Fresh litemap v0.8.3
+       Fresh futures-task v0.3.34
+       Fresh slab v0.4.12
+       Fresh writeable v0.6.4
+       Fresh icu_locale_core v2.3.0
+       Fresh futures-util v0.3.34
+       Fresh digest v0.10.7
+       Fresh zerotrie v0.2.5
+       Fresh potential_utf v0.1.6
+       Fresh http v1.5.0
+       Fresh rustls-pki-types v1.15.1
+       Fresh utf8_iter v1.0.4
+       Fresh icu_collections v2.3.0
+       Fresh icu_provider v2.3.1
+       Fresh autocfg v1.5.1
+       Fresh untrusted v0.9.0
+       Fresh percent-encoding v2.3.2
+       Fresh ring v0.17.14
+       Fresh icu_normalizer_data v2.3.0
+       Fresh icu_properties_data v2.3.0
+       Fresh icu_normalizer v2.3.0
+       Fresh icu_properties v2.3.0
+       Fresh httparse v1.10.1
+       Fresh serde_core v1.0.229
+       Fresh rustls-webpki v0.103.15
+       Fresh http-body v1.1.0
+       Fresh tracing-core v0.1.36
+       Fresh num-traits v0.2.19
+       Fresh rustls v0.23.45
+       Fresh idna_adapter v1.2.2
+       Fresh form_urlencoded v1.2.2
+       Fresh tracing-attributes v0.1.31
+       Fresh der v0.7.10
+       Fresh serde_derive v1.0.229
+       Fresh tower-service v0.3.3
+       Fresh try-lock v0.2.5
+       Fresh log v0.4.34
+       Fresh want v0.3.1
+       Fresh serde v1.0.229
+       Fresh tracing v0.1.44
+       Fresh zerocopy v0.8.59
+       Fresh idna v1.1.0
+       Fresh webpki-roots v1.0.9
+       Fresh atomic-waker v1.1.2
+       Fresh equivalent v1.0.2
+       Fresh hashbrown v0.17.1
+       Fresh cpufeatures v0.2.17
+       Fresh hyper v1.11.1
+       Fresh indexmap v2.14.2
+       Fresh url v2.5.8
+       Fresh ppv-lite86 v0.2.21
+       Fresh zmij v1.0.23
+       Fresh spki v0.7.3
+       Fresh tokio-rustls v0.26.6
+       Fresh ff v0.13.1
+       Fresh sync_wrapper v1.0.2
+       Fresh ipnet v2.12.2
+       Fresh base16ct v0.2.0
+       Fresh regex-syntax v0.8.11
+       Fresh base64 v0.23.1
+       Fresh tower-layer v0.3.3
+       Fresh ryu v1.0.23
+       Fresh tower v0.5.3
+       Fresh hyper-util v0.1.21
+       Fresh regex-automata v0.4.18
+       Fresh sec1 v0.7.3
+       Fresh group v0.13.0
+       Fresh serde_json v1.0.151
+       Fresh pkcs8 v0.10.2
+       Fresh rand_chacha v0.3.1
+       Fresh hmac v0.12.1
+       Fresh crypto-bigint v0.5.5
+       Fresh thiserror-impl v1.0.69
+       Fresh lazy_static v1.5.0
+       Fresh bitflags v2.13.2
+       Fresh tower-http v0.6.11
+       Fresh sharded-slab v0.1.7
+       Fresh elliptic-curve v0.13.8
+       Fresh rfc6979 v0.4.0
+       Fresh thiserror v1.0.69
+       Fresh rand v0.8.8
+       Fresh anyhow v1.0.104
+       Fresh hyper-rustls v0.27.10
+       Fresh matchers v0.2.0
+       Fresh serde_urlencoded v0.7.1
+       Fresh sha1 v0.10.7
+       Fresh tracing-log v0.2.0
+       Fresh http-body-util v0.1.5
+       Fresh signature v2.2.0
+       Fresh thread_local v1.1.10
+       Fresh data-encoding v2.11.1
+       Fresh base64 v0.22.1
+       Fresh nu-ansi-term v0.50.3
+       Fresh byteorder v1.5.0
+       Fresh utf-8 v0.7.6
+       Fresh tungstenite v0.24.0
+       Fresh tracing-subscriber v0.3.23
+       Fresh reqwest v0.12.28
+       Fresh ecdsa v0.16.9
+       Fresh crunchy v0.2.4
+       Fresh rustversion v1.0.23
+       Fresh sha2 v0.10.9
+       Fresh webpki-roots v0.26.11
+       Fresh num-integer v0.1.47
+       Fresh rmp v0.8.15
+       Fresh futures-executor v0.3.34
+       Fresh tokio-util v0.7.19
+       Fresh either v1.18.0
+       Fresh dotenvy v0.15.7
+       Fresh fastrand v2.5.0
+       Fresh itertools v0.13.0
+       Fresh combine v4.6.8
+       Fresh backon v1.6.0
+       Fresh utils v0.1.0 (/root/hyperliquid/utils)
+       Fresh rmp-serde v1.3.1
+       Fresh futures v0.3.34
+       Fresh num-bigint v0.4.8
+       Fresh tokio-tungstenite v0.24.0
+       Fresh arc-swap v1.9.2
+       Fresh k256 v0.13.4
+       Fresh tiny-keccak v2.0.2
+       Fresh async-trait v0.1.92
+       Fresh hex v0.4.3
+       Fresh math v0.1.0 (/root/hyperliquid/math)
+       Fresh redis v0.27.6
+       Fresh hyperliquid-api v0.1.0 (/root/hyperliquid/api)
+       Fresh iana-time-zone v0.1.65
+       Fresh data v0.1.0 (/root/hyperliquid/data)
+       Fresh chrono v0.4.45
+       Fresh strategy v0.1.0 (/root/hyperliquid/strategy)
+       Dirty engine v0.1.0 (/root/hyperliquid/engine): the file `engine/src/track.rs` has changed (1791494952.276067731s, 18s after last build at 1791494934.715706272s)
+   Compiling engine v0.1.0 (/root/hyperliquid/engine)
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=83e1abeae746962d -C extra-filename=-5f82f619233d9186 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+     Running `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=91161187e1b14dde -C extra-filename=-0f99fb4ac83a7c8a --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rmeta --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rmeta --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rmeta --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rmeta --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rmeta --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rmeta --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rmeta --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rmeta --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rmeta --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rmeta --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rmeta --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rmeta --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rmeta -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out`
+error[E0277]: the trait bound `ExploreEvent: Default` is not satisfied
+   --> engine/src/track.rs:529:97
+    |
+529 | ...HashSet::from_iter(["xyzzy".into()]), vec![Default::default()]) /* ~ changed by cargo-mutants ~ */
+    |                                               ^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `Default` is not implemented for `ExploreEvent`
+   --> engine/src/track.rs:181:1
+    |
+181 | pub struct ExploreEvent {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `engine` (lib) due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=91161187e1b14dde -C extra-filename=-0f99fb4ac83a7c8a --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rmeta --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rmeta --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rmeta --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rmeta --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rmeta --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rmeta --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rmeta --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rmeta --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rmeta --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rmeta --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rmeta --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rmeta --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rmeta -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out` (exit status: 1)
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `engine` (lib test) due to 1 previous error
+
+Caused by:
+  process didn't exit successfully: `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name engine --edition=2021 engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=83e1abeae746962d -C extra-filename=-5f82f619233d9186 --out-dir /root/hyperliquid/target/debug/deps -L dependency=/root/hyperliquid/target/debug/deps --extern anyhow=/root/hyperliquid/target/debug/deps/libanyhow-3ebb6e5db4a17590.rlib --extern async_trait=/root/hyperliquid/target/debug/deps/libasync_trait-588cc0803d3ae9cf.so --extern chrono=/root/hyperliquid/target/debug/deps/libchrono-dacdd9cfd5278f8a.rlib --extern data=/root/hyperliquid/target/debug/deps/libdata-7662bfe7006d2db8.rlib --extern hyperliquid_api=/root/hyperliquid/target/debug/deps/libhyperliquid_api-4c88b5d58ab25df9.rlib --extern math=/root/hyperliquid/target/debug/deps/libmath-574dbc0160c47f33.rlib --extern once_cell=/root/hyperliquid/target/debug/deps/libonce_cell-9b38858089cc1fb0.rlib --extern serde=/root/hyperliquid/target/debug/deps/libserde-959a7084ded7af91.rlib --extern serde_json=/root/hyperliquid/target/debug/deps/libserde_json-c4d9d7ed05253a11.rlib --extern strategy=/root/hyperliquid/target/debug/deps/libstrategy-b45567442553b17d.rlib --extern thiserror=/root/hyperliquid/target/debug/deps/libthiserror-de9c9fcd6cbb1827.rlib --extern tokio=/root/hyperliquid/target/debug/deps/libtokio-bcdc373ccc494250.rlib --extern tracing=/root/hyperliquid/target/debug/deps/libtracing-9850ce6cdb6f4024.rlib --extern utils=/root/hyperliquid/target/debug/deps/libutils-0e6a969e53bb9b88.rlib -L native=/root/hyperliquid/target/debug/build/ring-a1bfc645f1f5b45c/out` (exit status: 1)
+
+*** result: Failure(101)

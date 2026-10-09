@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with > in merge_effective_weights
+@@ -417,17 +417,17 @@
+         ensemble_weights: tracker_w.clone(),
+         ..Default::default()
+     };
+     for (name, lw) in live {
+         if !tracker_w.contains_key(name) {
+             out.unknown.push(name.clone());
+             continue;
+         }
+-        if evidence_n(name) < min_n {
++        if evidence_n(name) > /* ~ changed by cargo-mutants ~ */ min_n {
+             out.ensemble_weights.insert(name.clone(), *lw);
+             out.live_applied.push(name.clone());
+         } else {
+             out.live_overridden.push(name.clone());
+         }
+     }
+     out.live_applied.sort();
+     out.live_overridden.sort();

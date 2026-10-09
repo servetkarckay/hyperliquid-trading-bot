@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace / with * in Engine::run_cycle
+@@ -2496,17 +2496,17 @@
+             for e2 in &universe_returns {
+                 sgn_acc += e2.1;
+             }
+             let s = (
+                 sgn_acc / universe_returns.len().max(1) as f64,
+                 universe_returns.len(),
+             );
+             let crisis = universe_returns.iter().map(|e2| e2.1.abs()).sum::<f64>()
+-                / universe_returns.len().max(1) as f64
++                * /* ~ changed by cargo-mutants ~ */ universe_returns.len().max(1) as f64
+                 > 0.05;
+             self.am.cfg.max_correlation = if crisis {
+                 0.35
+             } else {
+                 crate::allocation_manager::LOOSE_CORR
+             };
+             // black-swan: işaretli ort < −%15 → TÜM pozisyonları KAPAT (gerçek flatten)
+             if !universe_returns.is_empty() && s.0 < -0.15 {

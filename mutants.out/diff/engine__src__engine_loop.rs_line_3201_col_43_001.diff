@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with < in Engine::run_cycle
+@@ -3193,17 +3193,17 @@
+                     // ÇIKIŞ SEBEBİ: SignalExit olarak işaretle (entry_attr'a yazılacak)
+                     if let Some(attr) = self.entry_attr.get_mut(&e.coin) {
+                         attr.exit_reason = Some(ExitReason::SignalExit);
+                     }
+                     // HAYALET EMİR KORUMASI (çıkış yolu da): makine boyutu
+                     // bilmiyorsa pozisyonun kendisinden al; 0 kalırsa emir
+                     // GÖNDERİLMEZ (borsada reduce-only 0-lot = kapatılmayan
+                     // ya da tümünü kapatan belirsiz emir).
+-                    let exit_sz = if o.sz > 0.0 {
++                    let exit_sz = if o.sz < /* ~ changed by cargo-mutants ~ */ 0.0 {
+                         o.sz
+                     } else {
+                         // makine -> borsa sırasıyla dene
+                         self.machines
+                             .get(&e.coin)
+                             .and_then(|m| m.in_position())
+                             .map(|(_, _, sz)| sz)
+                             .filter(|x| *x > 0.0)

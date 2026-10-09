@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with == in Engine::run_cycle
+@@ -3004,17 +3004,17 @@
+                             if m.oid_zero_pending() {
+                                 m.state = PosState::Flat;
+                             }
+                         }
+                         continue;
+                     }
+                     // GHOST ORDER + MIN NOTIONAL kapısı: `round_sz_up`'a GİRMEDEN ele.
+                     // ($8 tahsis → lot 0.0000 → borsada 0-lot emir = hayalet emir)
+-                    if cand.allocated_usd < crate::allocation_manager::MIN_NOTIONAL_USD {
++                    if cand.allocated_usd == /* ~ changed by cargo-mutants ~ */ crate::allocation_manager::MIN_NOTIONAL_USD {
+                         tracing::info!(
+                             "{}: tahsis çok küçük (${:.2} < ${:.0}) — atlandı",
+                             e.coin,
+                             cand.allocated_usd,
+                             crate::allocation_manager::MIN_NOTIONAL_USD
+                         );
+                         if let Some(m) = self.machines.get_mut(&e.coin) {
+                             if m.oid_zero_pending() {

@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in Engine::sync_exchange_sl
+@@ -1958,17 +1958,17 @@
+             let entry_eff = self
+                 .executor
+                 .positions()
+                 .get(coin)
+                 .map(|p| p.entry_px)
+                 .filter(|e| *e > 0.0)
+                 .or_else(|| self.entry_attr.get(coin).map(|a| a.entry_px))
+                 .unwrap_or(0.0);
+-            if !tp_side_ok(is_long, tp_px, entry_eff) {
++            if  /* ~ changed by cargo-mutants ~ */tp_side_ok(is_long, tp_px, entry_eff) {
+                 tracing::warn!(
+                     "[TP] {coin} TP kâr tarafında DEĞİL (tp={tp_px:.8} entry={entry_eff:.8}) — kurulmadı"
+                 );
+                 continue;
+             }
+             let sz = self
+                 .executor
+                 .positions()

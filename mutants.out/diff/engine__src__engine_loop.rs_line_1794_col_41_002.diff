@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::sync_exchange_sl
+@@ -1786,17 +1786,17 @@
+                     // GEVŞEME KAPISI: long için yeni stop ESKİDEN YÜKSEK,
+                     // short için DAHA DÜŞÜK olmalı. Ayrıca pozisyon kapanmış
+                     // stop'u (mark çok uzaklaşmış) yeniden açmayalım.
+                     let better = if is_long {
+                         target > t.cur_sl_px + self.loop_cfg.trail_min_step * t.atr_px
+                     } else {
+                         target < t.cur_sl_px - self.loop_cfg.trail_min_step * t.atr_px
+                     };
+-                    if better && target > 0.0 {
++                    if better && target >= /* ~ changed by cargo-mutants ~ */ 0.0 {
+                         match self
+                             .executor
+                             .replace_sl(coin, is_long, szi.abs(), target)
+                             .await
+                         {
+                             Ok(_) => {
+                                 let t = self.trail.get_mut(coin).unwrap();
+                                 t.cur_sl_px = target;

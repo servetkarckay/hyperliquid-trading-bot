@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace - with / in Engine::run_cycle
+@@ -3102,17 +3102,17 @@
+                     };
+                     let band = self.am.cfg.cost.execution_band_bps(spread_bps_band);
+                     let ord_px = match mark_map.get(&e.coin) {
+                         Some(mk) if *mk > 0.0 => {
+                             let f = band / 10_000.0;
+                             if side_sm.is_buy() {
+                                 *mk * (1.0 + f)
+                             } else {
+-                                *mk * (1.0 - f)
++                                *mk * (1.0 / /* ~ changed by cargo-mutants ~ */ f)
+                             }
+                         }
+                         _ => {
+                             let f = band / 10_000.0;
+                             let raw = if side_sm.is_buy() {
+                                 entry_px * (1.0 + f)
+                             } else {
+                                 entry_px * (1.0 - f)

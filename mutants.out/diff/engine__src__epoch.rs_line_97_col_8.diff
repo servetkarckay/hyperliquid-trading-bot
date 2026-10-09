@@ -1,0 +1,21 @@
+--- engine/src/epoch.rs
++++ delete ! in fresh_start_decision
+@@ -89,17 +89,17 @@
+ /// | 1 | yok | evet | `Wipe` (İLK bootstrap çalıştırması) |
+ /// | 1 | **var** | evet | `KeepExisting` (reset bir kez olur; sonra state koru) |
+ /// | 1 | — | **hayır** | `Invalid` (canlı anahtarlarla flatten/reset yasağı) |
+ pub fn fresh_start_decision(
+     fresh_env: bool,
+     epoch_exists: bool,
+     is_testnet: bool,
+ ) -> FreshDecision {
+-    if !fresh_env {
++    if  /* ~ changed by cargo-mutants ~ */fresh_env {
+         return FreshDecision::KeepExisting;
+     }
+     if !is_testnet {
+         return FreshDecision::Invalid;
+     }
+     if epoch_exists {
+         return FreshDecision::KeepExisting;
+     }

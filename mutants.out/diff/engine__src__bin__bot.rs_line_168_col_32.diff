@@ -1,0 +1,21 @@
+--- engine/src/bin/bot.rs
++++ replace >= with < in main
+@@ -160,17 +160,17 @@
+         .unwrap_or(5);
+ 
+     // EĞİTİM/İŞLEM ZAMAN DİLİMİ AYNI OLMALI. Kelly eğitimi 1h mumlarla
+     // yapıldı (4321 bar); 1m'de stratejilerin çoğu (Elliott dahil) 300
+     // barlık pencerede sinyal üretemiyor → ağırlıkların tamamı ölü kalıyor.
+     let hist_bars: usize = std::env::var("ENGINE_HIST_BARS")
+         .ok()
+         .and_then(|v| v.parse().ok())
+-        .unwrap_or(if interval >= 3600 { 4400 } else { 300 });
++        .unwrap_or(if interval < /* ~ changed by cargo-mutants ~ */ 3600 { 4400 } else { 300 });
+     // Döngü periyodu. `ENGINE_INTERVAL` MUM interval'idır (1h stratejisi için
+     // 3600) ve döngü periyodunu KONTROL ETMEZ — daha önce 5 sn sabitti.
+     let cycle_secs: u64 = std::env::var("ENGINE_CYCLE_SECS")
+         .ok()
+         .and_then(|v| v.parse().ok())
+         .unwrap_or(300);
+     tracing::info!(
+         "BOT başlıyor: coins={} bar_interval={interval}s döngü={cycle_secs}s hist_bars={hist_bars} min_score={min_score}",

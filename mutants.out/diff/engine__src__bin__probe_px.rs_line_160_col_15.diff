@@ -1,0 +1,21 @@
+--- engine/src/bin/probe_px.rs
++++ replace <= with > in main
+@@ -152,17 +152,17 @@
+         ),
+         ("5 hane", (mid * 0.98 * 1e5).round() / 1e5),
+         ("4 hane", (mid * 0.98 * 1e4).round() / 1e4),
+         ("3 hane", (mid * 0.98 * 1e3).round() / 1e3),
+         ("2 hane", (mid * 0.98 * 1e2).round() / 1e2),
+         ("5 sig (tam)", round5sig_ref(mid * 0.98)),
+     ];
+     for (name, px) in cands {
+-        if px <= 0.0 || !px.is_finite() {
++        if px > /* ~ changed by cargo-mutants ~ */ 0.0 || !px.is_finite() {
+             println!("{name:22} px={px:.10} -> GEÇERSİZ (skip)");
+             continue;
+         }
+         let st = ex.place_limit(asset, true, sz, px, Tif::Alo, false).await;
+         match st {
+             Ok(s) => match (s.resting_oid(0), s.error(0)) {
+                 (Some(oid), _) => {
+                     println!("{name:22} px={px:.10} -> KABUL (oid={oid}), iptal ediliyor");

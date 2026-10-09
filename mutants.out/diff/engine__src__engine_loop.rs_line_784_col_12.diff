@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ delete ! in EntryGate::risk_lock_step
+@@ -776,17 +776,17 @@
+     /// Pozisyon yoksa sayaç artar; `RISK_LOCK_FLAT_CYCLES` dolunca kilit
+     /// açılır ve `true` döner.
+     ///
+     /// `verified` = bu döngüde flat durumu **gerçek `sync_positions_from`
+     /// sonucuyla** doğrulandı mı. REST taraması başarısız olduğu döngüde
+     /// `false` gelir → sayaç ilerlemez (bayat pozisyon haritası "flat"
+     /// görünüp kilidi erken açabilirdi).
+     pub fn risk_lock_step(&mut self, any_position: bool, verified: bool) -> bool {
+-        if !self.risk_locked {
++        if  /* ~ changed by cargo-mutants ~ */self.risk_locked {
+             return false;
+         }
+         if any_position {
+             self.flat_count = 0; // hâlâ pozisyon var → sayaç sıfırla
+             return false;
+         }
+         if !verified {
+             return false; // doğrulanmamış flat → sayac ilerletme

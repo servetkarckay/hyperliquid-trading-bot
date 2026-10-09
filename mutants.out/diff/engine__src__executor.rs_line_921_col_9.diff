@@ -1,0 +1,32 @@
+--- engine/src/executor.rs
++++ replace Executor::drain_tp_results -> usize with 0
+@@ -913,28 +913,17 @@
+                 );
+             }
+         }
+         n
+     }
+ 
+     /// Arka planda kurulan TP'lerin oid'ini kayda al (`drain_sl_results` şeması).
+     pub fn drain_tp_results(&mut self) -> usize {
+-        let mut n = 0usize;
+-        while let Ok((coin, oid, px)) = self.tp_rx.try_recv() {
+-            self.tp_orders.insert(coin.clone(), oid);
+-            if px > 0.0 {
+-                self.tp_last_px.insert(coin, px);
+-            }
+-            n += 1;
+-        }
+-        if n > 0 {
+-            tracing::info!("[TP] {n} arka-plan TP kaydı tamamlandı (tp_orders)");
+-        }
+-        n
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// **TRAILING STOP YENİLEME — KURALLI SIRA: ÖNCE YENİ STOP, SONRA ESKİYİ İPTAL.**
+     ///
+     /// Neden bu sira zorunlu: ters sırada (`iptal → yerleştir`) yerleştirme
+     /// başarısız olursa ya da ağ koparsa pozisyon **sıfır korumasız** kalır.
+     /// Not: `place_trigger` bazı coin'lerde fiyat ızgarası bulamayınca
+     /// ("invalid price") denemelerde tamamen başarısız olabiliyor.

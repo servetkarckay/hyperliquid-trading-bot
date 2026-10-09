@@ -1,0 +1,26 @@
+--- engine/src/engine_loop.rs
++++ replace Engine::unlock_risk with ()
+@@ -3468,22 +3468,17 @@
+         self.gate.entries_allowed()
+     }
+ 
+     /// Risk lock manuel açma (operatör müdahalesi için).
+     ///
+     /// Kilit açılır ama `entries_allowed` **yine** denklemden türetilir:
+     /// `health_ok=false` ise giriş kapalı kalır.
+     pub fn unlock_risk(&mut self) {
+-        if self.gate.unlock_manual() {
+-            tracing::warn!(
+-                "[RISK-LOCK] MANUEL AÇILDI — operatör müdahalesi (entries_allowed={})",
+-                self.entries_allowed()
+-            );
+-        }
++        () /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// UNKNOWN reconciliation eşleşmesi — aynı coin **VE** aynı cloid.
+ ///
+ /// Ayrı fonksiyon olmasının sebebi: test ağ olmadan çalışabilmeli. Emrin
+ /// borsadaki `oid`'sini döndürür, yoksa `None`.
+ pub fn find_by_cloid(

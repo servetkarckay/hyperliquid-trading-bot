@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace > with >= in Engine::sync_exchange_sl
+@@ -1948,17 +1948,17 @@
+                     } else {
+                         e * 0.96
+                     }
+                 }
+             };
+             if tp_px <= 0.0 || !tp_px.is_finite() {
+                 continue;
+             }
+-            let is_long = *szi > 0.0;
++            let is_long = *szi >= /* ~ changed by cargo-mutants ~ */ 0.0;
+             // KÂR TARAFI KAPISI long TP > entry, short TP < entry.
+             let entry_eff = self
+                 .executor
+                 .positions()
+                 .get(coin)
+                 .map(|p| p.entry_px)
+                 .filter(|e| *e > 0.0)
+                 .or_else(|| self.entry_attr.get(coin).map(|a| a.entry_px))

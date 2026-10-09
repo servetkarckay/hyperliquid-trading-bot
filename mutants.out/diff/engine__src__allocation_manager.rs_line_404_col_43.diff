@@ -1,0 +1,21 @@
+--- engine/src/allocation_manager.rs
++++ replace >= with < in AllocationManager::allocate
+@@ -396,17 +396,17 @@
+                 c.capped = true;
+                 tracing::info!(
+                     "[AL] keşif tavanı dolu — {max_funded} kişi × ${MIN_NOTIONAL_USD:.0} = ${:.2} (havuz), artık yer yok — {} elendi",
+                     max_funded as f64 * MIN_NOTIONAL_USD,
+                     c.coin
+                 );
+                 continue;
+             }
+-            let cap = if c.explorer_share >= 1.0 {
++            let cap = if c.explorer_share < /* ~ changed by cargo-mutants ~ */ 1.0 {
+                 self.cfg.explore_max_usd.min(explore_budget)
+             } else {
+                 explore_budget
+             };
+             let allow = (explore_budget - used).max(0.0);
+             let cap = cap.min(allow);
+             if cap < MIN_NOTIONAL_USD {
+                 c.allocated_usd = 0.0;

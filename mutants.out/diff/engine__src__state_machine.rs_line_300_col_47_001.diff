@@ -1,0 +1,21 @@
+--- engine/src/state_machine.rs
++++ replace match guard oid == pending_oid(&self.state).unwrap_or(0) with false in PositionStateMachine::on_order_status
+@@ -292,17 +292,17 @@
+     pub fn on_order_status(
+         &mut self,
+         oid: i64,
+         filled_size: f64,
+         remaining: f64,
+         avg_px: f64,
+     ) -> Action {
+         match self.state.clone() {
+-            PosState::Pending { side, .. } if oid == pending_oid(&self.state).unwrap_or(0) => {
++            PosState::Pending { side, .. } if false /* ~ changed by cargo-mutants ~ */ => {
+                 if remaining <= 1e-12 {
+                     // tam dolum
+                     self.state = PosState::InPosition {
+                         side,
+                         entry: avg_px,
+                         size: filled_size,
+                         peak: avg_px,
+                     };

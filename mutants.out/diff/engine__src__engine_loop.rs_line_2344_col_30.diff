@@ -1,0 +1,21 @@
+--- engine/src/engine_loop.rs
++++ replace < with == in Engine::run_cycle
+@@ -2336,17 +2336,17 @@
+         for coin in self.loop_cfg.coins.clone() {
+             let mut candles: Vec<data::Candle> = self
+                 .agg
+                 .history(&coin, self.loop_cfg.interval_secs)
+                 .to_vec();
+             if let Some(cur) = self.agg.current(&coin, self.loop_cfg.interval_secs) {
+                 candles.push(cur);
+             }
+-            if candles.len() < 60 {
++            if candles.len() == /* ~ changed by cargo-mutants ~ */ 60 {
+                 summaries.push((coin.clone(), "SKIP: mum yetersiz".into()));
+                 continue;
+             }
+             // STALE-SKIP — verisi donmuş coin sinyali öğrenmeye karışmasın
+             if self.agg.is_stale(&coin, self.loop_cfg.interval_secs, None) {
+                 summaries.push((coin.clone(), "STALE: veri donmuş".into()));
+                 continue;
+             }
