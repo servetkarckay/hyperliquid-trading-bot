@@ -44,9 +44,23 @@ async fn main() -> anyhow::Result<()> {
     let weights_path = std::env::var("ENSEMBLE_WEIGHTS_IN")
         .unwrap_or_else(|_| "/root/hyperliquid/config/ensemble_weights_live.json".into());
     let is_testnet = cfg.network == "testnet";
-    // YAPISAL KORUMA (her başlangıç yolunda): TESTNET epoch canlı endpoint'e
-    // karşı BAŞLAMAZ — emir hiç atılmadan süreç durur.
-    engine::epoch::assert_testnet_endpoint(&cfg.network, &cfg.api_url, "testnet")?;
+    // ORTAM TESPİTİ: mainnet = NETWORK=mainnet İLE BİRLİKTE MAINNET_CONFIRMED=1
+    // (çift anahtar: tek başına NETWORK yeterli DEĞİL — yanlışlıkla canlıya
+    // açılma koruması). Onaysız/eksik her koşu testnet kuralına düşer.
+    let environment = if cfg.network == "mainnet" {
+        if std::env::var("MAINNET_CONFIRMED").as_deref() != Ok("1") {
+            anyhow::bail!(
+                "[MAINNET] NETWORK=mainnet ama MAINNET_CONFIRMED=1 yok — \
+                 canlıya geçiş çift-onay ister (bilinçli operatör eylemi)"
+            );
+        }
+        "mainnet"
+    } else {
+        "testnet"
+    };
+    // YAPISAL KORUMA: environment ↔ endpoint eşleşmesi (testnet epoch canlı
+    // endpoint'e karşı başlamaz; mainnet ise gerçek mainnet hostu ister).
+    engine::epoch::assert_endpoint_for(environment, &cfg.network, &cfg.api_url)?;
 
     // Risk hafızası yolu: WIPE ve normal-yükleme AYNI kaynağı kullanır —
     // RISK_STATE_PATH env'i; custom path'te de fresh reset risk hafızasını

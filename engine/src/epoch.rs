@@ -65,6 +65,28 @@ pub enum FreshDecision {
 /// API url'si mainnet hostu içeriyorsa → hata. Böylece testnet modunda
 /// canlı endpoint'e emir gitmesi **yapısal olarak** engellenir (emir
 /// hiç atılmadan süreç durur).
+/// ENDPOINT KAPISI — environment'e göre eşleşme (mainnet promotion):
+/// - "testnet": mevcut testnet kuralı (assert_testnet_endpoint)
+/// - "mainnet": NETWORK=mainnet + gerçek mainnet hostu ZORUNLU;
+///   testnet hostu veya yanlış network KESİN red (karışma koruması)
+pub fn assert_endpoint_for(environment: &str, network: &str, api_url: &str) -> Result<()> {
+    if environment == "mainnet" {
+        if network != "mainnet" {
+            anyhow::bail!(
+                "environment=mainnet ama NETWORK=\"{network}\" — mainnet geçişi NETWORK=mainnet ister"
+            );
+        }
+        if api_url.contains("testnet") {
+            anyhow::bail!("environment=mainnet ama api_url testnet hostu içeriyor — karışma red");
+        }
+        if !api_url.contains("hyperliquid.xyz") {
+            anyhow::bail!("environment=mainnet ama api_url mainnet hostu değil: {api_url}");
+        }
+        return Ok(());
+    }
+    assert_testnet_endpoint(network, api_url, environment)
+}
+
 pub fn assert_testnet_endpoint(network: &str, api_url: &str, environment: &str) -> Result<()> {
     if environment != "testnet" {
         bail!("öğrenme dönemi environment=\"{environment}\" — yalnız testnet kabul edilir");
@@ -172,9 +194,9 @@ impl LearningEpoch {
                 "öğrenme dönemi dosyası BOZUK ({path}): {err} — sayaç sıfırlamasın diye                  açılış durduruldu; dosyayı onarın (atomik yazım zaten tmp+rename)"
             )
         })?;
-        if e.environment != "testnet" {
+        if e.environment != "testnet" && e.environment != "mainnet" {
             anyhow::bail!(
-                "öğrenme dönemi dosyası environment=\"{}\" — yalnız \"testnet\" geçerli ({path})",
+                "öğrenme dönemi dosyası environment=\"{}\" — yalnız \"testnet\"/\"mainnet\" geçerli ({path})",
                 e.environment
             );
         }
@@ -344,6 +366,57 @@ mod tests {
         );
     }
 
+    /// MAINNET PROMOTION sözleşmesi: endpoint kapısı mainnet'i doğru
+    /// çift-anahtar koşulda kabul eder, karışımı red eder.
+    #[test]
+    fn mainnet_endpoint_kapisı_sozlesmesi() {
+        // doğru mainnet üçlüsü → Ok
+        assert!(crate::epoch::assert_endpoint_for(
+            "mainnet",
+            "mainnet",
+            "https://api.hyperliquid.xyz"
+        )
+        .is_ok());
+        // testnet hostu ile mainnet → red (karışma)
+        assert!(crate::epoch::assert_endpoint_for(
+            "mainnet",
+            "mainnet",
+            "https://api.hyperliquid-testnet.xyz"
+        )
+        .is_err());
+        // yanlış NETWORK ile mainnet → red
+        assert!(crate::epoch::assert_endpoint_for(
+            "mainnet",
+            "testnet",
+            "https://api.hyperliquid.xyz"
+        )
+        .is_err());
+        // testnet üçlüsü hâlâ eski kurala tabi (geriye uyum)
+        assert!(crate::epoch::assert_endpoint_for(
+            "testnet",
+            "testnet",
+            "https://api.hyperliquid-testnet.xyz"
+        )
+        .is_ok());
+    }
+
+    /// MAINNET PROMOTION: epoch dosyası environment=mainnet ile YÜKLENİR.
+    #[test]
+    fn mainnet_epoch_yuklenir() {
+        let dir = std::env::temp_dir().join("epoch-test-mainnet");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("epoch.json");
+        let path = path.to_str().unwrap();
+        std::fs::write(
+            path,
+            br#"{"epoch_id":"mn1","environment":"mainnet","started_at":1,"starting_trade_count":0,"completed_trade_count":0,"status":"Learning"}"#,
+        )
+        .unwrap();
+        let e = LearningEpoch::load(path).expect("mainnet epoch yüklenmeli");
+        assert_eq!(e.expect("Some").environment, "mainnet");
+        let _ = std::fs::remove_file(path);
+    }
+
     /// Yeni dönem nötr başlar: fresh start tracker/weights dosyalarını
     /// temizler (bot.rs dosya yollarını uygular; karar tablosu yukarıda).
     #[test]
@@ -434,6 +507,15 @@ mod tests {
         let e = LearningEpoch::load(path);
         assert!(e.is_err(), "bozuk JSON Err dönmeli (sessiz None YASAK)");
         assert!(e.unwrap_err().to_string().contains("BOZUK"));
+
+        // (c0) environment=mainnet → KABUL (promotion sözleşmesi)
+        std::fs::write(
+            path,
+            br#"{"epoch_id":"mn","environment":"mainnet","started_at":1,"starting_trade_count":0,"completed_trade_count":0,"status":"Learning"}"#,
+        )
+        .unwrap();
+        let loaded_mn = LearningEpoch::load(path);
+        assert!(loaded_mn.is_ok(), "mainnet epoch kabul edilmeli");
 
         // (c) şema uyumsuz (environment=live) → Err
         std::fs::write(
