@@ -213,14 +213,19 @@ async fn main() -> anyhow::Result<()> {
         "TRAİLİNG STOP: on={trail_on} k={trail_atr_k}×ATR min_adım={trail_min_step}×ATR          \
          (yalnız SL ratchet'lenir; TP GERÇEK kapanıştır: giriş dolumunda reduce-only TP trigger asılır — entry_eff ± max(tp/sl×risk, 2×risk), §4)"
     );
+    let max_position_usd: f64 = std::env::var("ENGINE_MAX_POSITION_USD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(50.0);
     let lc = LoopConfig {
         coins,
         cycle_secs,
+        max_position_usd,
         interval_secs: interval,
         hist_bars,
         min_score,
         batch_window_ms: 100,
-        max_position_usd: 50.0,
         top_n,
         trail_on,
         trail_atr_k,

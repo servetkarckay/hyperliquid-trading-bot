@@ -15,5 +15,3 @@ config/*.json
 fuzz/artifacts/
 fuzz/target/
 fuzz/Cargo.lock
-.env.mainnet
-mainnet/

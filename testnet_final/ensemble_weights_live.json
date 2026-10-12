@@ -1,6 +1,6 @@
 {
   "origin": "live",
-  "ts": 1791665348451,
+  "ts": 1791702851488,
   "weights": {
     "Classic Indicators": 0.0000,
     "Cross-Sectional Momentum": 0.0000,
@@ -16,6 +16,6 @@
     "Regime Detection": 0.1000,
     "Squeeze Breakout": 1.0000,
     "Turtle": 0.1000,
-    "Wyckoff": 0.1000
+    "Wyckoff": 1.0175
   }
 }
