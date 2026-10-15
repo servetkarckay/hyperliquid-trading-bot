@@ -356,6 +356,36 @@ pub(crate) fn place_arm_gate(
     m.is_some_and(|m| m.is_recon_pending() || m.oid_zero_pending()) && coin_pre_pending
 }
 
+/// DİNAMİK KALDIRAÇ BOYUTLANDIRMASI (saf, test edilebilir):
+/// notional = margin × min(ENGINE_LEVERAGE, coin meta maxLeverage)
+/// üst sınırlar: max_position_usd (notional cap) ve equity × coin_max_lev
+/// (borsa margin sınırı — bu üstünde borsa emri RED eder).
+/// Döner: (sz, gerçek notional, efektif kaldıraç).
+pub(crate) fn leverage_sizing(
+    allocated_usd: f64,
+    entry_px: f64,
+    szd: u32,
+    engine_leverage: f64,
+    coin_max_lev: f64,
+    cap_usd: f64,
+    equity: f64,
+) -> (f64, f64, f64) {
+    let eff_lev = engine_leverage.min(coin_max_lev.max(1.0)).max(1.0);
+    let alloc = allocated_usd.max(0.0); // negatif margin → 0 (savunma)
+    let notional = (alloc * eff_lev)
+        .min(cap_usd.max(0.0))
+        .min(equity.max(0.0) * coin_max_lev.max(1.0));
+    // YUKARI yuvarlama margin/cap sınırını bir tick taşıyabilir —
+    // borsa insufficient-margin RED verir. O(1) çözüm: tick ızgarasında
+    // AŞAĞI yuvarla (sınır altı garanti; tek tick kaybı max).
+    let tick = 10f64.powi(-(szd as i32));
+    let mut sz = ((notional / entry_px) / tick).floor() * tick;
+    sz = (sz * 10f64.powi(szd as i32)).round() / 10f64.powi(szd as i32);
+    sz = sz.max(0.0);
+    let notional_final = sz * entry_px;
+    (sz, notional_final, eff_lev)
+}
+
 pub fn risk_lock_positions_left(left: &[(String, f64)]) -> String {
     if left.is_empty() {
         return "[]".to_string();
@@ -998,6 +1028,11 @@ impl Engine {
             Err(e) => return Err(e),
         };
 
+        let engine_leverage = std::env::var("ENGINE_LEVERAGE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|x| *x > 0.0)
+            .unwrap_or(5.0);
         Ok(Self {
             learning,
             learning_epoch_path,
@@ -1027,11 +1062,7 @@ impl Engine {
             explore_pick: None,
             gate: EntryGate::default(),
             rest_sync_verified: false,
-            leverage: std::env::var("ENGINE_LEVERAGE")
-                .ok()
-                .and_then(|v| v.parse::<f64>().ok())
-                .filter(|x| *x > 0.0)
-                .unwrap_or(5.0),
+            leverage: engine_leverage,
             entry_attr: recovered_attrs,
             trail: HashMap::new(),
             atr_px: HashMap::new(),
@@ -1046,7 +1077,9 @@ impl Engine {
             risk: crate::RiskManager::new(crate::RiskConfig {
                 max_position_notional_usd: lc_cl.max_position_usd,
                 max_total_notional_usd: lc_cl.max_position_usd * (lc_cl.top_n as f64 + 1.0),
-                max_leverage: 5.0,
+                // Dinamik kaldıraç boyutuyla TUTARLI: operatörün seçtiği
+                // ENGINE_LEVERAGE risk kapısının da üst sınırı olur.
+                max_leverage: engine_leverage.max(5.0),
                 min_account_equity_usd: 10.0,
                 max_drawdown_pct: 20.0,
                 max_open_orders_per_coin: 10,
@@ -1213,6 +1246,7 @@ impl Engine {
                 // (haritadan düşmüşse) TradeExit + R + sayaç ŞİMDİ yazılır;
                 // REST clearinghouse taramasına bağımlı DEĞİL (429/arıza
                 // durumunda kapanış kaydı yine yazılır).
+                let attr_risk_px = self.entry_attr.get(&coin).map(|a| a.risk_px).unwrap_or(0.0);
                 let pos_open = self
                     .executor
                     .positions()
@@ -1226,7 +1260,13 @@ impl Engine {
                     self.entry_attr.contains_key(&coin),
                 ) {
                     let excursion = self.trail.remove(&coin).map(|t| {
-                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                        // MFE/MAE paydası = GERÇEK risk (entry→SL). attr yoksa
+                        // ATR tabanlı fallback (eski davranış).
+                        let risk = if attr_risk_px > 0.0 {
+                            attr_risk_px
+                        } else {
+                            (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12)
+                        };
                         let fav = if t.is_long {
                             (t.peak_px - t.entry_px) / risk
                         } else {
@@ -1268,7 +1308,7 @@ impl Engine {
                     // yazsın (attr burada silinirse SignalExit
                     // kayıtlarına "signal" yazılmıyordu). MFE/MAE trail'den.
                     let excursion = self.trail.remove(&coin).map(|t| {
-                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                        let risk = attr.risk_px.max(1e-12);
                         let fav = if t.is_long {
                             (t.peak_px - t.entry_px) / risk
                         } else {
@@ -2077,7 +2117,7 @@ impl Engine {
                                 0.0,
                             );
                             let excursion = self.trail.remove(c).map(|t| {
-                                let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                                let risk = attr.risk_px.max(1e-12);
                                 let fav = if t.is_long { (t.peak_px - t.entry_px) / risk }
                                     else { (t.entry_px - t.peak_px) / risk };
                                 let adv = if t.is_long { (t.worst_px - t.entry_px) / risk }
@@ -2132,8 +2172,12 @@ impl Engine {
  // değildir; kayıp örneklerinin MFE ≈ 0 profili trailing'in
  // savunmadığını gösterir. Bu log, bir sonraki kararı VERİYE
  // dayandırır.
+                    let Some(mut attr) = self.entry_attr.remove(&c) else {
+                        continue;
+                    };
                     let excursion = self.trail.remove(&c).map(|t| {
-                        let risk = (t.atr_px * self.loop_cfg.trail_atr_k).max(1e-12);
+                        // MFE/MAE paydası = GERÇEK risk (entry→SL) — R ile AYNI
+                        let risk = attr.risk_px.max(1e-12);
                         let fav = if t.is_long {
                             (t.peak_px - t.entry_px) / risk
                         } else {
@@ -2165,9 +2209,6 @@ impl Engine {
                         if t.ratchets > 0 { ExitReason::TrailingStop } else { ExitReason::StopLoss }
                     } else {
                         ExitReason::StopLoss
-                    };
-                    let Some(mut attr) = self.entry_attr.remove(&c) else {
-                        continue;
                     };
                     attr.exit_reason = attr.exit_reason.or(Some(inferred));
  // R = net PnL / giriş riski. Pozisyon adedini bildiğimiz
@@ -2953,12 +2994,32 @@ impl Engine {
                         continue;
                     }
                     let cand_opt = selected.iter().find(|c| c.coin == e.coin);
-                    let notional = cand_opt.map(|c| c.allocated_usd).unwrap_or(0.0);
-                    let lev = pmap
+                    let margin = cand_opt.map(|c| c.allocated_usd).unwrap_or(0.0);
+                    let cand = selected.iter().find(|c| c.coin == e.coin).unwrap();
+                    let book_px = if cand.dir == Dir::Long { e.ask } else { e.bid };
+                    let entry_px = if book_px > 1e-6 {
+                        book_px
+                    } else {
+                        e.closes.last().copied().unwrap_or(0.0)
+                    };
+                    // DİNAMİK KALDIRAÇ (helper tek kaynak): notional = margin ×
+                    // min(ENGINE_LEVERAGE, coin meta maxLeverage); sınırlar:
+                    // max_position_usd ve equity × coin_max_lev (borsa margin).
+                    let coin_max_lev: f64 = self
+                        .executor
+                        .assets
                         .get(&e.coin)
-                        .map(|p| p.leverage)
-                        .unwrap_or(self.leverage)
-                        .max(self.leverage);
+                        .map(|(_, _, m)| *m as f64)
+                        .unwrap_or(1.0);
+                    let (sz, notional, lev) = leverage_sizing(
+                        margin,
+                        entry_px,
+                        szd,
+                        self.leverage,
+                        coin_max_lev,
+                        self.loop_cfg.max_position_usd,
+                        self.equity,
+                    );
                     // risk kontrolü: mevcut + bu-cycle kabul edilmiş maruziyet
                     if let Err(risk_err) =
                         projection.check_and_commit(&self.risk, self.equity, &e.coin, notional, lev)
@@ -2972,13 +3033,6 @@ impl Engine {
                         tracing::info!("{}: risk kapısı reddi — {risk_err}", e.coin);
                         continue;
                     }
-                    let cand = selected.iter().find(|c| c.coin == e.coin).unwrap();
-                    let book_px = if cand.dir == Dir::Long { e.ask } else { e.bid };
-                    let entry_px = if book_px > 1e-6 {
-                        book_px
-                    } else {
-                        e.closes.last().copied().unwrap_or(0.0)
-                    };
                     // ATR=0 / bozuk SL koruması (min %0.25 mesafe)
                     let min_dist = entry_px * 0.0025;
                     let (sl_ok, tp_ok) = if cand.dir == Dir::Long {
@@ -3023,7 +3077,7 @@ impl Engine {
                         }
                         continue;
                     }
-                    let sz = hyperliquid_api::round_sz_up(cand.allocated_usd / entry_px, szd);
+                    // (sz yukarıda leverage_sizing ile hesaplandı)
                     if sz <= 0.0 || !sz.is_finite() {
                         tracing::info!(
                             "{}: lot yuvarlaması 0 (${:.2}/@${:.2}) — hayalet emir koruması, atlandı",
@@ -4896,6 +4950,64 @@ mod lifecycle_contract_tests {
 }
 
 /// ── I — ÖLÇÜLEBİLİR METRİKLER (gerçek fill verisi; uydurma yok) ─────────
+#[cfg(test)]
+mod leverage_sizing_tests {
+    use super::leverage_sizing;
+
+    /// 5x: $92.5 margin × 5 = $462.5 notional (coin max 40 engel değil)
+    #[test]
+    fn bes_kat_notional() {
+        let (sz, notional, eff) = leverage_sizing(92.5, 0.5, 2, 5.0, 40.0, 1000.0, 92.5);
+        assert_eq!(eff, 5.0);
+        assert!((notional - 462.5).abs() < 0.1, "notional={notional}");
+        assert!((sz - 925.0).abs() < 0.01, "sz={sz}");
+    }
+
+    /// coin meta max 3x → ENGINE 5 istese de 3x'e KISITLANIR
+    #[test]
+    fn coin_max_kisitlanir() {
+        let (_, notional, eff) = leverage_sizing(92.5, 100.0, 2, 5.0, 3.0, 1000.0, 92.5);
+        assert_eq!(eff, 3.0);
+        // tick-floor: hedef 277.5 → grid 277.0 (sınır altı garanti)
+        assert!(
+            (276.0..=277.5).contains(&notional),
+            "3x notional={notional}"
+        );
+    }
+
+    /// notional cap: $1000 üstüne ÇIKMAZ
+    #[test]
+    fn cap_bin_ustune_cikmaz() {
+        let (_, notional, _) = leverage_sizing(500.0, 100.0, 2, 10.0, 40.0, 1000.0, 500.0);
+        assert!(notional <= 1000.0, "cap aşıldı: {notional}");
+    }
+
+    /// borsa margin sınırı: equity × coin_max — round-up taşması bir tick
+    /// düşülerek sınır altına indirilir (borsa insufficient-margin red vermesin)
+    #[test]
+    fn equity_coinmax_siniri() {
+        let (_, notional, _) = leverage_sizing(92.5, 100.0, 2, 5.0, 3.0, 1000.0, 92.5);
+        assert!(
+            notional <= 92.5 * 3.0,
+            "equity×coinmax aşıldı (round-up taşması düşülmedi): {notional}"
+        );
+        assert!(notional >= 275.0, "sınır altına aşırı düşüş: {notional}");
+    }
+
+    /// aşırı değerler: panik yok, sz finite/pozitif
+    #[test]
+    fn asiri_degerlerde_panik_yok() {
+        for (alloc, px, lev, cmax, cap, eq) in [
+            (0.0, 0.5, 5.0, 10.0, 100.0, 0.0),
+            (1e9, 1e-9, 100.0, 1.0, 1e12, 1e9),
+            (-5.0, 100.0, 3.0, 5.0, 1000.0, 100.0),
+        ] {
+            let (sz, _, _) = leverage_sizing(alloc, px, 2, lev, cmax, cap, eq);
+            assert!(sz.is_finite() && sz >= 0.0, "negatif alloc sz<0: {sz}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod metrics_tests {
     use crate::track::{PerformanceMetrics, StrategyTracker};
