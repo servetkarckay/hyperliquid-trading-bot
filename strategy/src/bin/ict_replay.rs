@@ -67,18 +67,18 @@ fn main() {
             };
             let entry = cs[i + 1].o;
             let risk = if p.long { entry - p.sl } else { p.sl - entry };
-            if !(risk > 0.0) || !risk.is_finite() {
+            if risk.is_nan() || risk <= 0.0 || !risk.is_finite() {
                 i += 1;
                 continue;
             }
             let end = (i + 1 + horizon).min(cs.len());
             let mut r: Option<f64> = None;
             let mut exit_idx = end - 1;
-            for j in i + 1..end {
+            for (j, bar) in cs.iter().enumerate().skip(i + 1).take(end - i - 1) {
                 let (sl_hit, tp_hit) = if p.long {
-                    (cs[j].l <= p.sl, cs[j].h >= p.tp)
+                    (bar.l <= p.sl, bar.h >= p.tp)
                 } else {
-                    (cs[j].h >= p.sl, cs[j].l <= p.tp)
+                    (bar.h >= p.sl, bar.l <= p.tp)
                 };
                 if sl_hit {
                     r = Some(-1.0);
