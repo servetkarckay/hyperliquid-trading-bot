@@ -29,6 +29,24 @@ use math::indicators;
 
 pub struct Mre;
 
+/// Tarama ayar paketi — kanonik eşikler = Default; optimizer bin'leri
+/// geçici varyant olarak kullanır.
+#[derive(Debug, Clone, Copy)]
+pub struct MreTune {
+    pub z_esik: f64,
+    pub sigma_ratio: f64,
+    pub sl_mult: f64,
+}
+impl Default for MreTune {
+    fn default() -> Self {
+        Self {
+            z_esik: Z_ESIK,
+            sigma_ratio: SIGMA_RATIO_ESIK,
+            sl_mult: 1.5,
+        }
+    }
+}
+
 pub const MIN_BARS: usize = 200;
 const Z_ESIK: f64 = 2.5;
 const SIGMA_RATIO_ESIK: f64 = 1.0;
@@ -102,13 +120,22 @@ pub fn plan_replay(
     universe_returns: &[(String, f64)],
     coin: &str,
 ) -> Option<ReversionPlan> {
+    replay_chain(candles, universe_returns, coin, &MreTune::default())
+}
+
+pub fn replay_chain(
+    candles: &[Candle],
+    universe_returns: &[(String, f64)],
+    coin: &str,
+    tune: &MreTune,
+) -> Option<ReversionPlan> {
     let (label, _) = regime_label(candles)?;
     if !regime_permits_mre(&label) {
         return None;
     }
-    let (z, long) = z_overreaction(candles)?;
-    let ratio = garch_elevated(candles)?;
-    if !(ratio.is_finite() && ratio >= SIGMA_RATIO_ESIK) {
+    let (z, long) = z_overreaction(candles, tune.z_esik)?;
+    let ratio = garch_threshold(candles, tune.sigma_ratio)?;
+    if !(ratio.is_finite() && ratio >= tune.sigma_ratio) {
         return None;
     }
     let band = rank_band_at(universe_returns, coin)?;
@@ -120,7 +147,7 @@ pub fn plan_replay(
     if !band_ok {
         return None;
     }
-    build_plan(candles, z, long, ratio, band)
+    build_plan(candles, z, long, ratio, band, tune.sl_mult)
 }
 
 fn build_plan(
@@ -129,6 +156,7 @@ fn build_plan(
     long: bool,
     ratio: f64,
     band: RankBand,
+    sl_mult: f64,
 ) -> Option<ReversionPlan> {
     let c = closes(candles);
     let last = c.len() - 1;
@@ -141,9 +169,9 @@ fn build_plan(
         .and_then(|v| *v)
         .filter(|v| v.is_finite() && *v > 0.0)?;
     let sl = if long {
-        entry - 1.5 * atr
+        entry - sl_mult * atr
     } else {
-        entry + 1.5 * atr
+        entry + sl_mult * atr
     };
     let strength = (0.5 + (z.abs() - Z_ESIK) / 5.0).clamp(0.35, 0.9);
     let note =
@@ -195,17 +223,27 @@ impl Strategy for Mre {
 }
 
 impl Mre {
-    /// evaluate gövdesi — test/replay için de açık.
+    /// evaluate gövdesi — test/replay için de açık (kanonik; MreTune::default).
     pub fn plan_entity(
         candles: &[Candle],
         universe_returns: &[(String, f64)],
         coin: &str,
     ) -> Option<ReversionPlan> {
+        Self::plan_tuned(candles, universe_returns, coin, &MreTune::default())
+    }
+
+    /// Parametrized zincir (optimizer bin'leri için).
+    pub fn plan_tuned(
+        candles: &[Candle],
+        universe_returns: &[(String, f64)],
+        coin: &str,
+        tune: &MreTune,
+    ) -> Option<ReversionPlan> {
         if candles.len() < MIN_BARS || universe_returns.len() < 20 {
             return None;
         }
         // ── 2) Z katmanı: yön burada belirlenir
-        let (z, long) = z_overreaction(candles)?;
+        let (z, long) = z_overreaction(candles, tune.z_esik)?;
         // ── 1) Rejim: TREND/Blocked red (AND zincirinde geç katman ama
         //    erken eleme ucuz)
         let (label, _) = regime_label(candles)?;
@@ -213,8 +251,8 @@ impl Mre {
             return None;
         }
         // ── 3) GARCH koşullu vol teyidi
-        let ratio = garch_elevated(candles)?;
-        if !(ratio.is_finite() && ratio >= SIGMA_RATIO_ESIK) {
+        let ratio = garch_threshold(candles, tune.sigma_ratio)?;
+        if !(ratio.is_finite() && ratio >= tune.sigma_ratio) {
             return None;
         }
         // ── 4) Cross-sectional rank teyidi
@@ -228,7 +266,7 @@ impl Mre {
             return None;
         }
         // ── Fiyat planı: hedef = aşırı hareketin başlangıcı
-        build_plan(candles, z, long, ratio, band)
+        build_plan(candles, z, long, ratio, band, tune.sl_mult)
     }
 }
 
@@ -248,7 +286,7 @@ fn regime_permits_mre(label: &RegimeLabel) -> bool {
 
 /// De Bondt-Thaler Z katmanı: (z, long) — z ≤ −2.5 → panik long;
 /// z ≥ +2.5 → euphoria short. Arasında → None.
-pub fn z_overreaction(candles: &[Candle]) -> Option<(f64, bool)> {
+pub fn z_overreaction(candles: &[Candle], z_esik: f64) -> Option<(f64, bool)> {
     let c = closes(candles);
     if c.len() < SD_WINDOW + 8 {
         return None;
@@ -260,9 +298,9 @@ pub fn z_overreaction(candles: &[Candle]) -> Option<(f64, bool)> {
     };
     let move6 = c[c.len() - 1] / c[c.len() - 1 - MOVE_N] - 1.0;
     let z = move6 / (sd * (MOVE_N as f64).sqrt()).max(1e-9);
-    if z <= -Z_ESIK {
+    if z <= -z_esik {
         Some((z, true))
-    } else if z >= Z_ESIK {
+    } else if z >= z_esik {
         Some((z, false))
     } else {
         None
@@ -271,7 +309,7 @@ pub fn z_overreaction(candles: &[Candle]) -> Option<(f64, bool)> {
 
 /// GARCH(1,1) koşullu vol teyidi — σ_next/σ_long-run oranı.
 /// Anomalinin volatilite patlaması yaratması şartı (≥1.0 doğal eşik).
-pub fn garch_elevated(candles: &[Candle]) -> Option<f64> {
+pub fn garch_threshold(candles: &[Candle], _th: f64) -> Option<f64> {
     let c = closes(candles);
     if c.len() < MIN_BARS {
         return None;
@@ -306,7 +344,7 @@ mod tests {
             let i = 104 + k;
             cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
         }
-        let (z, long) = z_overreaction(&cs).expect("uygundur");
+        let (z, long) = z_overreaction(&cs, Z_ESIK).expect("uygundur");
         assert!(long && z <= -2.5, "panik z={z}");
         // ayna: euphoria (short)
         let ups = [1.0, 2.0, 4.0, 6.0, 8.0, 10.0];
@@ -322,14 +360,14 @@ mod tests {
                 1200.0,
             );
         }
-        let (z, long) = z_overreaction(&cs).expect("uygundur");
+        let (z, long) = z_overreaction(&cs, Z_ESIK).expect("uygundur");
         assert!(!long && z >= 2.5, "euphoria z={z}");
     }
 
     #[test]
     fn z_esik_alti_red() {
         // sakin seride z ~0 → None
-        assert!(z_overreaction(&flat(120, 100.0)).is_none());
+        assert!(z_overreaction(&flat(120, 100.0), Z_ESIK).is_none());
     }
 
     #[test]
@@ -341,7 +379,7 @@ mod tests {
             let px = 100.0 + (if i % 2 == 0 { amp } else { -amp });
             cs.push(candle((i as i64) * H, px, px + 0.1, px - 0.1, px, 100.0));
         }
-        let r = garch_elevated(&cs);
+        let r = garch_threshold(&cs, SIGMA_RATIO_ESIK);
         assert!(r.is_some(), "oran hesaplanmalı");
         let _ = r.unwrap();
     }

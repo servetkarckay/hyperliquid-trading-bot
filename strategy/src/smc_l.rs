@@ -218,6 +218,26 @@ pub fn core_plan(candles: &[Candle]) -> Option<Plan> {
 
 pub struct SweepCisd;
 
+/// Tarama ayar paketi — SweepCisd çekirdeği optimizer bin'leri için
+/// parametrized; üretim Default (kanonik eşikler).
+#[derive(Debug, Clone, Copy)]
+pub struct SmcTune {
+    pub wick_min: f64,
+    pub sweep_lookback: usize,
+    pub disp_body_atr: f64,
+    pub min_rr: f64,
+}
+impl Default for SmcTune {
+    fn default() -> Self {
+        Self {
+            wick_min: WICK_MIN,
+            sweep_lookback: SWEEP_LOOKBACK,
+            disp_body_atr: DISP_BODY_ATR,
+            min_rr: MIN_RR,
+        }
+    }
+}
+
 /// 1h mum: 120-bar likidite penceresi + 4h EMA20 (≈84 bar) ısınması.
 pub const MIN_BARS: usize = 220;
 const ATR_N: usize = 14;
@@ -263,6 +283,10 @@ struct Setup {
 impl SweepCisd {
     /// Kurulum taraması — sinyal varsa fiyat planıyla döner.
     pub fn plan(candles: &[Candle]) -> Option<Plan> {
+        Self::plan_with(candles, &SmcTune::default())
+    }
+
+    pub fn plan_with(candles: &[Candle], tune: &SmcTune) -> Option<Plan> {
         if candles.len() < MIN_BARS {
             return None;
         }
@@ -275,18 +299,25 @@ impl SweepCisd {
         }
         let last = candles.len() - 1;
         if htf_trend_up(candles)? {
-            plan_long(candles, &h, &l, atr, last)
+            plan_long(candles, &h, &l, atr, last, tune)
         } else {
-            plan_short(candles, &h, &l, atr, last)
+            plan_short(candles, &h, &l, atr, last, tune)
         }
     }
 }
 
-fn plan_long(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) -> Option<Plan> {
-    let start = last.saturating_sub(SWEEP_LOOKBACK);
+fn plan_long(
+    candles: &[Candle],
+    h: &[f64],
+    l: &[f64],
+    atr: f64,
+    last: usize,
+    tune: &SmcTune,
+) -> Option<Plan> {
+    let start = last.saturating_sub(tune.sweep_lookback);
     let (sweep, st) = (start..last)
         .rev()
-        .find_map(|s| long_setup(candles, l, atr, s, last).map(|st| (s, st)))?;
+        .find_map(|s| long_setup(candles, l, atr, s, last, tune).map(|st| (s, st)))?;
     let bar = &candles[last];
     let touched = if st.confirm == last {
         true
@@ -302,18 +333,25 @@ fn plan_long(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) ->
     if risk.is_nan() || risk <= 0.0 {
         return None;
     }
-    let tp = target_long(h, last, entry, risk);
-    if (tp - entry) / risk < MIN_RR {
+    let tp = target_long(h, last, entry, risk, tune.min_rr);
+    if (tp - entry) / risk < tune.min_rr {
         return None;
     }
     Some(build_plan(true, entry, sl, tp, atr, st))
 }
 
-fn plan_short(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) -> Option<Plan> {
+fn plan_short(
+    candles: &[Candle],
+    h: &[f64],
+    l: &[f64],
+    atr: f64,
+    last: usize,
+    tune: &SmcTune,
+) -> Option<Plan> {
     let start = last.saturating_sub(SWEEP_LOOKBACK);
     let (sweep, st) = (start..last)
         .rev()
-        .find_map(|s| short_setup(candles, h, atr, s, last).map(|st| (s, st)))?;
+        .find_map(|s| short_setup(candles, h, atr, s, last, tune).map(|st| (s, st)))?;
     let bar = &candles[last];
     let touched = if st.confirm == last {
         true
@@ -329,8 +367,8 @@ fn plan_short(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) -
     if risk.is_nan() || risk <= 0.0 {
         return None;
     }
-    let tp = target_short(l, last, entry, risk);
-    if (entry - tp) / risk < MIN_RR {
+    let tp = target_short(l, last, entry, risk, tune.min_rr);
+    if (entry - tp) / risk < tune.min_rr {
         return None;
     }
     Some(build_plan(false, entry, sl, tp, atr, st))
@@ -356,7 +394,14 @@ fn build_plan(long: bool, entry: f64, sl: f64, tp: f64, atr: f64, st: Setup) -> 
 }
 
 /// Long sweep: dip likiditesi alınır, kapanış seviyenin üstünde, fitil baskın.
-fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) -> Option<Setup> {
+fn long_setup(
+    candles: &[Candle],
+    l: &[f64],
+    atr: f64,
+    s: usize,
+    last: usize,
+    tune: &SmcTune,
+) -> Option<Setup> {
     let cd = &candles[s];
     let range = cd.h - cd.l;
     if range.is_nan() || range <= 0.0 {
@@ -364,7 +409,7 @@ fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) ->
     }
     let lower_wick = cd.o.min(cd.c) - cd.l;
     let wick_ratio = lower_wick / range;
-    if wick_ratio < WICK_MIN {
+    if wick_ratio < tune.wick_min {
         return None;
     }
     let level = liquidity_lows(l, s)
@@ -375,7 +420,7 @@ fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) ->
         return None;
     }
     // Displacement + FVG (3 mumluk imbalance, orta mum yönlü ve güçlü).
-    let (m, fvg) = first_bull_fvg(candles, s, atr)?;
+    let (m, fvg) = first_bull_fvg(candles, s, atr, tune.disp_body_atr)?;
     // CISD: displacement öncesi SON düşüş mumunun açılışının üstünde
     // gövde kapanışı.
     let ob = (s..m).rev().find(|&i| candles[i].c < candles[i].o)?;
@@ -401,7 +446,14 @@ fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) ->
 }
 
 /// Short sweep: tepe likiditesi alınır, kapanış seviyenin altında, fitil baskın.
-fn short_setup(candles: &[Candle], h: &[f64], atr: f64, s: usize, last: usize) -> Option<Setup> {
+fn short_setup(
+    candles: &[Candle],
+    h: &[f64],
+    atr: f64,
+    s: usize,
+    last: usize,
+    tune: &SmcTune,
+) -> Option<Setup> {
     let cd = &candles[s];
     let range = cd.h - cd.l;
     if range.is_nan() || range <= 0.0 {
@@ -419,7 +471,7 @@ fn short_setup(candles: &[Candle], h: &[f64], atr: f64, s: usize, last: usize) -
     if !level.is_finite() {
         return None;
     }
-    let (m, fvg) = first_bear_fvg(candles, s, atr)?;
+    let (m, fvg) = first_bear_fvg(candles, s, atr, tune.disp_body_atr)?;
     let ob = (s..m).rev().find(|&i| candles[i].c > candles[i].o)?;
     let cisd = candles[ob].o;
     let confirm = (ob + 1..=last).find(|&i| candles[i].c < cisd && candles[i].c < candles[i].o)?;
@@ -443,24 +495,32 @@ fn short_setup(candles: &[Candle], h: &[f64], atr: f64, s: usize, last: usize) -
 
 /// (orta, (fvg_alt, fvg_üst)) — ilk geçerli boğa FVG'si.
 /// `from` = sweep barı; FVG sweep'ten SONRA oluşmalı.
-fn first_bull_fvg(candles: &[Candle], from: usize, atr: f64) -> Option<(usize, (f64, f64))> {
+fn first_bull_fvg(
+    candles: &[Candle],
+    from: usize,
+    atr: f64,
+    disp_min: f64,
+) -> Option<(usize, (f64, f64))> {
     (from + 2..candles.len()).find_map(|j| {
         let c0 = &candles[j - 2];
         let m = &candles[j - 1];
         let c2 = &candles[j];
-        (c2.l > c0.h && m.c > m.o && (m.c - m.o) >= DISP_BODY_ATR * atr)
-            .then_some((j - 1, (c0.h, c2.l)))
+        (c2.l > c0.h && m.c > m.o && (m.c - m.o) >= disp_min * atr).then_some((j - 1, (c0.h, c2.l)))
     })
 }
 
 /// (orta, (fvg_alt, fvg_üst)) — ilk geçerli ayı FVG'si.
-fn first_bear_fvg(candles: &[Candle], from: usize, atr: f64) -> Option<(usize, (f64, f64))> {
+fn first_bear_fvg(
+    candles: &[Candle],
+    from: usize,
+    atr: f64,
+    disp_min: f64,
+) -> Option<(usize, (f64, f64))> {
     (from + 2..candles.len()).find_map(|j| {
         let c0 = &candles[j - 2];
         let m = &candles[j - 1];
         let c2 = &candles[j];
-        (c2.h < c0.l && m.c < m.o && (m.o - m.c) >= DISP_BODY_ATR * atr)
-            .then_some((j - 1, (c2.h, c0.l)))
+        (c2.h < c0.l && m.c < m.o && (m.o - m.c) >= disp_min * atr).then_some((j - 1, (c2.h, c0.l)))
     })
 }
 
@@ -516,7 +576,7 @@ fn is_pivot_high(v: &[f64], i: usize, span: usize) -> bool {
 }
 
 /// En yakın (≥ MIN_RR veren) üst likidite havuzu; yoksa 3R yedek hedef.
-fn target_long(h: &[f64], last: usize, entry: f64, risk: f64) -> f64 {
+fn target_long(h: &[f64], last: usize, entry: f64, risk: f64, min_rr: f64) -> f64 {
     let lo = last.saturating_sub(SWING_LOOKBACK);
     let mut levels: Vec<f64> = (lo..=last)
         .filter(|&i| i >= SWING_SPAN && i + SWING_SPAN <= last && is_pivot_high(h, i, SWING_SPAN))
@@ -534,12 +594,12 @@ fn target_long(h: &[f64], last: usize, entry: f64, risk: f64) -> f64 {
     levels.sort_by(f64::total_cmp);
     levels
         .into_iter()
-        .find(|x| (x - entry) / risk >= MIN_RR)
+        .find(|x| (x - entry) / risk >= min_rr)
         .unwrap_or(entry + 3.0 * risk)
 }
 
 /// En yakın (≥ MIN_RR veren) alt likidite havuzu; yoksa 3R yedek hedef.
-fn target_short(l: &[f64], last: usize, entry: f64, risk: f64) -> f64 {
+fn target_short(l: &[f64], last: usize, entry: f64, risk: f64, min_rr: f64) -> f64 {
     let lo = last.saturating_sub(SWING_LOOKBACK);
     let mut levels: Vec<f64> = (lo..=last)
         .filter(|&i| i >= SWING_SPAN && i + SWING_SPAN <= last && is_pivot_low(l, i, SWING_SPAN))
@@ -557,7 +617,7 @@ fn target_short(l: &[f64], last: usize, entry: f64, risk: f64) -> f64 {
     levels.sort_by(|a, b| b.total_cmp(a));
     levels
         .into_iter()
-        .find(|x| (entry - x) / risk >= MIN_RR)
+        .find(|x| (entry - x) / risk >= min_rr)
         .unwrap_or(entry - 3.0 * risk)
 }
 
@@ -703,7 +763,7 @@ mod ict_core_tests {
         let h: Vec<f64> = cs.iter().map(|x| x.h).collect();
         let l: Vec<f64> = cs.iter().map(|x| x.l).collect();
         assert_eq!(htf_trend_up(&cs), Some(false), "htf düşüş bekleniyor");
-        assert!(plan_long(&cs, &h, &l, 0.5, cs.len() - 1).is_none());
+        assert!(plan_long(&cs, &h, &l, 0.5, cs.len() - 1, &SmcTune::default()).is_none());
     }
 
     #[test]

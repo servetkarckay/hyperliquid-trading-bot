@@ -50,6 +50,26 @@ const EL_PIVOTS: usize = 3;
 pub const EL_WINDOW: usize = 60;
 pub const SOS_VOL_MULT: f64 = 1.3;
 
+/// Tarama ayar paketi (kanonik eşikler = Default; tarihsel doğrulama
+/// taramaları bunu geçici varyant olarak kullanır — üretim Default).
+#[derive(Debug, Clone, Copy)]
+pub struct Tune {
+    pub tp_mult: f64,
+    pub sl_mult: f64,
+    pub sos_vol: f64,
+    pub sq_buf: f64,
+}
+impl Default for Tune {
+    fn default() -> Self {
+        Self {
+            tp_mult: 5.0,
+            sl_mult: 1.5,
+            sos_vol: SOS_VOL_MULT,
+            sq_buf: SQUEEZE_BUFFER,
+        }
+    }
+}
+
 /// Fiyat planı (replay/sınav için açık).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrendPlan {
@@ -92,8 +112,13 @@ impl Strategy for Mmt {
 }
 
 impl Mmt {
-    /// Katman zinciri — her katman geçilmezse None.
+    /// Katman zinciri — her katman geçilmezse None (kanonik ayarlar).
     pub fn plan(candles: &[Candle]) -> Option<TrendPlan> {
+        Self::plan_with(candles, &Tune::default())
+    }
+
+    /// Parametrized katman zinciri — tarama bin'leri için.
+    pub fn plan_with(candles: &[Candle], tune: &Tune) -> Option<TrendPlan> {
         if candles.len() < MIN_BARS {
             return None;
         }
@@ -108,7 +133,7 @@ impl Mmt {
             return None;
         }
         // ── 3) Squeeze enerjisi (kırılımdan önce sıkışma şart)
-        if !squeeze_on(candles) {
+        if !squeeze_on_buf(candles, tune.sq_buf) {
             return None;
         }
         // ── 4) Dow yapısı (HH+HL / LH+LL + hacim)
@@ -116,7 +141,7 @@ impl Mmt {
             return None;
         }
         // ── 5) Wyckoff SOS (geniş gövde + hacim patlaması)
-        let vol_expand = wyckoff_sos(candles, long)?;
+        let vol_expand = wyckoff_sos_mult(candles, long, tune.sos_vol)?;
         // ── 6) Elliott darbe sayımı (tekdüze pivot ilerleyişi)
         if !elliott_ok(candles, long) {
             return None;
@@ -134,9 +159,9 @@ impl Mmt {
         }
         let entry = c[last];
         let (sl, tp) = if long {
-            (entry - 2.0 * atr, entry + 3.0 * atr)
+            (entry - tune.sl_mult * atr, entry + tune.tp_mult * atr)
         } else {
-            (entry + 2.0 * atr, entry - 3.0 * atr)
+            (entry + tune.sl_mult * atr, entry - tune.tp_mult * atr)
         };
         // Güç: temel 0.55 + kırılım hacim fazlalığı
         let strength = (0.55 + 0.25 * (vol_expand.clamp(1.0, 2.0) - 1.0)).clamp(0.35, 1.0);
@@ -213,6 +238,10 @@ pub fn turtle_trigger(candles: &[Candle]) -> Option<bool> {
 /// açılımı min() ile seçilmez → tezahür noktasından bağımsız enerji
 /// kontrolü; sabitler (125, ×1.03) Method-I kanunu — ayar yok.
 pub fn squeeze_on(candles: &[Candle]) -> bool {
+    squeeze_on_buf(candles, SQUEEZE_BUFFER)
+}
+
+pub fn squeeze_on_buf(candles: &[Candle], sq_buf: f64) -> bool {
     let c = closes(candles);
     let bb = indicators::bollinger(&c, BB_N, BB_K);
     let width: Vec<f64> = bb
@@ -238,7 +267,7 @@ pub fn squeeze_on(candles: &[Candle]) -> bool {
         return false;
     }
     // BB genişliği 0'a inebilir (durağan seri) — sıfır = uç sıkışma.
-    recent_min <= prior_min * SQUEEZE_BUFFER
+    recent_min <= prior_min * sq_buf
 }
 
 /// Dow yapısı: son iki pivot karşılaştırması + hacim doğrulayıcı.
@@ -296,6 +325,10 @@ fn pivots(v: &[f64], k: usize) -> (Vec<f64>, Vec<f64>) {
 /// Wyckoff SOS: kırılım barı geniş gövde (≥1×ATR20) + hacim patlaması
 /// (≥1.3×SMA20). Dönüş: hacim/SMA20 oranı (güc girdisi).
 pub fn wyckoff_sos(candles: &[Candle], long: bool) -> Option<f64> {
+    wyckoff_sos_mult(candles, long, SOS_VOL_MULT)
+}
+
+pub fn wyckoff_sos_mult(candles: &[Candle], long: bool, sos_mult: f64) -> Option<f64> {
     let c = closes(candles);
     let n = c.len();
     if n < ATR_N + 5 {
@@ -317,7 +350,7 @@ pub fn wyckoff_sos(candles: &[Candle], long: bool) -> Option<f64> {
     }
     let dir_ok = if long { bar.c > bar.o } else { bar.c < bar.o };
     let ratio = bar.v / sma;
-    if dir_ok && spread >= 1.0 * atr && ratio >= SOS_VOL_MULT {
+    if dir_ok && spread >= 1.0 * atr && ratio >= sos_mult {
         Some(ratio)
     } else {
         None
