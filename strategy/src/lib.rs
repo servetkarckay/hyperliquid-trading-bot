@@ -27,11 +27,10 @@ pub mod ensemble;
 pub mod funding_carry;
 pub mod garch_regime;
 pub mod market_making;
-pub mod open_interest;
-pub mod order_flow_imbalance;
 pub mod overreaction;
 pub mod regime_detection;
 pub mod risk_kelly;
+pub mod smc_l;
 pub mod squeeze_breakout;
 pub mod sweep_cisd;
 pub mod turtle_system;
@@ -209,12 +208,9 @@ pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Wyckoff",
         "Cross-Sectional Momentum",
-        "Order Flow Imbalance",
         "Market Making",
         "GARCH",
         "Funding Carry",
-        "Open Interest",
-        "Regime Detection",
         "Kelly Sizing",
         "Dow Theory",
         "Overreaction",
@@ -222,7 +218,7 @@ pub fn registry_names() -> Vec<&'static str> {
         "Elliott",
         "Turtle",
         "Squeeze Breakout",
-        "Sweep + CISD",
+        "SMC-L",
     ]
 }
 
@@ -230,12 +226,9 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(wyckoff::Wyckoff),
         Box::new(cross_sectional_momentum::CrossSectionalMomentum::default()),
-        Box::new(order_flow_imbalance::OrderFlowImbalance),
         Box::new(market_making::MarketMaking),
         Box::new(garch_regime::GarchRegime),
         Box::new(funding_carry::FundingCarry),
-        Box::new(open_interest::OpenInterest),
-        Box::new(regime_detection::RegimeDetection),
         Box::new(risk_kelly::RiskKelly),
         Box::new(dow_theory::DowTheory),
         Box::new(overreaction::Overreaction),
@@ -243,7 +236,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(elliott_wave::ElliottWave),
         Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
-        Box::new(sweep_cisd::SweepCisd),
+        Box::new(smc_l::SmcL),
     ]
 }
 
@@ -278,14 +271,14 @@ pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
         "Kelly Sizing" => InfoCluster::Sizing,
         "Cross-Sectional Momentum" => InfoCluster::CrossSectional,
-        "Order Flow Imbalance" | "Market Making" => InfoCluster::OrderFlow,
+        "Market Making" => InfoCluster::OrderFlow,
         "GARCH" => InfoCluster::Volatility,
         "Funding Carry" => InfoCluster::Carry,
-        "Open Interest" => InfoCluster::Liquidation,
         "Overreaction" => InfoCluster::MeanReversion,
-        "Sweep + CISD" => InfoCluster::Trend,
+        // SMC-L: likidite yapısı + OI kadransı hibrit → Liquidation
+        "SMC-L" => InfoCluster::Liquidation,
         // fiyat/trend türevleri: Wyckoff, Dow, Classic Indicators, Elliott,
-        // Turtle, Squeeze Breakout, Regime Detection
+        // Turtle, Squeeze Breakout
         _ => InfoCluster::Trend,
     }
 }
@@ -309,7 +302,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 16;
+pub const STRATEGY_COUNT: usize = 13;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]

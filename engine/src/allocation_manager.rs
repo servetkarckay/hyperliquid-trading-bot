@@ -1066,9 +1066,9 @@ mod cluster_tests {
             &|_, _| 0.0,
             300.0,
         );
-        // 3 oy — AYRI kümeler: Wyckoff (Trend), LOB (OrderFlow), Carry
+        // 3 oy — AYRI kümeler: Wyckoff (Trend), MM (OrderFlow), FC (Carry)
         let ayri = am.allocate(
-            vec![mk("BTC", vec!["Wyckoff", "Order Flow Imbalance", "Carry"])],
+            vec![mk("BTC", vec!["Wyckoff", "Market Making", "Funding Carry"])],
             &|_, _| 0.0,
             300.0,
         );

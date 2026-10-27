@@ -19,7 +19,7 @@
 //!   ≥ %50'si.
 //!
 //! Deterministik, replay-idempotent, panik yok; yetersiz veri → `Skip`.
-use crate::{closes, MarketInput, Signal, Strategy};
+use crate::closes;
 use data::Candle;
 use math::indicators;
 
@@ -65,48 +65,6 @@ struct Setup {
     extreme: f64,
     zone: (f64, f64),
     fvg: (f64, f64),
-}
-
-impl Strategy for SweepCisd {
-    fn name(&self) -> &'static str {
-        "Sweep + CISD"
-    }
-
-    fn evaluate(&self, input: &MarketInput) -> Signal {
-        if input.candles.len() < MIN_BARS {
-            return Signal::Skip {
-                reason: format!("sweep+CISD için >={MIN_BARS} mum gerekli"),
-            };
-        }
-        match Self::plan(&input.candles) {
-            Some(p) => {
-                let note = format!(
-                    "sweep {:.6} → CISD {:.6} → FVG/OB {:.6}-{:.6} · SL {:.6} TP {:.6} RR {:.2}",
-                    p.sweep_level,
-                    p.cisd_level,
-                    p.zone.0,
-                    p.zone.1,
-                    p.sl,
-                    p.tp,
-                    (p.tp - p.entry).abs() / (p.entry - p.sl).abs()
-                );
-                if p.long {
-                    Signal::Long {
-                        strength: p.strength,
-                        note,
-                    }
-                } else {
-                    Signal::Short {
-                        strength: p.strength,
-                        note,
-                    }
-                }
-            }
-            None => Signal::Hold {
-                note: "sweep/CISD kurulumu yok (HTF uyumu + FVG şart)".into(),
-            },
-        }
-    }
 }
 
 impl SweepCisd {
@@ -489,18 +447,6 @@ mod tests {
         cs
     }
 
-    fn input(cs: Vec<Candle>) -> MarketInput {
-        MarketInput {
-            coin: "TEST".into(),
-            candles: cs,
-            ..Default::default()
-        }
-    }
-
-    fn eval(cs: Vec<Candle>) -> Signal {
-        SweepCisd.evaluate(&input(cs))
-    }
-
     #[test]
     fn uzun_kurulum_sinyal_uretir() {
         let plan = SweepCisd::plan(&long_series()).expect("long plan");
@@ -511,7 +457,6 @@ mod tests {
         assert!((plan.cisd_level - 99.9).abs() < 1e-9);
         assert!(plan.strength >= 0.35 && plan.strength <= 1.0);
         assert!(plan.zone.0 < plan.zone.1);
-        assert!(matches!(eval(long_series()), Signal::Long { .. }));
     }
 
     #[test]
@@ -521,7 +466,6 @@ mod tests {
         assert!((plan.entry - 99.4).abs() < 1e-9);
         assert!((plan.sl - 101.0).abs() < 0.1, "sl={}", plan.sl);
         assert!((plan.tp - 95.5).abs() < 1e-9, "tp={}", plan.tp);
-        assert!(matches!(eval(short_series()), Signal::Short { .. }));
     }
 
     #[test]
@@ -531,7 +475,6 @@ mod tests {
         cs[219] = candle(219 * H, 100.6, 101.2, 100.0, 101.0, 200.0);
         cs[220] = candle(220 * H, 100.7, 101.1, 100.1, 100.9, 150.0);
         assert!(SweepCisd::plan(&cs).is_none());
-        assert!(matches!(eval(cs), Signal::Hold { .. }));
     }
 
     #[test]
@@ -569,7 +512,6 @@ mod tests {
         let l = lows(&cs);
         assert_eq!(htf_trend_up(&cs), Some(false), "htf düşüş bekleniyor");
         assert!(plan_long(&cs, &h, &l, 0.5, cs.len() - 1).is_none());
-        assert!(!matches!(eval(cs), Signal::Long { .. }));
     }
 
     #[test]
@@ -591,15 +533,15 @@ mod tests {
     }
 
     #[test]
-    fn yetersiz_veri_skip() {
+    fn yetersiz_veri_kurulum_yok() {
         let cs = flat(MIN_BARS - 1, 100.0);
-        assert!(matches!(eval(cs), Signal::Skip { .. }));
+        assert!(SweepCisd::plan(&cs).is_none());
     }
 
     #[test]
-    fn deterministik_ayni_girdi_ayni_sinyal() {
-        let a = eval(long_series());
-        let b = eval(long_series());
+    fn deterministik_ayni_girdi_ayni_plan() {
+        let a = SweepCisd::plan(&long_series());
+        let b = SweepCisd::plan(&long_series());
         assert_eq!(a, b);
     }
 }
