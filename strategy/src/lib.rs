@@ -30,7 +30,6 @@ pub mod overreaction;
 pub mod regime_detection;
 pub mod risk_kelly;
 pub mod smc_l;
-pub mod sweep_cisd;
 
 use data::market_ctx::CtxState;
 use data::Candle;

@@ -8,7 +8,7 @@
 //! ufuk sonunda kapanış fiyatından çıkış. Komisyon: 2 × %0.045 taker.
 use data::Candle;
 use serde_json::Value;
-use strategy::sweep_cisd::{SweepCisd, MIN_BARS};
+use strategy::smc_l::{SweepCisd, MIN_BARS};
 
 fn parse_candles(v: &Value) -> Vec<Candle> {
     v.as_array()
