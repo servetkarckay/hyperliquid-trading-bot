@@ -33,6 +33,7 @@ pub mod overreaction;
 pub mod regime_detection;
 pub mod risk_kelly;
 pub mod squeeze_breakout;
+pub mod sweep_cisd;
 pub mod turtle_system;
 pub mod wyckoff;
 
@@ -221,6 +222,7 @@ pub fn registry_names() -> Vec<&'static str> {
         "Elliott",
         "Turtle",
         "Squeeze Breakout",
+        "Sweep + CISD",
     ]
 }
 
@@ -241,6 +243,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
         Box::new(elliott_wave::ElliottWave),
         Box::new(turtle_system::TurtleSystem),
         Box::new(squeeze_breakout::SqueezeBreakout),
+        Box::new(sweep_cisd::SweepCisd),
     ]
 }
 
@@ -280,6 +283,7 @@ pub fn info_cluster(name: &str) -> InfoCluster {
         "Funding Carry" => InfoCluster::Carry,
         "Open Interest" => InfoCluster::Liquidation,
         "Overreaction" => InfoCluster::MeanReversion,
+        "Sweep + CISD" => InfoCluster::Trend,
         // fiyat/trend türevleri: Wyckoff, Dow, Classic Indicators, Elliott,
         // Turtle, Squeeze Breakout, Regime Detection
         _ => InfoCluster::Trend,
@@ -305,7 +309,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 15;
+pub const STRATEGY_COUNT: usize = 16;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]
