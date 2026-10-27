@@ -53,7 +53,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
     │                                          │
     ├──► MarketCtx (funding/OI/mark/oracle)    │
     ▼                                          ▼
-        MarketInput (15 stratejiye TEK girdi sözleşmesi)
+        MarketInput (3 temel modüle TEK girdi sözleşmesi)
                        │
                        ▼
         Strategy Layer (panik-izole evaluate)
@@ -92,7 +92,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
 |---|---|
 | `api` | Hyperliquid I/O façade: imza (EIP-712), exchange/info endpoint, WS, hata taksonomisi, wire yuvarlama. Bot mantığı İÇERMEZ. |
 | `data` | Piyasa verisi hattı: WS ingestor, tick→mum aggregator, market context, storage soyutlaması, evren tek kaynağı. |
-| `strategy` | `Strategy` trait'i + 15 strateji + ensemble + rejim + `InfoCluster` + `exit_intent`. |
+| `strategy` | `Strategy` trait'i + 3 temel modül (MMT, SMC-L, MRE) + ensemble + rejim + `InfoCluster` + `exit_intent`. |
 | `engine` | Motor: döngü, executor, allocation, risk, durum makinesi, tracker, epoch. |
 | `math` | Saf deterministik sayısal çekirdek: göstergeler, vol modelleri, linalg/OLS, istatistik testleri, portföy metrikleri. |
 | `utils` | Logger + NTP saat senkronu. |
@@ -137,7 +137,7 @@ kullandığını doğrular; uyuşmazlıkta **açılış durur**.
 - `MarketInput`: kapanmış mumlar + canlı son bar + L2 defter (`Option` —
   yoksa `None`, sahte sıfır DEĞİL) + ctx (OI/funding) + portfolio kanıtı +
   equity + evren getirileri.
-- 15 strateji `registry()`'de tanımlıdır. `evaluate` panik-izole çalışır
+- 3 temel modül `registry()`'de tanımlıdır (MMT, SMC-L, MRE). `evaluate` panik-izole çalışır
   (bir stratejinin paniki döngüyü düşürmez; Skip'e döner).
 - `Signal`: Long/Short/Hold/Skip/Exit — `None` gösterge asla sahte oy
   üretmez (gösterge yok = katkı yok).
@@ -166,17 +166,14 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 
 ## 10. InfoCluster ve breadth
 
-15 strateji aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
+3 temel modül aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
 **ham oy sayısına göre verilmez**. `strategy::info_cluster(name)` tek
 kaynaktır — 8 bilgi kümesi:
 
 ```text
-Trend (Wyckoff, Dow Theory, Turtle, Squeeze Breakout, Elliott, Classic Indicators, Regime Detection)
-MeanReversion (Overreaction — De Bondt-Thaler)
-CrossSectional (Cross-Sectional Momentum — Jegadeesh-Titman)
-OrderFlow (Order Flow Imbalance, Market Making)
-CrossSectional (Cross-Sectional Momentum)
-Carry (Funding Carry — perp bacağı) · Volatility (GARCH koşullu volatilite rejimi) · Open Interest (Price×OI matrisi) · Sizing (Kelly)
+Trend (MMT — Turtle + Dow + Wyckoff + Elliott + Classic confluence; RegimeBoost)
+Liquidation (SMC-L — Sweep + CISD + OFI + L2 imbalance + OI)
+MeanReversion (MRE — De Bondt-Thaler Z + GARCH σ + CS rank)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
@@ -363,7 +360,7 @@ history ile korunur). PnL çözülemeyen kapanış tracker'a **0R YAZILMAZ**
 - Okuma: `ENSEMBLE_WEIGHTS_IN` — **yalnız `origin:"live"`** kabul edilir;
   `origin` olmayan / backtest-üretimli dosya reddedilir; bozuk sayı/sema →
   **AÇILIŞ BAŞARISIZ** (sessiz cold-start = öğrenme kaybı); dosya yok →
-  nötr cold-start (15 × 1.0).
+  nötr cold-start (3 × 1.0).
 - `schema_version: 2`, gerçek R history saklanır; restart'ta birebir yüklenir.
 
 ## 23. Learning epoch
@@ -523,12 +520,11 @@ engine 170 · data 19 · api 5 · strategy 76
 
 - **Elliott** yapısal olarak long-only eğilimlidir; short kolu mevcut
   kontratta uygulanmaz (parametre normalizasyonu değiştirilmedi).
-- **Market Making** AUXILIARY'dir: yönlü sinyal üretmez (raporda
-  görünür; sahte alpha kanıtı üretmez).
-- **Kelly Sizing** portföy-düzey öneridir; tahsise etkisi yoktur.
-- **Funding Carry** perp bacağıdır: spot hedge ayağı motor kontratında
-  yoktur → gerçek delta-nötr carry arbitrajı DEĞİLDİR;
-  funding-koşullu yönlü pozisyondur (notta beyan).
+- **Market Making** SMC-L'in L2 katmanına (spread/γ/κ/T) yedirilmiştir;
+  yönlü sinyal üretmez, spread-guard olarak çalışır.
+- **Kelly Sizing** ve **Funding Carry** motorun Sermaye/Risk katmanına
+  (leverage_sizing + funding EMA/freeze) taşınmıştır; registry'den
+  çıkarılmıştır (sinyal modülü değildir).
 - **GARCH** kanonik Bollerslev(1986) GARCH(1,1) ölçümü + momentum
   kaplaması (yön kanıtı kaplamadır — notta açıkça işaretli; istasyonarlık
   kısıtı α+β<1 yüklüdür).
