@@ -1067,12 +1067,9 @@ mod cluster_tests {
             &|_, _| 0.0,
             300.0,
         );
-        // 3 oy — AYRI kümeler: Classic (Trend), MM (OrderFlow), SMC-L (Liquidation)
+        // 3 oy — AYRI kümeler: MMT (Trend), SMC-L (Liquidation), MRE (MeanReversion)
         let ayri = am.allocate(
-            vec![mk(
-                "BTC",
-                vec!["Classic Indicators", "Market Making", "SMC-L"],
-            )],
+            vec![mk("BTC", vec!["MMT", "SMC-L", "MRE"])],
             &|_, _| 0.0,
             300.0,
         );
@@ -1096,11 +1093,12 @@ mod cluster_tests {
             .iter()
             .map(|n| strategy::info_cluster(n))
             .collect();
-        // NOT: Kelly Sizing & Funding Carry registry'den ÇIKARILDI —
-        // yönsüz yardımcılar; Sizing = engine `leverage_sizing` +
-        // AllocationManager, Carry = engine funding EMA/freeze katmanı.
+        // NOT: Kelly Sizing & Funding Carry registry'den ÇIKARILDI;
+        // Classic Indicators → MMT 7. katman, Market Making → SMC-L L2
+        // katmanı olarak birleşti. Kalan kümeler: Trend, Liquidation,
+        // MeanReversion.
         assert!(
-            distinct.len() >= 4,
+            distinct.len() >= 3,
             "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi etkisizleşir): {}",
             distinct.len()
         );

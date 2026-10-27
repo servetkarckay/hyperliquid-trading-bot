@@ -13,6 +13,9 @@
 //! 4. **OI onayı** (Price×OI): sweep anında ΔOI < 0 (stop patlaması =
 //!    likidite avı) ve görece eşik |ΔOI|/OI ≥ %0.2. OI artışı + fiyat
 //!    sweep'i = yeni pozisyon itmesi, stop avı değil → fake koruması.
+//! 5. **L2 defter onayı** (Market Making birleşimi, Avellaneda &
+//!    Stoikov): borsa spread'i AS optimal tam-spread (2δ) içinde —
+//!    kote edilebilir derinlik; sahte kırılımda defter boşalır.
 //!
 //! Veri yoksa `Skip` (sahte sinyal yok), katman ihlali `Hold` (bilinçli
 //! bekleme). Deterministik, replay-idempotent, panik yok.
@@ -104,7 +107,19 @@ impl Strategy for SmcL {
                 ),
             };
         }
-        // ── 4) OI: sweep = stop patlaması → ΔOI < 0, görece ≥ %0.2
+        // ── 4) L2 defter katmanı (Market Making birleşimi): kote-edilebilir
+        //    defter — borsa spread'i A&S optimal tam-spread (2δ) içinde
+        let Some((l2_pass, l2_margin)) = l2_book_ok(input) else {
+            return Signal::Hold {
+                note: "SMC-L: L2 defter sorgusu yapilamadı (defter yok/bozuk)".into(),
+            };
+        };
+        if !l2_pass {
+            return Signal::Hold {
+                note: "SMC-L: L2 spread A&S optimal üstü — defter genişlendi (geçiş yok)".into(),
+            };
+        }
+        // ── 5) OI: sweep = stop patlaması → ΔOI < 0, görece ≥ %0.2
         let rel_raw = d_oi.abs() / ctx.open_interest.max(1e-12);
         let rel = match oi_verdict(d_oi, ctx.open_interest) {
             OiVerdict::Ok(v) => v,
@@ -125,6 +140,7 @@ impl Strategy for SmcL {
         // ── Katman toplamı: çekirdek güç + taker yoğunluğu + ΔOI şiddeti
         let strength = (plan.strength
             + 0.10 * ((taker - 0.5).abs() * 4.0).min(1.0)
+            + 0.05 * l2_margin
             + 0.10 * (rel.clamp(0.0, 0.02) / 0.02))
             .min(1.0);
         let note = format!(
@@ -146,6 +162,44 @@ impl Strategy for SmcL {
 
 fn regime_permits(label: RegimeLabel, long: bool) -> bool {
     matches!(label, RegimeLabel::Trend { up } if up == long)
+}
+
+/// L2 defter katmanı — Market Making (Avellaneda & Stoikov, 2008)
+/// mirası: borsa spread'i (ask−bid), AS optimal yarı-spread δ'nin
+/// 2 katından küçük-олmalı (kote edilebilir/derin defter):
+/// δ = γσ²(T−t)/2 + (1/γ)·ln(1+γ/κ), γ=0.1, κ=1.5, T=1 bar,
+/// σ = 50-bar realized (makale §3.1). Dönüş: (pass, strength-marjı).
+fn l2_book_ok(input: &crate::MarketInput) -> Option<(bool, f64)> {
+    let (Some(bid), Some(ask)) = (input.best_bid, input.best_ask) else {
+        return None;
+    };
+    if !(bid < ask && ask > 0.0 && bid > 0.0) {
+        return None;
+    }
+    let c = closes(&input.candles);
+    if c.len() < 60 {
+        return None;
+    }
+    let r = indicators::log_returns(&c);
+    if r.len() < 51 {
+        return None;
+    }
+    let w = &r[r.len() - 50..];
+    let m = w.iter().sum::<f64>() / w.len() as f64;
+    let sigma = (w.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (w.len() - 1) as f64).sqrt();
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return None;
+    }
+    let gamma = 0.1;
+    let kappa = 1.5;
+    let half = gamma * sigma * sigma / 2.0 + (1.0 + gamma / kappa).ln() / gamma;
+    if !(half.is_finite() && half > 0.0) {
+        return None;
+    }
+    let full = 2.0 * half;
+    let spread = ask - bid;
+    let margin = ((full - spread) / full).clamp(0.0, 1.0);
+    Some((spread <= full, margin))
 }
 
 fn ofi_ok(long: bool, imb: f64, taker: f64) -> bool {

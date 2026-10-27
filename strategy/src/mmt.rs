@@ -1,6 +1,6 @@
 //! MMT — MACRO-MICRO TREND ENGINE (Trend & Kırılım Modülü).
 //!
-//! 6 trend stratejisinin KATMAN ZİNCİRİ (hepsi ✓ olmalı — biri bile
+//! 6 trend stratejisi + KLASİK TEYİT katmanının ZİNCİRİ (hepsi ✓ olmalı — biri bile
 //! veto ederse sinyal yok; SMC-L ile aynı dürüst mimari):
 //!
 //! 1. **TrendBoost (Rejim)**: `regime_detection::classify` — yalnız
@@ -13,10 +13,12 @@
 //!    long; LH+LL (+ düşüş hacmi baskın) short — Rhea tenet 6 eleme matığı.
 //! 4. **Squeeze enerji**: Bollinger Method I — kırılımdan 5 bar önceki
 //!    BandWidth ≤ 125-periyot düşüğü ×1.03 (enerji birikim şartı).
-//! 5. **Wyckoff SOS**: kırılım barı hacmi ≥ 1.3×SMA20 + geniş gövde
+//! 5. **Wyckoff SOS: kırılım barı hacmi ≥ 1.3×SMA20 + geniş gövde
 //!    (≥ 1.0×ATR20, yönlü) — "önce cılız, sonra hacim" (SOS/SOW).
 //! 6. **Elliott darbe**: son 3 pivot (span=EL_SPAN) yönünde tekdüze
 //!    ilerleyiş — impulse dalga sayımı (HH→HH→HH / LL→LL→LL).
+//! 7. **Klasik teyit** (Classic Indicators birleşimi): EMA20>EMA50 +
+//!    RSI14>50 (long; short ayna) — confluence filtresi.
 //!
 //! Fiyat planı: Turtle N (ATR20) — SL = 2N, TP = 3N (kanoniс sistem
 //! 1.5R oranı; motorun kendi TP/SL/trailing katmanı ayrıca devrede).
@@ -117,6 +119,10 @@ impl Mmt {
         let vol_expand = wyckoff_sos(candles, long)?;
         // ── 6) Elliott darbe sayımı (tekdüze pivot ilerleyişi)
         if !elliott_ok(candles, long) {
+            return None;
+        }
+        // ── 7) Klasik teyit (Classic Indicators birleşimi): confluence
+        if !classic_confluence(candles, long) {
             return None;
         }
         // ── Fiyat planı (Turtle N kuralları)
@@ -320,6 +326,30 @@ pub fn wyckoff_sos(candles: &[Candle], long: bool) -> Option<f64> {
 
 /// Elliott darbe: son EL_PIVOTS pivot (span=EL_SPAN, EL_WINDOW penceresi)
 /// yönünde tekdüze ilerleyiş (long: HH→HH→HH; short: LL→LL→LL).
+/// Klasik teyit katmanı — Classic Indicators birleşimi: EMA hizası +
+/// RSI orta çizgi confluence (long: EMA20>EMA50 ve RSI14>50; short
+/// ayna). Gürültü üretmez — yalnız onay katmanı.
+pub fn classic_confluence(candles: &[Candle], long: bool) -> bool {
+    let c = closes(candles);
+    if c.len() < 80 {
+        return false;
+    }
+    let (Some(fast), Some(slow)) = (
+        last(&indicators::ema(&c, 20)),
+        last(&indicators::ema(&c, 50)),
+    ) else {
+        return false;
+    };
+    let Some(r) = last(&indicators::rsi(&c, 14)) else {
+        return false;
+    };
+    if long {
+        fast > slow && r > 50.0
+    } else {
+        fast < slow && r < 50.0
+    }
+}
+
 pub fn elliott_ok(candles: &[Candle], long: bool) -> bool {
     let n = candles.len();
     if n < 2 * EL_SPAN + EL_WINDOW + 2 {
