@@ -16,7 +16,7 @@ Hızlı referans. Tam mimari için `SISTEM-MIMARISI.md`.
 
 ## Bot durumu
 
-- **DURDURULMUŞ** (PID killed, watchdog kaldırılmış, equity $66.88 temiz).
+- **ÇALIŞIYOR** (PID 42148, watchdog aktif 5 dk, equity $66.88 temiz).
 - Yeniden başlatma: `bash scripts/start_bot_mainnet.sh` (`.env` mainnet onaylı).
 - State temizlendi → cold-start.
 

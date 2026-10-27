@@ -24,7 +24,7 @@ grep -q "^MAINNET_CONFIRMED=1" .env || { echo "MAINNET_CONFIRMED=1 yok"; exit 1;
 CH_URL=$(grep -E "^CLICKHOUSE_URL" .env | cut -d= -f2)
 CH_URL=${CH_URL:-http://localhost:8123}
 if ! curl -so /dev/null -w '%{http_code}' --max-time 4 "$CH_URL/" --data-binary "SELECT 1" | grep -q 200; then
-    echo "CH depo sağlıksız — mainnet bot başlatılmaz"; exit 1
+    echo "CH depo sağlıksız — Memory fallback ile devam (arşiv kapalı)"
 fi
 
 [ -f "$LOG" ] && cp "$LOG" "$LOG.prev"

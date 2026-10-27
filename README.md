@@ -36,7 +36,7 @@ Bot DURDURULMUŞ durumdan başlatılır; risk_state temiz → peak=current equit
 
 ## Durum (2026-10-27)
 
-- Bot: **DURDURULMUŞ** (PID killed, watchdog kaldırılmış, equity $66.88 temiz).
+- Bot: **ÇALIŞIYOR** (PID 42148, watchdog aktif 5 dk, equity $66.88 temiz).
 - Son commit: `2b23c15` — parametrize + data-driven tuning pass.
 - MMT kanonik replay: 30 işlem, ΣR −9.82 (önceki −12.32).
 - MRE kanonik replay: 2445 işlem, ΣR +121.8, +0.050R/işlem.
