@@ -21,12 +21,10 @@
 //! deterministik mum üreteci.
 pub mod classic_indicators;
 pub mod ensemble;
-pub mod funding_carry;
 pub mod market_making;
 pub mod mmt;
 pub mod mre;
 pub mod regime_detection;
-pub mod risk_kelly;
 pub mod smc_l;
 
 use data::market_ctx::CtxState;
@@ -200,8 +198,6 @@ pub struct ExitIntent {
 pub fn registry_names() -> Vec<&'static str> {
     vec![
         "Market Making",
-        "Funding Carry",
-        "Kelly Sizing",
         "Classic Indicators",
         "Squeeze Breakout",
         "MMT",
@@ -213,8 +209,6 @@ pub fn registry_names() -> Vec<&'static str> {
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(market_making::MarketMaking),
-        Box::new(funding_carry::FundingCarry),
-        Box::new(risk_kelly::RiskKelly),
         Box::new(classic_indicators::ClassicIndicators),
         Box::new(smc_l::SmcL),
         Box::new(mmt::Mmt),
@@ -251,9 +245,7 @@ pub enum InfoCluster {
 /// strateji adı → bilgi kümesi (registry ile birebir; tek kaynak)
 pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
-        "Kelly Sizing" => InfoCluster::Sizing,
         "Market Making" => InfoCluster::OrderFlow,
-        "Funding Carry" => InfoCluster::Carry,
         // SMC-L: likidite yapısı + OI kadransı hibrit → Liquidation
         "SMC-L" => InfoCluster::Liquidation,
         // MRE: tepki/volatilite kesit kompoziti → MeanReversion
@@ -273,7 +265,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 7;
+pub const STRATEGY_COUNT: usize = 5;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]

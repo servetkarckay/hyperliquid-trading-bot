@@ -1060,15 +1060,19 @@ mod cluster_tests {
             atr_pct: 0.01,
             mid: 100.0,
         };
-        // 3 oy — AYNI küme (Trend): Wyckoff, Dow, Turtle
+        // 3 oy — AYNI küme (Trend): Wyckoff, Dow, Turtle (tümü → Trend)
+        // [etiketler serbest serştir; registry bağlanmaz]
         let ayni = am.allocate(
             vec![mk("BTC", vec!["Wyckoff", "Dow", "Turtle"])],
             &|_, _| 0.0,
             300.0,
         );
-        // 3 oy — AYRI kümeler: Wyckoff (Trend), MM (OrderFlow), FC (Carry)
+        // 3 oy — AYRI kümeler: Classic (Trend), MM (OrderFlow), SMC-L (Liquidation)
         let ayri = am.allocate(
-            vec![mk("BTC", vec!["Wyckoff", "Market Making", "Funding Carry"])],
+            vec![mk(
+                "BTC",
+                vec!["Classic Indicators", "Market Making", "SMC-L"],
+            )],
             &|_, _| 0.0,
             300.0,
         );
@@ -1082,25 +1086,23 @@ mod cluster_tests {
             ayni[0].conviction,
             ayri[0].conviction
         );
-        // küme haritası tutarlı + DÜRÜST: 18 stratejinin hepsi eşlenmeli VE
-        // haritalar dokümante edilmiş kümelerle birebir (harita bozulursa —
-        // hepsi tek kümeye eşlenirse — bağımsızlık düzeltmesi etkisizleşir)
+        // küme haritası tutarlı + DÜRÜST: registry stratejilerinin hepsi
+        // eşlenmeli VE haritalar dokümante edilmiş kümelerle birebir.
+        // NOT: her birleştirme (SMC-L/MMT/MRE) kümelik sayısını bilinçli
+        // azaltır — birleştirilmiş modül, bileşenlerinin kümelerini
+        // temsil eder; mevcut 6 küme: Trend, OrderFlow, Carry, Sizing,
+        // Liquidation, MeanReversion.
         let distinct: std::collections::HashSet<strategy::InfoCluster> = strategy::registry_names()
             .iter()
             .map(|n| strategy::info_cluster(n))
             .collect();
+        // NOT: Kelly Sizing & Funding Carry registry'den ÇIKARILDI —
+        // yönsüz yardımcılar; Sizing = engine `leverage_sizing` +
+        // AllocationManager, Carry = engine funding EMA/freeze katmanı.
         assert!(
-            distinct.len() >= 7,
+            distinct.len() >= 4,
             "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi etkisizleşir): {}",
             distinct.len()
-        );
-        assert_eq!(
-            strategy::info_cluster("Kelly Sizing"),
-            strategy::InfoCluster::Sizing
-        );
-        assert_eq!(
-            strategy::info_cluster("Funding Carry"),
-            strategy::InfoCluster::Carry
         );
     }
 }
