@@ -20,13 +20,11 @@
 //!
 //! deterministik mum üreteci.
 pub mod classic_indicators;
-pub mod cross_sectional_momentum;
 pub mod ensemble;
 pub mod funding_carry;
-pub mod garch_regime;
 pub mod market_making;
 pub mod mmt;
-pub mod overreaction;
+pub mod mre;
 pub mod regime_detection;
 pub mod risk_kelly;
 pub mod smc_l;
@@ -201,30 +199,26 @@ pub struct ExitIntent {
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
     vec![
-        "Cross-Sectional Momentum",
         "Market Making",
-        "GARCH",
         "Funding Carry",
         "Kelly Sizing",
-        "Overreaction",
         "Classic Indicators",
         "Squeeze Breakout",
         "MMT",
+        "MRE",
         "SMC-L",
     ]
 }
 
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
-        Box::new(cross_sectional_momentum::CrossSectionalMomentum::default()),
         Box::new(market_making::MarketMaking),
-        Box::new(garch_regime::GarchRegime),
         Box::new(funding_carry::FundingCarry),
         Box::new(risk_kelly::RiskKelly),
-        Box::new(overreaction::Overreaction),
         Box::new(classic_indicators::ClassicIndicators),
         Box::new(smc_l::SmcL),
         Box::new(mmt::Mmt),
+        Box::new(mre::Mre),
     ]
 }
 
@@ -258,15 +252,13 @@ pub enum InfoCluster {
 pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
         "Kelly Sizing" => InfoCluster::Sizing,
-        "Cross-Sectional Momentum" => InfoCluster::CrossSectional,
         "Market Making" => InfoCluster::OrderFlow,
-        "GARCH" => InfoCluster::Volatility,
         "Funding Carry" => InfoCluster::Carry,
-        "Overreaction" => InfoCluster::MeanReversion,
         // SMC-L: likidite yapısı + OI kadransı hibrit → Liquidation
         "SMC-L" => InfoCluster::Liquidation,
-        // fiyat/trend türevleri: Wyckoff, Dow, Classic Indicators, Elliott,
-        // Turtle, Squeeze Breakout
+        // MRE: tepki/volatilite kesit kompoziti → MeanReversion
+        "MRE" => InfoCluster::MeanReversion,
+        // fiyat/trend türevleri: Classic Indicators, MMT
         _ => InfoCluster::Trend,
     }
 }
@@ -281,7 +273,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 9;
+pub const STRATEGY_COUNT: usize = 7;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]
