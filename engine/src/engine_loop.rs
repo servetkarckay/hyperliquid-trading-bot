@@ -5538,9 +5538,25 @@ mod golden_path_tests {
         c
     }
 
+    // Test-dahili stub: altın yolun konusu ZİNCİRDİR (ensemble→rejim→
+    // tahsis→risk→tracker); Turtle registry'den MMT'ye birleşti —
+    // sinyal kaynağı yerel stub ile sabitlenir.
+    struct GoldenStub;
+    impl strategy::Strategy for GoldenStub {
+        fn name(&self) -> &'static str {
+            "GoldenStub"
+        }
+        fn evaluate(&self, _input: &strategy::MarketInput) -> strategy::Signal {
+            strategy::Signal::Long {
+                strength: 0.7,
+                note: "golden stub".into(),
+            }
+        }
+    }
+
     #[test]
     fn golden_path_tam_zincir() {
-        // ── 1) STRATEJİ: Turtle 20-bar kırılım → Long [0.7] ──
+        // ── 1) STRATEJİ: stub Long [0.7] (registry + stub) ──
         let c = candles();
         let input = MarketInput {
             coin: "BTC".into(),
@@ -5550,7 +5566,8 @@ mod golden_path_tests {
             equity: 10_000.0,
             ..Default::default()
         };
-        let strategies = strategy::registry();
+        let mut strategies: Vec<Box<dyn strategy::Strategy>> = strategy::registry();
+        strategies.insert(0, Box::new(GoldenStub));
         let signals: Vec<(String, Signal)> = strategies
             .iter()
             .map(|s| {

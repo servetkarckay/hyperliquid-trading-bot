@@ -21,20 +21,16 @@
 //! deterministik mum üreteci.
 pub mod classic_indicators;
 pub mod cross_sectional_momentum;
-pub mod dow_theory;
-pub mod elliott_wave;
 pub mod ensemble;
 pub mod funding_carry;
 pub mod garch_regime;
 pub mod market_making;
+pub mod mmt;
 pub mod overreaction;
 pub mod regime_detection;
 pub mod risk_kelly;
 pub mod smc_l;
-pub mod squeeze_breakout;
 pub mod sweep_cisd;
-pub mod turtle_system;
-pub mod wyckoff;
 
 use data::market_ctx::CtxState;
 use data::Candle;
@@ -206,37 +202,30 @@ pub struct ExitIntent {
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
     vec![
-        "Wyckoff",
         "Cross-Sectional Momentum",
         "Market Making",
         "GARCH",
         "Funding Carry",
         "Kelly Sizing",
-        "Dow Theory",
         "Overreaction",
         "Classic Indicators",
-        "Elliott",
-        "Turtle",
         "Squeeze Breakout",
+        "MMT",
         "SMC-L",
     ]
 }
 
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
-        Box::new(wyckoff::Wyckoff),
         Box::new(cross_sectional_momentum::CrossSectionalMomentum::default()),
         Box::new(market_making::MarketMaking),
         Box::new(garch_regime::GarchRegime),
         Box::new(funding_carry::FundingCarry),
         Box::new(risk_kelly::RiskKelly),
-        Box::new(dow_theory::DowTheory),
         Box::new(overreaction::Overreaction),
         Box::new(classic_indicators::ClassicIndicators),
-        Box::new(elliott_wave::ElliottWave),
-        Box::new(turtle_system::TurtleSystem),
-        Box::new(squeeze_breakout::SqueezeBreakout),
         Box::new(smc_l::SmcL),
+        Box::new(mmt::Mmt),
     ]
 }
 
@@ -287,22 +276,13 @@ pub fn info_cluster(name: &str) -> InfoCluster {
 pub(crate) fn closes(candles: &[Candle]) -> Vec<f64> {
     candles.iter().map(|c| c.c).collect()
 }
-pub(crate) fn highs(candles: &[Candle]) -> Vec<f64> {
-    candles.iter().map(|c| c.h).collect()
-}
-pub(crate) fn lows(candles: &[Candle]) -> Vec<f64> {
-    candles.iter().map(|c| c.l).collect()
-}
-pub(crate) fn volumes(candles: &[Candle]) -> Vec<f64> {
-    candles.iter().map(|c| c.v).collect()
-}
 /// Son değer (pencere doluysa)
 pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
     v.last().and_then(|x| *x)
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 13;
+pub const STRATEGY_COUNT: usize = 9;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]

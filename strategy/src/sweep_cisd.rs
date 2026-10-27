@@ -409,7 +409,6 @@ fn htf_trend_up(candles: &[Candle]) -> Option<bool> {
 mod tests {
     use super::*;
     use crate::strat_test_helpers::helpers::{candle, flat};
-    use crate::{highs, lows};
 
     const H: i64 = 3_600_000;
 
@@ -508,8 +507,8 @@ mod tests {
             *cd = candle(cd.t, px, px * 1.001, px * 0.999, px, 100.0);
         }
         cs[211] = candle(211 * H, 120.0, 104.0, 110.0, 111.0, 100.0);
-        let h = highs(&cs);
-        let l = lows(&cs);
+        let h: Vec<f64> = cs.iter().map(|x| x.h).collect();
+        let l: Vec<f64> = cs.iter().map(|x| x.l).collect();
         assert_eq!(htf_trend_up(&cs), Some(false), "htf düşüş bekleniyor");
         assert!(plan_long(&cs, &h, &l, 0.5, cs.len() - 1).is_none());
     }
