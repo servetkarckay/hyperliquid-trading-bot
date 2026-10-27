@@ -148,7 +148,7 @@ fn plan_long(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) ->
     let entry = bar.c;
     let sl = candles[sweep].l - SL_BUFFER_ATR * atr;
     let risk = entry - sl;
-    if !(risk > 0.0) {
+    if risk.is_nan() || risk <= 0.0 {
         return None;
     }
     let tp = target_long(h, last, entry, risk);
@@ -175,7 +175,7 @@ fn plan_short(candles: &[Candle], h: &[f64], l: &[f64], atr: f64, last: usize) -
     let entry = bar.c;
     let sl = candles[sweep].h + SL_BUFFER_ATR * atr;
     let risk = sl - entry;
-    if !(risk > 0.0) {
+    if risk.is_nan() || risk <= 0.0 {
         return None;
     }
     let tp = target_short(l, last, entry, risk);
@@ -208,7 +208,7 @@ fn build_plan(long: bool, entry: f64, sl: f64, tp: f64, atr: f64, st: Setup) -> 
 fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) -> Option<Setup> {
     let cd = &candles[s];
     let range = cd.h - cd.l;
-    if !(range > 0.0) {
+    if range.is_nan() || range <= 0.0 {
         return None;
     }
     let lower_wick = cd.o.min(cd.c) - cd.l;
@@ -253,7 +253,7 @@ fn long_setup(candles: &[Candle], l: &[f64], atr: f64, s: usize, last: usize) ->
 fn short_setup(candles: &[Candle], h: &[f64], atr: f64, s: usize, last: usize) -> Option<Setup> {
     let cd = &candles[s];
     let range = cd.h - cd.l;
-    if !(range > 0.0) {
+    if range.is_nan() || range <= 0.0 {
         return None;
     }
     let upper_wick = cd.h - cd.o.max(cd.c);
