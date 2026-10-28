@@ -8,18 +8,19 @@ Kaynak: repository'deki kod. Her bölüm kodla birebir senkronizedir.
 
 ## 1. Sistem amacı ve sınırları
 
-Sistem, Hyperliquid perpetual borsasında **testnet** üzerinde çalışan
-algoritmik bir işlem botudur. Tek amacı vardır: gerçek kapanmış işlemlerden
-öğrenen, kontratlarla korunan bir işlem motorunu 100 gerçek kapanmış işlemlik
-öğrenme döneminde koşturmak.
+Sistem, Hyperliquid perpetual borsasında çalışan algoritmik bir işlem botudur.
+Tek amacı vardır: gerçek kapanmış işlemlerden öğrenen, kontratlarla korunan
+bir işlem motorunu 100 gerçek kapanmış işlemlik öğrenme döneminde koşturmak.
 
 Sınırlar:
 
 - Bot bir **motor**dur: karar, tahsis, emir, çıkış, öğrenme. Piyasa tahmini
   iddiası yoktur; her karar ölçülebilir kontratlara bağlıdır.
 - Öğrenme dönemi TESTNET'tir. Canlı endpoint'e karşı başlatma **yapısal
-  olarak engellenir**.
+  olarak engellenir** (`assert_testnet_endpoint`).
 - `ready_for_live` otomatik canlı işlem demek değildir (bkz. §26).
+- Mainnet konfigürasyonuyla başlatılırsa öğrenme dönemi mantığı devre dışıdır;
+  canlıya geçiş yalnız operatörün ayrı, bilinçli adımıdır.
 
 ## 2. Genel mimari
 
@@ -96,7 +97,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
 | `engine` | Motor: döngü, executor, allocation, risk, durum makinesi, tracker, epoch. |
 | `math` | Saf deterministik sayısal çekirdek: göstergeler, vol modelleri, linalg/OLS, istatistik testleri, portföy metrikleri. |
 | `utils` | Logger + NTP saat senkronu. |
-| `scripts` | Operasyon: `start_bot.sh` (timeout'suz süresiz koşu). |
+| `scripts` | Operasyon: `start_bot.sh` / `start_bot_mainnet.sh` / `watchdog.sh`. |
 | `bin/probe_px` | Fiyat/lot hassasiyet keşif aracı (pozisyon üretmez). |
 | `bin/trail_report` | `trade_exits.jsonl` offline analitiği (MFE/MAE, çıkış dağılımı). |
 
@@ -112,10 +113,12 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
 - **MarketCtx**: funding / OI / mark / oracle / prevDayPx serilerini WS +
   REST'ten birleştirir. Alan parse edilemezse son bilinen değer korunur
   (UNKNOWN ≠ geçerli sıfır). HL `funding` alanı **saatlik** orandır;
-  dönüşüm strateji katmanındadır.
+  dönüşüm strateji katmanındadır. OI serisi 1500 ölçüme kadar tutulur (≈3h)
+  — bar-penceresinde ΔOI ölçümü için.
 - **Storage**: `Storage` trait — ClickHouse (üretim arşivi, ReplacingMergeTree
   dedup, resume imleci), Memory (test/fallback), Redis (sıcak mids/ctx).
   URL boşsa sistem Memory ile çalışmayı sürdürür (indirimli mod loglanır).
+  Bot canlı yolda CH'yi kullanmaz; CH yalnız arşiv/backfill içindir.
 - **Backfill**: sayfalı geçmiş mum/funding pompası; motorun ısınma penceresi
   (`ENGINE_HIST_BARS`) REST snapshot ile açılır.
 - **Stale koruması**: `LocalBook::is_stale/is_sane` — bayat/bozuk defter
@@ -191,7 +194,10 @@ genişlik ödülünü çoğaltmaz.
 4. SL/TP kontratı karar anında türetilir: `sl = entry ± sl_atr_mult×ATR`;
    `tp = entry ∓ max(tp/sl×risk, 2×risk)` — TP **gerçek risk mesafesinin**
    en az iki katı kapılıdır.
-5. Keşif şeridi: kanıtı yetersiz (n < full_n) stratejiler küçük lotla
+5. MMT voter'lı adaylar kanonik TUNE çarpanını (TP=5N=3.33R) taşır;
+   diğer modüller motor tabanını (TP=3.0=2R) korur. Formül AYNI — yalnız
+   çarpan modülden gelir.
+6. Keşif şeridi: kanıtı yetersiz (n < full_n) stratejiler küçük lotla
    sınanır; keşif havuzu bütçe×%5'i aşamaz, taban havuzu aşamaz;
    finanse edilebilir keşifçi = `min(N, ⌊havuz/$10⌋)`.
 
@@ -204,12 +210,18 @@ aday tahsis edilmez. Yürütme fiyat bandı aynı modelden gelir; operasyonel
 taban `EXECUTION_BAND_FLOOR_BPS=50` ince defterde dolum kaçışını önler.
 Motor içinde ad-hoc ikinci maliyet modeli yoktur.
 
+Spread-gate spec formülü `max(75, 3×Spread + TakerFee)` mevcut gate'in
+**alt sınırıdır** — mevcut gate (spread + slippage + iki bacak) daha sıkı.
+
 ## 13. Risk architecture
 
 `RiskManager` — kalıcı risk hafızası + emir öncesi kapılar.
 
 - Kalıcı state: `peak_equity`, `current_equity`, `halted`
   (`RISK_STATE_PATH`, atomik tmp+rename; boot'ta yüklenir).
+- **Peak = yalnız SETTLED equity**: açık pozisyonlu (unrealized) equity
+  spike'ı peak'i şişiremez (IO vakası: MFE anı 66.9→76.9 kalktı).
+  Drawdown kontrolü her güncellemede mark equity ile yapılır (korumacı).
 - Drawdown: peak'e göre hesaplanır; restart drawdown hafızasını sıfırlamaz.
 - Kapılar: pozisyon notional tavanı, toplam notional, kaldıraç, minimum
   equity, max açık pozisyon sayısı, drawdown limiti.
@@ -381,6 +393,8 @@ TESTNET ──► cold start ──► 100 gerçek kapanmış işlem ──► r
   canlı ağırlık, risk hafızası, epoch temizlenir; açık emirler iptal,
   pozisyonlar flatten; `trade_exits.jsonl` arşivlenir. Sonraki
   restartlarda ENV kalsa bile state KORUNUR.
+- Ortam-farkında kurucu: mainnet'te `environment:"mainnet"` mührü basılır
+  (`LearningEpoch::new_for_environment`).
 
 ## 24. Restart / recovery
 
@@ -405,8 +419,8 @@ TESTNET ──► cold start ──► 100 gerçek kapanmış işlem ──► r
 - Öğrenme dönemi tek deneydir: aynı konfigürasyonla (stratejiler, eşikler,
   risk limitleri, evren) 100 gerçek kapanış toplanır. Deney sırasında
   parametre değişikliği yapılmaz.
-- `cargo test --workspace`: **280 passed / 0 failed** (engine 170,
-  data 19, api 5, strategy 76). Release build ayrı derlenir.
+- `cargo test --workspace`: **311 passed / 0 failed** (engine 227,
+  data 32, api 13, strategy 39). Release build ayrı derlenir.
 
 ## 26. Mainnet promotion boundary
 
@@ -472,11 +486,13 @@ anlamsızdır.
 | `LEARNING_EPOCH_PATH` | `config/learning_epoch.json` | dönem kaydı |
 | `RISK_STATE_PATH` | `config/risk_state.json` | kalıcı risk hafızası |
 | `EV_TAKER_FEE_BPS` / `EV_SLIPPAGE_BPS` / `EV_MIN_DIST_BPS` | `4.5 / 5.0 / 75` | tek maliyet modeli |
+| `MMT_TP_ATR_MULT` | `5.0` | MMT voter'lı aday TP çarpanı (ATR×) |
 | `CLICKHOUSE_URL` / `REDIS_URL` | (boş → Memory) | opsiyonel kalıcılık |
 | `LOG_LEVEL` / `RUST_LOG` | `info` | log seviyesi (LOG_LEVEL öncelikli) |
 
 `start_bot.sh` operasyon değerlerini export eder (bütçe 300, döngü 300 sn,
 1h mum, 4400 bar, FLATTEN=0) ve botu **timeout'suz süresiz** çalıştırır.
+`start_bot_mainnet.sh` mainnet onayı + CH kontrolü + watchdog ile çalışır.
 
 ## 29. Failure modes / safe behavior
 
@@ -495,12 +511,13 @@ anlamsızdır.
 | Drawdown halt | yalnız operatör `resume`; state kalıcı |
 | Yetim/çift stop | boot dedupe + grace kapısı + dedupe_sl (en yeni oid kalır) |
 | Kill-switch | EmergencyFlatten; restart exponential backoff (30..300 sn) |
+| Watchdog | PIDFILE tabanlı; disable lock ile operatör durdurma talebi |
 
 ## 30. Test architecture
 
 ```text
-cargo test --workspace  →  280 passed / 0 failed
-engine 170 · data 19 · api 5 · strategy 76
+cargo test --workspace  →  311 passed / 0 failed
+engine 227 · data 32 · api 13 · strategy 39
 ```
 
 - **Kontrat testleri**: EntryGate denklemi (kaynak taraması), exit sahipliği
@@ -511,7 +528,7 @@ engine 170 · data 19 · api 5 · strategy 76
 - **Mutasyon kanıtlaması**: persistence, epoch sayacı, risk hafızası,
   ağırlık validasyonu testleri mutasyonla doğrulanmıştır.
 - **Data dürüstlüğü**: None kontratı, bozuk mum düşürme, ctx bayat-değer
-  koruması testleri.
+  koruması, pencere-ΔOI testleri.
 - **CI** (`.github/workflows/test.yml`): `cargo test --workspace` +
   `cargo build --release --workspace`. fmt/clippy adımları yoktur
   (bkz. Dürüst sınırlar).
@@ -532,4 +549,6 @@ engine 170 · data 19 · api 5 · strategy 76
   backtest formatı yalnız reddedilmek üzere tanımlıdır.
 - CI fmt/clippy koşmaz; kalite kapısı test + release build'dir.
 - Arşiv kalıcılığı (ClickHouse/Redis) opsiyoneldir; boşsa Memory fallback
-  ile arşiv/backtest verisi birikmez.
+  ile arşiv/backtest verisi birikmez. Bot canlı yolda CH kullanmaz.
+- SMC-L kademeli kar al (partial profits) henüz uygulanmadı (exit_intent
+  revival gerektirir — ayrı sprint).
