@@ -140,7 +140,7 @@ kullandığını doğrular; uyuşmazlıkta **açılış durur**.
 - `MarketInput`: kapanmış mumlar + canlı son bar + L2 defter (`Option` —
   yoksa `None`, sahte sıfır DEĞİL) + ctx (OI/funding) + portfolio kanıtı +
   equity + evren getirileri.
-- 3 temel modül `registry()`'de tanımlıdır (MMT, SMC-L, MRE). `evaluate` panik-izole çalışır
+- 2 temel modül `registry()`'de tanımlıdır (MMT, MRE). `evaluate` panik-izole çalışır
   (bir stratejinin paniki döngüyü düşürmez; Skip'e döner).
 - `Signal`: Long/Short/Hold/Skip/Exit — `None` gösterge asla sahte oy
   üretmez (gösterge yok = katkı yok).
@@ -169,13 +169,12 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 
 ## 10. InfoCluster ve breadth
 
-3 temel modül aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
+2 temel modül aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
 **ham oy sayısına göre verilmez**. `strategy::info_cluster(name)` tek
 kaynaktır — 8 bilgi kümesi:
 
 ```text
 Trend (MMT — Turtle + Dow + Wyckoff + Elliott + Classic confluence; RegimeBoost)
-Liquidation (SMC-L — Sweep + CISD + OFI + L2 imbalance + OI)
 MeanReversion (MRE — De Bondt-Thaler Z + GARCH σ + CS rank)
 ```
 
@@ -538,8 +537,9 @@ engine 227 · data 32 · api 13 · strategy 39
 
 - **Elliott** yapısal olarak long-only eğilimlidir; short kolu mevcut
   kontratta uygulanmaz (parametre normalizasyonu değiştirilmedi).
-- **Market Making** SMC-L'in L2 katmanına (spread/γ/κ/T) yedirilmiştir;
-  yönlü sinyal üretmez, spread-guard olarak çalışır.
+- **SMC-L devre dışı**: trade verisi Hyperliquid WS'den gelmiyor (taker_ratio=None).
+  Modül kodu korunuyor (`smc_l.rs`), trade feed düzeldiğinde registry'ye
+  geri alınabilir. Aktif modüller: MMT, MRE (STRATEGY_COUNT=2).
 - **Kelly Sizing** ve **Funding Carry** motorun Sermaye/Risk katmanına
   (leverage_sizing + funding EMA/freeze) taşınmıştır; registry'den
   çıkarılmıştır (sinyal modülü değildir).

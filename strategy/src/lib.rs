@@ -16,7 +16,7 @@
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
 //!
 //! (funding/OI/taker/imbalance/universe_returns).
-//! 5. `registry`: 3 temel modül (MMT, SMC-L, MRE); `strat_test_helpers` yalnız-test
+//! 5. `registry`: 2 temel modül (MMT, MRE); SMC-L devre dışı; `strat_test_helpers` yalnız-test
 //!
 //! deterministik mum üreteci.
 pub mod ensemble;
@@ -194,12 +194,14 @@ pub struct ExitIntent {
 /// Registry stratejilerinin adları (test/rapor için; `registry()`nin
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
-    vec!["Squeeze Breakout", "MMT", "MRE", "SMC-L"]
+    // SMC-L devre dışı (trade verisi Hyperliquid WS'den gelmiyor) —
+    // modül kodu korunuyor (smc_l.rs), gelecekte trade feed düzelince
+    // registry'ye geri alınabilir.
+    vec!["Squeeze Breakout", "MMT", "MRE"]
 }
 
 pub fn registry() -> Vec<Box<dyn Strategy>> {
     vec![
-        Box::new(smc_l::SmcL),
         Box::new(mmt::Mmt),
         Box::new(mre::Mre),
     ]
@@ -253,7 +255,7 @@ pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
 }
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 3;
+pub const STRATEGY_COUNT: usize = 2;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]

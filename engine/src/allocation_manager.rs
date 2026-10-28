@@ -1108,14 +1108,15 @@ mod cluster_tests {
             &|_, _| 0.0,
             300.0,
         );
-        // 3 oy — AYRI kümeler: MMT (Trend), SMC-L (Liquidation), MRE (MeanReversion)
+        // 3 oy — AYRI kümeler: MMT (Trend), MRE (MeanReversion)
+        // (SMC-L devre dışı — trade verisi Hyperliquid WS'den gelmiyor)
         let ayri = am.allocate(
-            vec![mk("BTC", vec!["MMT", "SMC-L", "MRE"])],
+            vec![mk("BTC", vec!["MMT", "MRE"])],
             &|_, _| 0.0,
             300.0,
         );
         assert_eq!(ayni[0].votes, 3);
-        assert_eq!(ayri[0].votes, 3);
+        assert_eq!(ayri[0].votes, 2);
         // AYRI küme daha YÜKSEK conviction (bağımsız kanıt daha değerli):
         // breadth = 1 + 0.1×(küme sayısı − 1) → aynı küme 3 oy = 1.0, ayrı = 1.2
         assert!(
@@ -1139,7 +1140,7 @@ mod cluster_tests {
         // katmanı olarak birleşti. Kalan kümeler: Trend, Liquidation,
         // MeanReversion.
         assert!(
-            distinct.len() >= 3,
+            distinct.len() >= 2,
             "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi etkisizleşir): {}",
             distinct.len()
         );
