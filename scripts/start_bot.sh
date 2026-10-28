@@ -29,22 +29,9 @@ CH_URL=$(grep -E "^CLICKHOUSE_URL" "$ROOT/.env" | cut -d= -f2)
 CH_URL=${CH_URL:-http://localhost:8123}
 ch_ping() { curl -so /dev/null -w '%{http_code}' --max-time 4 "$CH_URL/" --data-binary "SELECT 1"; }
 if ! [ "$(ch_ping)" = "200" ]; then
-    echo "depolar ölü — sunucu başlatılıyor ($CH_URL)"
-    CH_BIN=$(ls /root/.clickhouse/versions/*/clickhouse 2>/dev/null | sort -V | tail -1)
-    if [ -n "$CH_BIN" ]; then
-        setsid nohup "$CH_BIN" server --config-file /tmp/opencode/ch/config.xml \
-            > /tmp/opencode/ch/server.out 2>&1 </dev/null &
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-            sleep 2
-            [ "$(ch_ping)" = "200" ] && break
-        done
-    fi
-    if ! [ "$(ch_ping)" = "200" ]; then
-        echo "HATA: depo ($CH_URL) ayağa kalkamadı — bot başlatılmaz"
-        exit 1
-    fi
+    echo "CH depo sağlıksız — Memory fallback ile devam (arşiv kapalı)"
 fi
-echo "depo sağlıklı: $CH_URL"
+echo "depo kontrolü: $CH_URL"
 
 # Sıfırlanacak dosya yok: `config/track_state.json` öğrenilmiş ağırlıkları
 # taşır, silinmez.

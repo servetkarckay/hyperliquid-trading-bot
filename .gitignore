@@ -12,6 +12,9 @@
 
 # Runtime state (bot her koşuda üretir/üzerine yazar — repoya girmez)
 config/*.json
+config/*.jsonl
+config/*.prev
+testnet_final/
 fuzz/artifacts/
 fuzz/target/
 fuzz/Cargo.lock

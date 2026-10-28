@@ -93,10 +93,18 @@ impl RiskManager {
         &self.cfg
     }
 
-    /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma
-    pub fn update_equity(&mut self, equity: f64) {
+    /// Her equity güncellemesinde çağır: peak takibi + drawdown durdurma.
+    ///
+    /// `settled=true` → hesapta açık pozisyon YOK: accountValue tamamen
+    /// **gerçekleşen** equity'dir. Açık pozisyon varken accountValue
+    /// unrealized mark-to-market içerir; geçici MFE spike'ı peak'i
+    /// şişİRAMAZ (canlı vakı: IO unrealized MFE anı peak'i 66.9→76.9
+    /// şişirdi → drawdown eşiği sahte daraldı). Peak yalnız flat
+    /// döngülerde ratchet'lenir; drawdown kontrolü HER güncellemede
+    /// mark equity ile yapılır (korumacı).
+    pub fn update_equity(&mut self, equity: f64, settled: bool) {
         self.current_equity = equity;
-        if equity > self.peak_equity {
+        if settled && equity > self.peak_equity {
             self.peak_equity = equity;
         }
         if self.peak_equity > 0.0 {
@@ -311,9 +319,9 @@ mod persistence_tests {
         let path = path.to_str().unwrap();
 
         let mut r = RiskManager::new(RiskConfig::default());
-        r.update_equity(100.0); // peak=100
+        r.update_equity(100.0, true); // settled: peak=100
         assert!((r.drawdown_pct(80.0) - 20.0).abs() < 1e-9, "%20 drawdown");
-        r.update_equity(80.0); // halt eşiğine geldi (>= %20)
+        r.update_equity(80.0, true); // halt eşiğine geldi (>= %20)
         assert!(r.is_halted(), "drawdown halt");
         r.save_state(path).expect("save");
 
@@ -327,7 +335,7 @@ mod persistence_tests {
             "peak=100 korunmalı (80 yeni peak SANILMAZ)"
         );
         // resume ile peak mevcut equity'ye çekilir
-        r2.update_equity(85.0);
+        r2.update_equity(85.0, true);
         r2.resume();
         assert!(!r2.is_halted());
         r2.save_state(path).unwrap();
@@ -348,5 +356,32 @@ mod persistence_tests {
         assert!(!r.is_halted());
         assert_eq!(r.halt_reason(), None);
         let _ = std::fs::remove_file(path);
+    }
+
+    /// PEAK SADECE SETTLED: açık pozisyonlu (unrealized) equity spike'ı
+    /// peak'i şişİRAMAZ (IO vakası: MFE anı peak'i 66.9→76.9 şişirdi).
+    #[test]
+    fn mark_to_market_spike_peak_iice_mez() {
+        let mut r = RiskManager::new(RiskConfig::default());
+        r.update_equity(100.0, true); // settled → peak=100
+        r.update_equity(115.0, false); // unrealized MFE spike → peak DEĞİŞMEZ
+        assert!((r.drawdown_pct(95.0) - 5.0).abs() < 1e-9, "peak hâlâ 100");
+        r.update_equity(95.0, true); // flat'te gerçekleşen → peak 100 kalır
+        assert!((r.drawdown_pct(95.0) - 5.0).abs() < 1e-9);
+        // drawdown kontrolü mark equity ile de çalışır (korumacı):
+        r.update_equity(80.0, false); // unrealized çöküş de halt tetikler
+        assert!(r.is_halted(), "mark equity drawdown'ı da halt etmeli");
+    }
+
+    /// Settled ratchet devam eder: flat iken yeni zirve peak'i taşır.
+    #[test]
+    fn settled_peak_ratchet_devam_eder() {
+        let mut r = RiskManager::new(RiskConfig::default());
+        r.update_equity(100.0, true);
+        r.update_equity(110.0, true); // flat zirve → peak=110
+        r.update_equity(120.0, false); // spike yutulur
+        assert!((r.drawdown_pct(110.0)).abs() < 1e-9, "peak=110 (120 değil)");
+        r.update_equity(112.0, true); // flat → yeni peak=112
+        assert!((r.drawdown_pct(112.0)).abs() < 1e-9);
     }
 }

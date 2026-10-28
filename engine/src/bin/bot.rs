@@ -109,7 +109,8 @@ async fn main() -> anyhow::Result<()> {
             }
             // 4) yeni epoch dosyası (Engine::new yükler; burada yazılırsa
             // "ilk çalıştırma" mührü atılmış olur → sonraki restart KORUR)
-            let epoch = engine::epoch::LearningEpoch::new_testnet(
+            let epoch = engine::epoch::LearningEpoch::new_for_environment(
+                environment,
                 hyperliquid_api::now_ms().to_string(),
                 hyperliquid_api::now_ms(),
             );

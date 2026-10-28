@@ -13,7 +13,7 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Config {
     pub network: String,
     pub api_url: String,
@@ -21,6 +21,19 @@ pub struct Config {
     /// API wallet (agent) private key, 0x'siz 32 byte hex
     pub private_key: String,
     pub agent_address: String,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // private_key ASLA log'a sızmamalı — Debug derive yerine maskelenmiş.
+        f.debug_struct("Config")
+            .field("network", &self.network)
+            .field("api_url", &self.api_url)
+            .field("ws_url", &self.ws_url)
+            .field("private_key", &"<REDACTED>")
+            .field("agent_address", &self.agent_address)
+            .finish()
+    }
 }
 
 impl Config {

@@ -16,7 +16,7 @@
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
 //!
 //! (funding/OI/taker/imbalance/universe_returns).
-//! 5. `registry`: 15 strateji; `strat_test_helpers` yalnız-test
+//! 5. `registry`: 3 temel modül (MMT, SMC-L, MRE); `strat_test_helpers` yalnız-test
 //!
 //! deterministik mum üreteci.
 pub mod ensemble;

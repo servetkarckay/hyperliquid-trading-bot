@@ -189,6 +189,36 @@ impl MarketCtx {
         Some(oi1 - oi0)
     }
 
+    /// ΔOI **pencere ölçümü**: `window_ms` içindeki OI değişimi
+    /// (son örnek − pencere tabanındaki en-eski örnek).
+    ///
+    /// NEDEN: per-tick ΔOI OI stokunun ~1e-5'i mertebesindedir; %1.5'lük
+    /// likidite-avı eşiği tick-aralığında ASLA tetiklenmez (canlı vakı:
+    /// SMC-L OI katmanı hep "gürültü" döndü). Anlamlı kanıt bar-penceresinde
+    /// (1 saat) ölçülür. Pencere dolmadıysa (açılış/buffer kısa) → None —
+    /// sahte sıfır/kısmi kanıt ÜRETİLMEZ (veri-yok dürüstlüğü).
+    pub fn delta_oi_window(&self, coin: &str, window_ms: i64) -> Option<f64> {
+        let h = self.oi_history.get(coin)?;
+        let &(t1, oi1) = h.back()?;
+        if h.len() < 2 || window_ms <= 0 {
+            return None;
+        }
+        let target = t1 - window_ms;
+        let mut base: Option<(i64, f64)> = None;
+        for &(t, oi) in h {
+            if t <= target {
+                base = Some((t, oi));
+            } else {
+                break;
+            }
+        }
+        let (t0, oi0) = base?;
+        if t1 <= t0 {
+            return None;
+        }
+        Some(oi1 - oi0)
+    }
+
     /// Son N ölçümün OI serisi
     pub fn oi_series(&self, coin: &str) -> Vec<(i64, f64)> {
         self.oi_history
@@ -230,6 +260,56 @@ impl MarketCtx {
 mod apply_stream_testleri {
     use super::*;
     use crate::ingestor::StreamEvent;
+
+    fn ctx_ev(ts: i64, oi: f64) -> StreamEvent {
+        StreamEvent::Ctx {
+            coin: "TEST".into(),
+            funding: 0.0,
+            open_interest: oi,
+            mark_px: 100.0,
+            oracle_px: 100.0,
+            premium: Some(0.0),
+            day_ntl_vlm: Some(1_000_000.0),
+            prev_day_px: Some(100.0),
+            ts,
+        }
+    }
+
+    /// Pencere ΔOI: 1h penceresinde OI düşüşü ölçülür; pencere dolmadan
+    /// None (veri-yok dürüstlüğü — sahte kanıt yok).
+    #[test]
+    fn delta_oi_window_pencere_olcumu() {
+        let mut c = MarketCtx::new(8);
+        // pencere 1 saat; örnekler t=0 ve t=3600_000 (tam kapalı pencere)
+        c.apply_stream(&ctx_ev(0, 1_000_000.0));
+        assert_eq!(c.delta_oi_window("TEST", 3_600_000), None, "tek örnek");
+        c.apply_stream(&ctx_ev(1_800_000, 1_000_500.0));
+        // pencere tabanı (t=−1800_000'e kadar örnek) yok → None
+        assert_eq!(
+            c.delta_oi_window("TEST", 3_600_000),
+            None,
+            "pencere dolmadı"
+        );
+        c.apply_stream(&ctx_ev(3_600_000, 975_000.0));
+        // taban = t=0 (≤ 3_600_000−3_600_000) → ΔOI = −25_000 (%2.5 düşüş)
+        let d = c
+            .delta_oi_window("TEST", 3_600_000)
+            .expect("pencere kapalı");
+        assert!((d - (-25_000.0)).abs() < 1e-9, "ΔOI={d}");
+        // per-tick delta ayrı soru: son iki örnek −500.5+... (karışmaz)
+        assert!(c.delta_oi("TEST").is_some());
+    }
+
+    /// Pencere kısa süreli tick gürültüsünü ölçMEMELİ: küçük OI salınımı
+    /// pencere başında ve sonunda aynen geri gelirse ΔOI≈0 çıkar.
+    #[test]
+    fn delta_oi_window_tick_gurultusunu_olcer() {
+        let mut c = MarketCtx::new(8);
+        c.apply_stream(&ctx_ev(0, 1_000_000.0));
+        c.apply_stream(&ctx_ev(3_600_000, 980_000.0)); // −%2 (likidite avı profili)
+        let d = c.delta_oi_window("TEST", 3_600_000).expect("kapalı");
+        assert!((d - (-20_000.0)).abs() < 1e-9);
+    }
 
     /// WS yolu: meşru null alan (premium/dayNtlVlm/prevDayPx None) →
     /// SON BİLİNEN değer korunur; sahte 0.0 yazılmaz. Çekirdek alanlar

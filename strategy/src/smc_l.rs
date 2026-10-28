@@ -11,7 +11,7 @@
 //! 3. **OFI onayı** (Cont-Kukanov–Stoikov ruhu): displacement arkasında
 //!    agresif akış olmalı — imb ±0.15 + taker %55/%45 ikili onayı.
 //! 4. **OI onayı** (Price×OI): sweep anında ΔOI < 0 (stop patlaması =
-//!    likidite avı) ve görece eşik |ΔOI|/OI ≥ %0.2. OI artışı + fiyat
+//!    likidite avı) ve görece eşik |ΔOI|/OI ≥ %1.5. OI artışı + fiyat
 //!    sweep'i = yeni pozisyon itmesi, stop avı değil → fake koruması.
 //! 5. **L2 defter onayı** (Market Making birleşimi, Avellaneda &
 //!    Stoikov): borsa spread'i AS optimal tam-spread (2δ) içinde —
@@ -30,7 +30,7 @@ pub struct SmcL;
 const IMB_MIN: f64 = 0.15;
 const TAKER_BUY: f64 = 0.55;
 const TAKER_SELL: f64 = 0.45;
-const REL_OI_MIN: f64 = 0.002;
+const REL_OI_MIN: f64 = 0.015;
 
 /// OI katmanı sonucu (test düzeyinde ayrıştırılabilir).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -119,7 +119,8 @@ impl Strategy for SmcL {
                 note: "SMC-L: L2 spread A&S optimal üstü — defter genişlendi (geçiş yok)".into(),
             };
         }
-        // ── 5) OI: sweep = stop patlaması → ΔOI < 0, görece ≥ %0.2
+        // ── 5) OI: sweep = stop patlaması → ΔOI < 0, görece ≥ %1.5
+        // (anlamlı pozisyon kapanışı kanıtı; %0.2 gürültü sınırdı)
         let rel_raw = d_oi.abs() / ctx.open_interest.max(1e-12);
         let rel = match oi_verdict(d_oi, ctx.open_interest) {
             OiVerdict::Ok(v) => v,
@@ -348,7 +349,7 @@ fn plan_short(
     last: usize,
     tune: &SmcTune,
 ) -> Option<Plan> {
-    let start = last.saturating_sub(SWEEP_LOOKBACK);
+    let start = last.saturating_sub(tune.sweep_lookback);
     let (sweep, st) = (start..last)
         .rev()
         .find_map(|s| short_setup(candles, h, atr, s, last, tune).map(|st| (s, st)))?;
@@ -461,7 +462,7 @@ fn short_setup(
     }
     let upper_wick = cd.h - cd.o.max(cd.c);
     let wick_ratio = upper_wick / range;
-    if wick_ratio < WICK_MIN {
+    if wick_ratio < tune.wick_min {
         return None;
     }
     let level = liquidity_highs(h, s)
@@ -833,7 +834,7 @@ mod tests {
                 prev_day_px: 100.0,
                 ts: 0,
             }),
-            oi_delta: Some(-2_500.0),
+            oi_delta: Some(-20_000.0),
             taker_ratio: Some(0.60),
             book_imbalance: Some(0.30),
             ..Default::default()
@@ -863,14 +864,14 @@ mod tests {
 
     #[test]
     fn oi_katmani_karar_agaci() {
-        assert_eq!(oi_verdict(-2_500.0, 1_000_000.0), OiVerdict::Ok(0.0025));
+        assert_eq!(oi_verdict(-20_000.0, 1_000_000.0), OiVerdict::Ok(0.02));
         assert_eq!(
-            oi_verdict(-800.0, 1_000_000.0),
+            oi_verdict(-8_000.0, 1_000_000.0),
             OiVerdict::Noise,
-            "eşik altı"
+            "eşik altı (%0.8 < %1.5)"
         );
         assert_eq!(
-            oi_verdict(3_000.0, 1_000_000.0),
+            oi_verdict(30_000.0, 1_000_000.0),
             OiVerdict::Rising,
             "stop avı değil"
         );

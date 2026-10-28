@@ -142,6 +142,17 @@ impl LearningEpoch {
         }
     }
 
+    /// Ortam-farkında kurucu: `environment` "testnet" | "mainnet".
+    /// (mainnet wipe-path'te `environment:"testnet"` MÜHRÜ basılmamalı —
+    /// epoch dosyası ortamı borsa endpoint'inden bağımsız belgeler.)
+    pub fn new_for_environment(env: &str, epoch_id: String, started_at: u64) -> Self {
+        let mut e = Self::new_testnet(epoch_id, started_at);
+        if env == "mainnet" {
+            e.environment = "mainnet".into();
+        }
+        e
+    }
+
     /// **GERÇEK kapanış** kaydı — bir pozisyon kapandıysa tam bir kez
     /// çağrılır (sinyal/emir/fill sayısı DEĞİL).
     ///
@@ -476,7 +487,7 @@ mod tests {
         let none_arm = match_body.split("Ok(None) =>").nth(1).unwrap_or("");
         let none_arm = none_arm.split("Err(e) =>").next().unwrap_or("");
         assert!(
-            none_arm.contains("new_testnet"),
+            none_arm.contains("new_testnet") || none_arm.contains("new_for_environment"),
             "yeni dönem yalnız dosya-yok dalında açılır"
         );
         assert!(

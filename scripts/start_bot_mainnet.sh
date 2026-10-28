@@ -17,7 +17,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     exit 1
 fi
 
-grep -q "^NETWORK=mainnet" .env || { echo ".env.mainnet NETWORK=mainnet değil"; exit 1; }
+grep -q "^NETWORK=mainnet" .env || { echo ".env NETWORK=mainnet değil"; exit 1; }
 grep -q "^MAINNET_CONFIRMED=1" .env || { echo "MAINNET_CONFIRMED=1 yok"; exit 1; }
 
 # Depo (CH arşiv) sağlık

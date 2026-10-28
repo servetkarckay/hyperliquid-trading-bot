@@ -155,7 +155,7 @@ impl EntryAttr {
         } else {
             Dir::Short
         };
-        let tp = cfg.tp_from_entry(dir, self.entry_px, self.risk_px);
+        let tp = cfg.tp_from_entry_v(dir, self.entry_px, self.risk_px, &self.voters);
         if tp <= 0.0 || !tp.is_finite() {
             return None;
         }
@@ -835,7 +835,7 @@ impl Engine {
     pub async fn new(cfg_api: Config, loop_cfg: LoopConfig) -> anyhow::Result<Self> {
         let lc_cl = loop_cfg.clone();
         let mut executor = Executor::new(cfg_api.clone()).await?;
-        let info = Info::new(cfg_api)?;
+        let info = Info::new(cfg_api.clone())?;
         let mut agg = data::Aggregator::default();
         // EĞİTİM/CANLI PENCERE EŞİTLİĞİ: eğitim `hist_bars` bar ile yapıldı.
         // Varsayılan 500'lik sabit cap, ilk kapanan mumda 4400'ü 500'e
@@ -991,13 +991,21 @@ impl Engine {
         );
 
         // öğrenme dönemi — varsa YÜKLE (restart devamı), yoksa yeni
-        // TESTNET dönem aç (nötr başlangıç; tracker zaten fresh/boş).
+        // dönem aç (nötr başlangıç; tracker zaten fresh/boş).
+        let environment = if cfg_api.network == "mainnet"
+            && std::env::var("MAINNET_CONFIRMED").as_deref() == Ok("1")
+        {
+            "mainnet"
+        } else {
+            "testnet"
+        };
         let learning_epoch_path = std::env::var("LEARNING_EPOCH_PATH")
             .unwrap_or_else(|_| "/root/hyperliquid/config/learning_epoch.json".into());
         let learning = match crate::epoch::LearningEpoch::load(&learning_epoch_path) {
             Ok(Some(e)) => {
                 tracing::info!(
-                    "[TESTNET] öğrenme dönemi sürüyor: {} — completed trades: {}/{}",
+                    "[{}] öğrenme dönemi sürüyor: {} — completed trades: {}/{}",
+                    environment.to_uppercase(),
                     e.epoch_id,
                     e.completed_trade_count,
                     crate::epoch::LEARNING_TRADES_TARGET
@@ -1009,17 +1017,20 @@ impl Engine {
             // sayacını 0'a sıfırlar (persistence açığı — bozuk dosya
             // operatör tarafından onarılmalı; atomik yazım zaten tmp+rename).
             Ok(None) => {
-                let e = crate::epoch::LearningEpoch::new_testnet(
+                let e = crate::epoch::LearningEpoch::new_for_environment(
+                    environment,
                     hyperliquid_api::now_ms().to_string(),
                     hyperliquid_api::now_ms(),
                 );
                 if let Err(er) = e.save(&learning_epoch_path) {
                     tracing::error!(
-                        "[TESTNET] epoch dosyası yazılamadı ({learning_epoch_path}): {er}"
+                        "[{}] epoch dosyası yazılamadı ({learning_epoch_path}): {er}",
+                        environment.to_uppercase()
                     );
                 }
                 tracing::info!(
-                    "[TESTNET] yeni öğrenme dönemi: {} — nötr w=1.0 başlangıç, hedef {} GERÇEK kapanmış işlem",
+                    "[{}] yeni öğrenme dönemi: {} — nötr w=1.0 başlangıç, hedef {} GERÇEK kapanmış işlem",
+                    environment.to_uppercase(),
                     e.epoch_id,
                     crate::epoch::LEARNING_TRADES_TARGET
                 );
@@ -1040,7 +1051,7 @@ impl Engine {
             executor,
             info,
             agg,
-            ctx: data::market_ctx::MarketCtx::new(500),
+            ctx: data::market_ctx::MarketCtx::new(1500),
             ensemble: Ensemble::new(EnsembleConfig {
                 min_score: 0.30,
                 ..Default::default()
@@ -1293,12 +1304,23 @@ impl Engine {
             }
             if exited_now {
                 if let Some(attr) = self.entry_attr.remove(&coin) {
-                    // R-çarpanı: net hareket / giriş riski (PF tabanlı terfi için)
-                    let move_px = match attr.side {
-                        SmSide::Long => avg - attr.entry_px,
-                        SmSide::Short => attr.entry_px - avg,
+                    // R-çarpanı: NET DOLAR PnL / giriş riski (PF tabanlı terfi).
+                    // WS-finalize yoluyla AYNI tanım: mümkünse borsanın
+                    // closedPnl'ini kullan (fee/funding dahil), yoksa fiyat-
+                    // hareketi R'una düş (geriye uyumlu). Böylece iki çıkış
+                    // yolunda R tanımı tekilleşir.
+                    let sz = attr.size.abs().max(f64::EPSILON);
+                    let risk_usd = attr.risk_px * sz;
+                    let r = match self.executor.take_closed_pnl(&coin) {
+                        Some(p) => p / risk_usd.max(f64::EPSILON),
+                        None => {
+                            let move_px = match attr.side {
+                                SmSide::Long => avg - attr.entry_px,
+                                SmSide::Short => attr.entry_px - avg,
+                            };
+                            move_px / attr.risk_px.max(f64::EPSILON)
+                        }
                     };
-                    let r = move_px / attr.risk_px.max(f64::EPSILON);
                     self.tracker.record_outcome_r(
                         attr.voters.clone(),
                         hyperliquid_api::now_ms(),
@@ -2420,7 +2442,7 @@ impl Engine {
                 coin: coin.clone(),
                 candles: candles.clone(),
                 ctx: ctx.clone(),
-                oi_delta: self.ctx.delta_oi(&coin),
+                oi_delta: self.ctx.delta_oi_window(&coin, 3_600_000),
                 taker_ratio: taker,
                 book_imbalance: book.map(|(_, _, i)| i),
                 best_bid: (bid > 1e-9).then_some(bid),
@@ -2863,7 +2885,11 @@ impl Engine {
         // Kabul edilmeyen aday projeksiyona girmemli; Exit emirleri
         // maruziyet EKLEMEZ.
         let mut projection = CycleProjection::seeded(&pmap);
-        self.risk.update_equity(self.equity);
+        // PEAK = SADECE SETTLED equity: pozisyon haritası bu döngüde borsadan
+        // tazelendi (rest_sync_verified) → flat iken accountValue gerçekleşen
+        // equity'dir. Açık pozisyonlu mark-to-market equity'si peak'i şişiremez.
+        let settled = self.rest_sync_verified && self.executor.positions().is_empty();
+        self.risk.update_equity(self.equity, settled);
         // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
         // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
         if let Err(e) = self.risk.save_state(&self.risk_state_path) {

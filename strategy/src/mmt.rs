@@ -20,8 +20,10 @@
 //! 7. **Klasik teyit** (Classic Indicators birleşimi): EMA20>EMA50 +
 //!    RSI14>50 (long; short ayna) — confluence filtresi.
 //!
-//! Fiyat planı: Turtle N (ATR20) — SL = 2N, TP = 3N (kanoniс sistem
-//! 1.5R oranı; motorun kendi TP/SL/trailing katmanı ayrıca devrede).
+//! Fiyat planı: Turtle N (ATR20) — SL = 1.5N, TP = 5N (kanonik TUNE;
+//! 3.33R oranı; motorun kendi TP/SL/trailing katmanı ayrıca devrede).
+//! Güçlü trendde (Wyckoff SOS hacim patlaması ≥1.5× + squeeze release)
+//! TP tp_strong_mult = 6N (4R) seviyesine genişler.
 //!
 //! Deterministik, replay-idempotent, panik yok; yetersiz veri → `Skip`.
 use crate::closes;
@@ -58,6 +60,10 @@ pub struct Tune {
     pub sl_mult: f64,
     pub sos_vol: f64,
     pub sq_buf: f64,
+    /// Güçlü trendde TP çarpanı (ATR×) — Wyckoff SOS hacim patlaması
+    /// (vol_expand ≥ 1.5) + squeeze release koşulunda uygulanır.
+    /// Kanonik: 6.0 = 4R (SL=1.5N → 4R). Tarama varyantları için.
+    pub tp_strong_mult: f64,
 }
 impl Default for Tune {
     fn default() -> Self {
@@ -66,6 +72,7 @@ impl Default for Tune {
             sl_mult: 1.5,
             sos_vol: SOS_VOL_MULT,
             sq_buf: SQUEEZE_BUFFER,
+            tp_strong_mult: 6.0,
         }
     }
 }
@@ -157,11 +164,20 @@ impl Mmt {
         if !atr.is_finite() || atr <= 0.0 {
             return None;
         }
+        // Güçlü trend koşulu: Wyckoff SOS hacim patlaması (vol_expand ≥ 1.5)
+        // + squeeze release (sıkışma sonrası kırılım). Bu koşulda TP
+        // tp_strong_mult (6.0=4R) genişler; aksi halde tp_mult (5.0=3.33R).
+        let strong_trend = vol_expand >= 1.5 && squeeze_on_buf(candles, tune.sq_buf);
+        let tp_mult = if strong_trend {
+            tune.tp_strong_mult
+        } else {
+            tune.tp_mult
+        };
         let entry = c[last];
         let (sl, tp) = if long {
-            (entry - tune.sl_mult * atr, entry + tune.tp_mult * atr)
+            (entry - tune.sl_mult * atr, entry + tp_mult * atr)
         } else {
-            (entry + tune.sl_mult * atr, entry - tune.tp_mult * atr)
+            (entry + tune.sl_mult * atr, entry - tp_mult * atr)
         };
         // Güç: temel 0.55 + kırılım hacim fazlalığı
         let strength = (0.55 + 0.25 * (vol_expand.clamp(1.0, 2.0) - 1.0)).clamp(0.35, 1.0);
