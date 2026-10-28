@@ -468,6 +468,7 @@ anlamsızdır.
 | `ENGINE_INTERVAL` | `3600` | mum aralığı (sn) |
 | `ENGINE_CYCLE_SECS` | `300` | döngü periyodu |
 | `ENGINE_COINS` | `all` | evren spesifikasyonu (tek kaynak) |
+| `ENGINE_L2BOOK_TOP_N` | `10000` (≈tam evren) | SMC-L L2 book aboneliği: hacme göre ilk N coin; 0 = kapalı |
 | `ENGINE_HIST_BARS` | `4400` | ısınma penceresi |
 | `ENGINE_BUDGET_USD` | `300` | döngü bütçesi |
 | `ENGINE_TOP_N` | `30` | eşzamanlı pozisyon tavanı |
