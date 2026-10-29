@@ -1,7 +1,7 @@
 //! MRE — MEAN-REVERSION & OVERREACTION ENGINE (Aşırı Sapma Modülü).
 //!
-//! 3 aşırı-tepki stratejisinin KATMAN ZİNCİRİ (SMC-L/MMT ile aynı
-//! dürüst mimari; bir katman vetoes → sinyal yok):
+//! 3 aşırı-tepki stratejisinin KATMAN ZİNCİRİ (dürüst mimari; bir katman
+//! vetoes → sinyal yok):
 //!
 //! 1. **Rejim**: `classify` TREND rejimini RED (trendless/çalkantılı
 //!    pazarda geçerli); VolSpike/Squeeze (Blocked) da geçmez. MR/GEÇİŞ

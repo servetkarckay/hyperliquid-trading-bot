@@ -83,11 +83,6 @@ pub struct AllocationConfig {
     pub explore_discount: f64,
     /// F — TEK MALİYET MODELİ (EV + yürütme bandı ortak)
     pub cost: CostModel,
-    /// MMT TP çarpanı (ATR×) — kanonik TUNE: TP=5N (SL=1.5N → 3.33R).
-    /// Kanonik replay'de TP genişlemesi monoton iyileşti (2b23c15);
-    /// MMT voter'lı adayların canlı TP'si bu çarpandan türetilir.
-    /// Env: `MMT_TP_ATR_MULT`.
-    pub mmt_tp_atr_mult: f64,
 }
 
 impl AllocationConfig {
@@ -115,30 +110,6 @@ impl AllocationConfig {
     /// TEK kaynağıdır.
     pub fn tp_from_entry(&self, dir: Dir, entry_eff: f64, risk_mesafesi: f64) -> f64 {
         self.tp_from_entry_mult(dir, entry_eff, risk_mesafesi, self.tp_atr_mult)
-    }
-
-    /// Modül-farkında TP çarpanı: adayın oy verenleri MMT içeriyorsa
-    /// MMT tune çarpanı (TP=5N), aksi halde motor tabanı.
-    pub fn tp_atr_mult_for(&self, voters: &[String]) -> f64 {
-        if voters.iter().any(|v| v == "MMT") {
-            self.mmt_tp_atr_mult
-        } else {
-            self.tp_atr_mult
-        }
-    }
-
-    /// Modül-farkında TP: MMT adayları kanonik TUNE sonucunu (TP=5N;
-    /// kanonik replay'de TP genişlemesi monoton iyileşti — commit `2b23c15`)
-    /// taşır; diğer modüller motor tabanı (`tp_atr_mult`). Formül AYNI —
-    /// yalnız çarpan modülden gelir (tek formül disiplini korunur).
-    pub fn tp_from_entry_v(
-        &self,
-        dir: Dir,
-        entry_eff: f64,
-        risk_mesafesi: f64,
-        voters: &[String],
-    ) -> f64 {
-        self.tp_from_entry_mult(dir, entry_eff, risk_mesafesi, self.tp_atr_mult_for(voters))
     }
 
     /// TP formülünün çekirdeği — çarpan parametresiyle (TEK formül).
@@ -183,7 +154,6 @@ impl Default for AllocationConfig {
             explore_cap_frac: 0.05,
             explore_discount: 0.7,
             cost: CostModel::from_env(),
-            mmt_tp_atr_mult: env_f64("MMT_TP_ATR_MULT", 5.0),
         }
     }
 }
@@ -1108,9 +1078,9 @@ mod cluster_tests {
             &|_, _| 0.0,
             300.0,
         );
-        // 3 oy — AYRI kümeler: MMT (Trend), MRE (MeanReversion)
-        // (SMC-L devre dışı — trade verisi Hyperliquid WS'den gelmiyor)
-        let ayri = am.allocate(vec![mk("BTC", vec!["MMT", "MRE"])], &|_, _| 0.0, 300.0);
+        // 2 oy — AYRI kümeler: Trend (keyfi ad → varsayım), MRE
+        // (MeanReversion)
+        let ayri = am.allocate(vec![mk("BTC", vec!["TRENDX", "MRE"])], &|_, _| 0.0, 300.0);
         assert_eq!(ayni[0].votes, 3);
         assert_eq!(ayri[0].votes, 2);
         // AYRI küme daha YÜKSEK conviction (bağımsız kanıt daha değerli):
@@ -1121,51 +1091,22 @@ mod cluster_tests {
             ayni[0].conviction,
             ayri[0].conviction
         );
-        // küme haritası tutarlı + DÜRÜST: registry stratejilerinin hepsi
-        // eşlenmeli VE haritalar dokümante edilmiş kümelerle birebir.
-        // NOT: her birleştirme (SMC-L/MMT/MRE) kümelik sayısını bilinçli
-        // azaltır — birleştirilmiş modül, bileşenlerinin kümelerini
-        // temsil eder; mevcut 6 küme: Trend, OrderFlow, Carry, Sizing,
-        // Liquidation, MeanReversion.
+        // küme haritası tutarlı: registry (tek modül MRE) tamamen
+        // MeanReversion kümesine eşlenir. TEK stratejili registry'de
+        // genişlik ödülü doğal olarak etkin değildir (breadth = 1.0) —
+        // mekaniğin kendisi yukarıdaki ayni/ayri testiyle canlı kalır.
         let distinct: std::collections::HashSet<strategy::InfoCluster> = strategy::registry_names()
             .iter()
             .map(|n| strategy::info_cluster(n))
             .collect();
-        // NOT: Kelly Sizing & Funding Carry registry'den ÇIKARILDI;
-        // Classic Indicators → MMT 7. katman, Market Making → SMC-L L2
-        // katmanı olarak birleşti. Kalan kümeler: Trend, Liquidation,
-        // MeanReversion.
-        assert!(
-            distinct.len() >= 2,
-            "kümeler tek tipe indirgenemez (bağımsızlık düzeltmesi etkisizleşir): {}",
-            distinct.len()
-        );
+        assert_eq!(distinct.len(), 1, "tek modül (MRE) → tek küme beklenir");
+        assert!(distinct.contains(&strategy::InfoCluster::MeanReversion));
     }
 }
 
 #[cfg(test)]
 mod module_tp_tests {
     use super::*;
-
-    /// MMT voter'lı aday kanonik TUNE çarpanını taşır (TP=5N → 3.33R);
-    /// diğer modüller motor tabanını (3.0 → 2R yan kapısı) korur.
-    #[test]
-    fn mmt_aday_tp_genis_digerleri_taban() {
-        let cfg = AllocationConfig::default();
-        let risk = 1.5; // bps cinsinden fark etmez — oransal
-        let mmt = cfg.tp_from_entry_v(Dir::Long, 100.0, risk, &["MMT".to_string()]);
-        let mre = cfg.tp_from_entry_v(Dir::Long, 100.0, risk, &["MRE".to_string()]);
-        let taban = cfg.tp_from_entry(Dir::Long, 100.0, risk);
-        // MMT: tp_dist = (5.0/1.5)×risk
-        assert!(
-            ((mmt - 100.0) - (5.0 / 1.5) * risk).abs() < 1e-9,
-            "MMT TP dist = 3.33R, {}",
-            mmt - 100.0
-        );
-        // MRE: tabanla aynı (2R yan kapısı)
-        assert!((mre - taban).abs() < 1e-9);
-        assert!(((mre - 100.0) - 2.0 * risk).abs() < 1e-9);
-    }
 
     /// SPREAD-GATE SPEC-PİNİ: önerilen `max(75, 3×Spread + TakerFee)`
     /// formülü, mevcut floor `max(75, 3×round_trip)`'in TÜM spread'lerde

@@ -155,7 +155,7 @@ impl EntryAttr {
         } else {
             Dir::Short
         };
-        let tp = cfg.tp_from_entry_v(dir, self.entry_px, self.risk_px, &self.voters);
+        let tp = cfg.tp_from_entry(dir, self.entry_px, self.risk_px);
         if tp <= 0.0 || !tp.is_finite() {
             return None;
         }
@@ -5565,8 +5565,7 @@ mod golden_path_tests {
     }
 
     // Test-dahili stub: altın yolun konusu ZİNCİRDİR (ensemble→rejim→
-    // tahsis→risk→tracker); Turtle registry'den MMT'ye birleşti —
-    // sinyal kaynağı yerel stub ile sabitlenir.
+    // tahsis→risk→tracker) — sinyal kaynağı yerel stub ile sabitlenir.
     struct GoldenStub;
     impl strategy::Strategy for GoldenStub {
         fn name(&self) -> &'static str {

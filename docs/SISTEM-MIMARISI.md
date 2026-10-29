@@ -93,7 +93,7 @@ StreamEvent ──► Aggregator (tick→mum) ──► Candle serisi
 |---|---|
 | `api` | Hyperliquid I/O façade: imza (EIP-712), exchange/info endpoint, WS, hata taksonomisi, wire yuvarlama. Bot mantığı İÇERMEZ. |
 | `data` | Piyasa verisi hattı: WS ingestor, tick→mum aggregator, market context, storage soyutlaması, evren tek kaynağı. |
-| `strategy` | `Strategy` trait'i + 3 temel modül (MMT, SMC-L, MRE) + ensemble + rejim + `InfoCluster` + `exit_intent`. |
+| `strategy` | `Strategy` trait'i + tek temel modül (MRE) + ensemble + rejim + `InfoCluster` + `exit_intent`. |
 | `engine` | Motor: döngü, executor, allocation, risk, durum makinesi, tracker, epoch. |
 | `math` | Saf deterministik sayısal çekirdek: göstergeler, vol modelleri, linalg/OLS, istatistik testleri, portföy metrikleri. |
 | `utils` | Logger + NTP saat senkronu. |
@@ -140,7 +140,7 @@ kullandığını doğrular; uyuşmazlıkta **açılış durur**.
 - `MarketInput`: kapanmış mumlar + canlı son bar + L2 defter (`Option` —
   yoksa `None`, sahte sıfır DEĞİL) + ctx (OI/funding) + portfolio kanıtı +
   equity + evren getirileri.
-- 2 temel modül `registry()`'de tanımlıdır (MMT, MRE). `evaluate` panik-izole çalışır
+- Tek temel modül `registry()`'de tanımlıdır (MRE). `evaluate` panik-izole çalışır
   (bir stratejinin paniki döngüyü düşürmez; Skip'e döner).
 - `Signal`: Long/Short/Hold/Skip/Exit — `None` gösterge asla sahte oy
   üretmez (gösterge yok = katkı yok).
@@ -169,18 +169,18 @@ bu bayrakla `ExitNow` yürütür; Flat'ta hiçbir emir üretmez.
 
 ## 10. InfoCluster ve breadth
 
-2 temel modül aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
+Modüller aynı temel girdilerin formülasyonları olabilir; genişlik ödülü
 **ham oy sayısına göre verilmez**. `strategy::info_cluster(name)` tek
-kaynaktır — 8 bilgi kümesi:
+kaynaktır — 8 bilgi kümesi taksonomisi durur; şu an eşlenen modül:
 
 ```text
-Trend (MMT — Turtle + Dow + Wyckoff + Elliott + Classic confluence; RegimeBoost)
 MeanReversion (MRE — De Bondt-Thaler Z + GARCH σ + CS rank + yönlü infaz mumu)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:
 `breadth = 1 + 0.1×(ayrı_küme−1)` (0.5..1.5 clamp). Aynı kümeden oylar
-genişlik ödülünü çoğaltmaz.
+genişlik ödülünü çoğaltmaz. Tek modüllü registry'de breadth = 1.0 (etkisiz)
+— mekânizma çoklu modül geri geldiğinde devreye girer.
 
 ## 11. Allocation
 
@@ -537,9 +537,10 @@ engine 227 · data 32 · api 13 · strategy 39
 
 - **Elliott** yapısal olarak long-only eğilimlidir; short kolu mevcut
   kontratta uygulanmaz (parametre normalizasyonu değiştirilmedi).
-- **SMC-L devre dışı**: trade verisi Hyperliquid WS'den gelmiyor (taker_ratio=None).
-  Modül kodu korunuyor (`smc_l.rs`), trade feed düzeldiğinde registry'ye
-  geri alınabilir. Aktif modüller: MMT, MRE (STRATEGY_COUNT=2).
+- **MMT ve SMC-L kaldırıldı**: MMT canlıda hiç işlem açlamadı (LEARN n=0);
+  SMC-L'nin trade verisi Hyperliquid WS'den gelmiyordu (taker_ratio=None) ve
+  zaten devre dışıydı. İki modül de git geçmişinde durur (silinme öncesi
+  commit'ler). Aktif modül: MRE (STRATEGY_COUNT=1).
 - **Kelly Sizing** ve **Funding Carry** motorun Sermaye/Risk katmanına
   (leverage_sizing + funding EMA/freeze) taşınmıştır; registry'den
   çıkarılmıştır (sinyal modülü değildir).

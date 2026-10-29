@@ -16,14 +16,12 @@
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
 //!
 //! (funding/OI/taker/imbalance/universe_returns).
-//! 5. `registry`: 2 temel modül (MMT, MRE); SMC-L devre dışı; `strat_test_helpers` yalnız-test
+//! 5. `registry`: tek temel modül (MRE); `strat_test_helpers` yalnız-test
 //!
 //! deterministik mum üreteci.
 pub mod ensemble;
-pub mod mmt;
 pub mod mre;
 pub mod regime_detection;
-pub mod smc_l;
 
 use data::market_ctx::CtxState;
 use data::Candle;
@@ -194,14 +192,11 @@ pub struct ExitIntent {
 /// Registry stratejilerinin adları (test/rapor için; `registry()`nin
 /// ağırlıksız karşılığı).
 pub fn registry_names() -> Vec<&'static str> {
-    // SMC-L devre dışı (trade verisi Hyperliquid WS'den gelmiyor) —
-    // modül kodu korunuyor (smc_l.rs), gelecekte trade feed düzelince
-    // registry'ye geri alınabilir.
-    vec!["Squeeze Breakout", "MMT", "MRE"]
+    vec!["MRE"]
 }
 
 pub fn registry() -> Vec<Box<dyn Strategy>> {
-    vec![Box::new(mmt::Mmt), Box::new(mre::Mre)]
+    vec![Box::new(mre::Mre)]
 }
 
 /// **BİLGİ KÜMESİ** — stratejilerin aynı temel girdiden türetilmesi
@@ -233,11 +228,10 @@ pub enum InfoCluster {
 /// strateji adı → bilgi kümesi (registry ile birebir; tek kaynak)
 pub fn info_cluster(name: &str) -> InfoCluster {
     match name {
-        // SMC-L: likidite yapısı + OI kadransı hibrit → Liquidation
-        "SMC-L" => InfoCluster::Liquidation,
         // MRE: tepki/volatilite kesit kompoziti → MeanReversion
         "MRE" => InfoCluster::MeanReversion,
-        // fiyat/trend türevleri: MMT (Classic Indicators birleşimi)
+        // bilinmeyen ad → fiyat/trend türevi varsayımı (küme mekaniği
+        // testleri keyfi isimlerle ayrışmayı test eder)
         _ => InfoCluster::Trend,
     }
 }
@@ -246,13 +240,9 @@ pub fn info_cluster(name: &str) -> InfoCluster {
 pub(crate) fn closes(candles: &[Candle]) -> Vec<f64> {
     candles.iter().map(|c| c.c).collect()
 }
-/// Son değer (pencere doluysa)
-pub(crate) fn last(v: &[Option<f64>]) -> Option<f64> {
-    v.last().and_then(|x| *x)
-}
 
 /// Registry'deki strateji sayısı (nötr cold-start logu + testler).
-pub const STRATEGY_COUNT: usize = 2;
+pub const STRATEGY_COUNT: usize = 1;
 
 #[cfg(test)]
 #[path = "strat_test_helpers.rs"]

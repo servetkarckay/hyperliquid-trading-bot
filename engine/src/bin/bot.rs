@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         l2book_top_n: std::env::var("ENGINE_L2BOOK_TOP_N")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(10000), // 0 = kapalı; varsayılan = tam evren (SMC-L L2 katmanı)
+            .unwrap_or(10000), // 0 = kapalı; varsayılan = tam evren (L2 imbalance kanıtı)
         ..Default::default()
     };
     let spec = data::UniverseSpec::parse(std::env::var("ENGINE_COINS").ok().as_deref())?;

@@ -2,17 +2,16 @@
 
 Hızlı referans. Tam mimari için `SISTEM-MIMARISI.md`.
 
-## Modüller (registry = 3)
+## Modüller (registry = 1)
 
-- **MMT** — Trend & Breakout. Katmanlar: TrendBoost(4h) × Turtle20 × Dow HH/HL × Squeeze × Wyckoff SOS × Elliott × Classic confluence. SL 1.5N / TP 5N (güçlü trendde 6N=4R).
-- **SMC-L** — Liquidity & Reversal. Katmanlar: Regime × Sweep∧ΔOI<0(≥%1.5, 1h pencere) × CISD∧OFI × L2 imbalance. Kanonik eşikler (0.5/0.7/1.5).
-- **MRE** — Mean-Reversion. Katmanlar: Regime × De Bondt-Thaler Z(±2.5) × GARCH(1,1) σ≥1.0 × CS rank extreme. SL 1.5×ATR / TP c[last−6].
+- **MRE** — Mean-Reversion. Katmanlar: Regime × De Bondt-Thaler Z(±2.5) × GARCH(1,1) σ≥1.0 × CS rank extreme × yönlü infaz mumu (LONG: aralık≤2.7×ATR / SHORT: aralık>2.7×ATR). SL 1.5×ATR / TP c[last−6].
+
+MMT ve SMC-L koddan kaldırıldı (git geçmişinde durur): MMT canlıda hiç işlem
+açlamadı (LEARN n=0); SMC-L'nin WS "trades" beslemesi veri göndermiyordu.
 
 ## Tuning özeti
 
-- MMT: SL 2→1.5, TP 3→5 (kanonik replay +2.5R); güçlü trendde 4R.
-- SMC-L: kanonik korundu; ΔOI %1.5 (önceki %0.2 — per-tick gürültü); shorts param bug düzeltildi.
-- MRE: kanonik korundu (z=2.5, σ=1.0, SL=1.5).
+- MRE: kanonik korundu (z=2.5, σ=1.0, SL=1.5); infaz mumu kuralı eklendi (pf 1.41→1.95 backtest).
 - Spread-gate: mevcut `max(75, 3×round_trip)` spec formülünden daha sıkı.
 
 ## Bot durumu
