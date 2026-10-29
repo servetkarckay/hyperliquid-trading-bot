@@ -16,6 +16,11 @@
 //! 4. **Cross-Sectional rank**: kesit quintile — panik uzvu → evrenin
 //!    alt %40'ında (Bottom/BottomShort), euphoria → üst %20 (Top).
 //!    Orta bölgeler (Mid/adı yok) → Hold.
+//! 5. **İnfaz mumu kuralı (yönlü)**: sinyal barı aralığı/ATR14 — dip
+//!    alımında (LONG) infaz mumu DİNMIŞ olmalı (aralık ≤ 2.7×ATR: bıçak
+//!    yere düşmüş); zirve shortunda (SHORT) infaz mumu ZİRVEDE olmalı
+//!    (aralık > 2.7×ATR: coşku tam delirmede). Kanıt: 83 gün × 179 coin
+//!    replay (754 işlem) — pf 1.41→1.95; 3 ufukta + 2 yarıda tutarlı.
 //!
 //! Fiyat planı: hedef = aşırı hareketin başlangıcı (c[last−6]) —
 //! "ortalamaya dönüş" literal hedefi; SL = 1.5×ATR14 risk tavanı.
@@ -53,6 +58,10 @@ const SIGMA_RATIO_ESIK: f64 = 1.0;
 const ATR_N: usize = 14;
 const MOVE_N: usize = 6;
 const SD_WINDOW: usize = 100;
+/// İnfaz mumu eşiği: sinyal barı aralığının ATR14'e oranı. LONG'da bu
+/// değerin ALTINDA (panik dinmiş), SHORT'ta ÜSTÜNDE (coşku zirvede)
+/// olmalı — 83 gün replay'de türetilen keskin ayrım (bkz. modül doc 5).
+const INFAZ_ATR_K: f64 = 2.7;
 
 /// Coinin kesit sıralamasındaki **dilimi** — tek kaynak (strateji +
 /// engine + replay aynı fonksiyonu kullanır).
@@ -134,6 +143,10 @@ pub fn replay_chain(
         return None;
     }
     let (z, long) = z_overreaction(candles, tune.z_esik)?;
+    // infaz mumu kuralı — replay kontratı üretimle birebir
+    if !infaz_mumu_ok(candles, long) {
+        return None;
+    }
     let ratio = garch_threshold(candles, tune.sigma_ratio)?;
     if !(ratio.is_finite() && ratio >= tune.sigma_ratio) {
         return None;
@@ -174,8 +187,9 @@ fn build_plan(
         entry + sl_mult * atr
     };
     let strength = (0.5 + (z.abs() - Z_ESIK) / 5.0).clamp(0.35, 0.9);
-    let note =
-        format!("MRE katmanları ✓ · Z={z:+.2}σ · σ_oranı={ratio:.2} · rank={band:?} · rejim TAMAM");
+    let note = format!(
+        "MRE katmanları ✓ · Z={z:+.2}σ · σ_oranı={ratio:.2} · rank={band:?} · infaz mumu ✓ · rejim TAMAM"
+    );
     Some(ReversionPlan {
         long,
         entry,
@@ -244,6 +258,11 @@ impl Mre {
         }
         // ── 2) Z katmanı: yön burada belirlenir
         let (z, long) = z_overreaction(candles, tune.z_esik)?;
+        // ── 2b) İnfaz mumu kuralı: dip alımda mum dinmiş, zirve
+        //    shortunda infaz zirvede (83 gün replay kanıtı)
+        if !infaz_mumu_ok(candles, long) {
+            return None;
+        }
         // ── 1) Rejim: TREND/Blocked red (AND zincirinde geç katman ama
         //    erken eleme ucuz)
         let (label, _) = regime_label(candles)?;
@@ -267,6 +286,31 @@ impl Mre {
         }
         // ── Fiyat planı: hedef = aşırı hareketin başlangıcı
         build_plan(candles, z, long, ratio, band, tune.sl_mult)
+    }
+}
+
+/// İnfaz mumu kuralı (yönlü) — dip alımında son bar sakin, zirve
+/// shortunda son bar infaz. ATR hesaplanamazsa kapı YOK (güvenli red).
+pub fn infaz_mumu_ok(candles: &[Candle], long: bool) -> bool {
+    if candles.is_empty() {
+        return false;
+    }
+    let h: Vec<f64> = candles.iter().map(|x| x.h).collect();
+    let l: Vec<f64> = candles.iter().map(|x| x.l).collect();
+    let c = closes(candles);
+    let atr = indicators::atr(&h, &l, &c, ATR_N)
+        .last()
+        .and_then(|v| *v)
+        .filter(|v| v.is_finite() && *v > 0.0);
+    let Some(atr) = atr else {
+        return false;
+    };
+    let last = candles.len() - 1;
+    let rng = h[last] - l[last];
+    if long {
+        rng <= INFAZ_ATR_K * atr
+    } else {
+        rng > INFAZ_ATR_K * atr
     }
 }
 
@@ -404,5 +448,26 @@ mod tests {
         assert!(!regime_permits_mre(&RegimeLabel::VolSpike));
         assert!(regime_permits_mre(&RegimeLabel::MeanReversion));
         assert!(regime_permits_mre(&RegimeLabel::Gecis));
+    }
+
+    #[test]
+    fn infaz_mumu_yonlu() {
+        // LONG: son bar sakin (aralık ≤ 2.7×ATR) → OK; infaz mumu (büyük) → red.
+        let mut cs = flat(220, 100.0);
+        // son bar: aralık 1.0 (ATR~0.2 seride küçük) — sakin
+        cs[219] = candle(219 * H, 94.0, 94.6, 93.6, 94.4, 100.0);
+        assert!(infaz_mumu_ok(&cs, true), "dip alımında dinmiş mum OK");
+        // ayna: son bar infaz — aralık 8.0 → LONG red
+        let mut cs = flat(220, 100.0);
+        cs[219] = candle(219 * H, 98.0, 99.0, 91.0, 94.0, 100.0);
+        assert!(!infaz_mumu_ok(&cs, true), "dip alımında infaz mumu red");
+        // SHORT: infaz mumu (coşku zirvesi) → OK; sakin mum → red
+        assert!(infaz_mumu_ok(&cs, false), "zirve shortunda infaz mumu OK");
+        let mut cs = flat(220, 100.0);
+        cs[219] = candle(219 * H, 94.0, 94.6, 93.6, 94.4, 100.0);
+        assert!(!infaz_mumu_ok(&cs, false), "zirve shortunda sakin mum red");
+        // ATR hesaplanamazsa (yetersiz veri) kapı YOK
+        assert!(!infaz_mumu_ok(&flat(10, 100.0), true));
+        assert!(!infaz_mumu_ok(&flat(10, 100.0), false));
     }
 }

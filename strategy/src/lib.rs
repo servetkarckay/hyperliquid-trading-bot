@@ -201,10 +201,7 @@ pub fn registry_names() -> Vec<&'static str> {
 }
 
 pub fn registry() -> Vec<Box<dyn Strategy>> {
-    vec![
-        Box::new(mmt::Mmt),
-        Box::new(mre::Mre),
-    ]
+    vec![Box::new(mmt::Mmt), Box::new(mre::Mre)]
 }
 
 /// **BİLGİ KÜMESİ** — stratejilerin aynı temel girdiden türetilmesi

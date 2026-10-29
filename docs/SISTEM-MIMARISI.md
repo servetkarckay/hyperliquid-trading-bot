@@ -175,7 +175,7 @@ kaynaktır — 8 bilgi kümesi:
 
 ```text
 Trend (MMT — Turtle + Dow + Wyckoff + Elliott + Classic confluence; RegimeBoost)
-MeanReversion (MRE — De Bondt-Thaler Z + GARCH σ + CS rank)
+MeanReversion (MRE — De Bondt-Thaler Z + GARCH σ + CS rank + yönlü infaz mumu)
 ```
 
 Tahsisin conviction genişliği **ayrı küme sayısından** gelir:

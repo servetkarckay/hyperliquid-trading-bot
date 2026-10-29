@@ -1110,11 +1110,7 @@ mod cluster_tests {
         );
         // 3 oy — AYRI kümeler: MMT (Trend), MRE (MeanReversion)
         // (SMC-L devre dışı — trade verisi Hyperliquid WS'den gelmiyor)
-        let ayri = am.allocate(
-            vec![mk("BTC", vec!["MMT", "MRE"])],
-            &|_, _| 0.0,
-            300.0,
-        );
+        let ayri = am.allocate(vec![mk("BTC", vec!["MMT", "MRE"])], &|_, _| 0.0, 300.0);
         assert_eq!(ayni[0].votes, 3);
         assert_eq!(ayri[0].votes, 2);
         // AYRI küme daha YÜKSEK conviction (bağımsız kanıt daha değerli):

@@ -12,7 +12,7 @@ None. Trade feed düzeldiğinde registry'ye geri alınabilir. Sermaye/risk katma
 | Modül | Katmanlar | SL / TP (ATR) | Durum |
 |---|---|---|---|
 | MMT | TrendBoost(4h) × Turtle20 × Dow HH/HL × Squeeze × Wyckoff SOS × Elliott × Classic confluence (EMA20>EMA50 ∧ RSI>50) | 1.5N / 5N (güçlü trendde 6N=4R) | Aktif |
-| MRE | Regime × De Bondt-Thaler Z(±2.5) × GARCH(1,1) σ≥1.0 × CS rank extreme | 1.5×ATR / c[last−6] | Aktif |
+| MRE | Regime × De Bondt-Thaler Z(±2.5) × GARCH(1,1) σ≥1.0 × CS rank extreme × yönlü infaz mumu (LONG: aralık≤2.7×ATR / SHORT: aralık>2.7×ATR) | 1.5×ATR / c[last−6] | Aktif |
 
 `STRATEGY_COUNT = 2`, cluster sayısı 2 (Trend / MeanReversion).
 
