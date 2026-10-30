@@ -3558,10 +3558,31 @@ impl Engine {
             let orders_res = self.executor.refresh_open_orders_all().await;
             let orders_ok = orders_res.is_ok();
             let rows = orders_res.ok();
-            let has_order = rows
+            let mut has_order = rows
                 .as_ref()
                 .map(|r| find_by_cloid(r, coin, cloid).is_some())
                 .unwrap_or(false);
+            let mut order_oid = rows.as_ref().and_then(|r| find_by_cloid(r, coin, cloid));
+
+            // CLOID fallback: frontendOpenOrders cloid içermeyebilir.
+            // orderStatus(cloid) ile emir gerçekten açık mı doğrula.
+            // Başarısızlık → Unknown (Flat YASAK).
+            let mut order_status_ok = orders_ok;
+            if !has_order && orders_ok {
+                match self.executor.order_status_cloid(cloid).await {
+                    Ok(Some(oid)) => {
+                        has_order = true;
+                        order_oid = Some(oid);
+                    }
+                    Ok(None) => {
+                        // emir açık değil (unknownOid/filled/canceled) — verified NotFound
+                        order_status_ok = true;
+                    }
+                    Err(_) => {
+                        order_status_ok = false;
+                    }
+                }
+            }
 
             // 2. pozisyon kanıtı — yalnız emir yokken; sorgu başarısızsa
             //    Unknown (NotFound iddiası yapılamaz).
@@ -3583,15 +3604,15 @@ impl Engine {
             };
             // verified: her iki sorgu (gereken) başarılı tamamlandı.
             let verified = if has_order {
-                orders_ok
+                orders_ok || order_status_ok
             } else {
-                orders_ok && positions_ok
+                orders_ok && order_status_ok && positions_ok
             };
 
             match recon_decide(has_order, has_position, verified, attempts) {
                 ReconAction::LinkOid => {
-                    let oid = rows
-                        .and_then(|r| find_by_cloid(&r, coin, cloid))
+                    let oid = order_oid
+                        .or_else(|| rows.as_ref().and_then(|r| find_by_cloid(r, coin, cloid)))
                         .expect("has_order=true ⇒ oid bulunmalı");
                     if let Some(m) = self.machines.get_mut(coin) {
                         m.link_recon_oid(oid, 0.0); // kalan; dolum bildirimi ayrı akışta

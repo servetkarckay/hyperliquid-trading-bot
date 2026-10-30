@@ -1234,6 +1234,24 @@ impl Executor {
     /// emirleri döndürür. UNKNOWN olan **giriş** emirleri `reduce_only=false`
     /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
     /// giriş emrini bulamazdı.
+    /// CLOID ile emir durumu sorgula (Hyperliquid orderStatus — oid olarak
+    /// cloid string kabul eder). Emir açık ise Some(oid), bulunamazsa None.
+    /// Sorgu başarısızsa Err (Unknown).
+    pub async fn order_status_cloid(&self, cloid: &str) -> Result<Option<i64>> {
+        let v = self.info.order_status_cloid(&self.user, cloid).await?;
+        if let Some(o) = v.get("order") {
+            if let Some(oid) = o["oid"].as_i64() {
+                return Ok(Some(oid));
+            }
+            // status "order" ama oid yok → şema bozuk
+            let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
+            if status == "order" {
+                bail!("orderStatus yanıtı şema bozuk (oid yok): {v}");
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
         let v = self.info.frontend_open_orders(&self.user).await?;
         let arr = v.as_array().ok_or_else(|| {
