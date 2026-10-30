@@ -540,6 +540,9 @@ pub enum ReconAction {
     Retry,
     /// kanıt yok + deneme hakkı bitti → Flat
     Flat,
+    /// borsa durumu DOĞRULANAMADI (REST başarısız) → Flat YASAK;
+    /// emir kimliği ve ReconciliationPending korunur, yeni girişler kilitli.
+    Unknown,
 }
 
 /// Bounded recheck: UNKNOWN emir için en fazla bu kadar yeniden sorgu.
@@ -547,11 +550,21 @@ pub const RECON_MAX_ATTEMPTS: u8 = 3;
 /// recheck arası bekleme (delayed visibility penceresi).
 pub const RECON_RECHECK_MS: u64 = 2_000;
 
-pub fn recon_decide(has_order: bool, has_position: bool, attempts: u8) -> ReconAction {
+/// `verified`: REST sorguları (open orders + positions) BAŞARIyla ve
+/// şeması doğrulanmış şekilde tamamlandı mı. `false` iken "NotFound"
+/// iddiası yapılamaz — yalnız Unknown döner (Flat YASAK).
+pub fn recon_decide(
+    has_order: bool,
+    has_position: bool,
+    verified: bool,
+    attempts: u8,
+) -> ReconAction {
     if has_order {
         ReconAction::LinkOid
     } else if has_position {
         ReconAction::ToPosition
+    } else if !verified {
+        ReconAction::Unknown
     } else if attempts < RECON_MAX_ATTEMPTS {
         ReconAction::Retry
     } else {
@@ -3384,28 +3397,51 @@ impl Engine {
         //   1. open orders (cloid) → oid bağlanır
         //   2. pozisyon (fill kanıtı) → InPosition + sentetik attr
         //   3. kanıt yok → recheck (geçikmeli görünürlük penceresi)
-        //   4. deneme hakkı bitti → Flat
+        //   4. doğrulanmış kanıt yok + deneme hakkı bitti → Flat
+        //   5. borsa durumu DOĞRULANAMADI (REST başarısız) → Unknown:
+        //      emir kimliği + ReconciliationPending korunur, Flat YASAK,
+        //      yeni girişler kilitlenir.
         let mut attempts: u8 = 0;
         loop {
-            let rows_opt = self.executor.refresh_open_orders_all().await.ok();
-            let has_order = rows_opt
+            // 1. open orders sorgusu — başarı/başarısızlık AYRILIR:
+            //    yalnız başarılı, şeması doğrulanmış yanıt "NotFound"
+            //    üretebilir. Başarısızlık → Unknown (Flat YASAK).
+            let orders_res = self.executor.refresh_open_orders_all().await;
+            let orders_ok = orders_res.is_ok();
+            let rows = orders_res.ok();
+            let has_order = rows
                 .as_ref()
                 .map(|r| find_by_cloid(r, coin, cloid).is_some())
                 .unwrap_or(false);
-            // kanıt 2 (yalnız emir yokken): fill → pozisyon kanıtı
-            let has_position = if has_order {
-                false
+
+            // 2. pozisyon kanıtı — yalnız emir yokken; sorgu başarısızsa
+            //    Unknown (NotFound iddiası yapılamaz).
+            let (has_position, positions_ok) = if has_order {
+                (false, true)
             } else {
-                let _ = self.executor.refresh_positions().await;
-                self.executor
-                    .positions()
-                    .get(coin)
-                    .map(|p| p.szi.abs() > 1e-12)
-                    .unwrap_or(false)
+                match self.executor.refresh_positions().await {
+                    Ok(()) => {
+                        let hp = self
+                            .executor
+                            .positions()
+                            .get(coin)
+                            .map(|p| p.szi.abs() > 1e-12)
+                            .unwrap_or(false);
+                        (hp, true)
+                    }
+                    Err(_) => (false, false),
+                }
             };
-            match recon_decide(has_order, has_position, attempts) {
+            // verified: her iki sorgu (gereken) başarılı tamamlandı.
+            let verified = if has_order {
+                orders_ok
+            } else {
+                orders_ok && positions_ok
+            };
+
+            match recon_decide(has_order, has_position, verified, attempts) {
                 ReconAction::LinkOid => {
-                    let oid = rows_opt
+                    let oid = rows
                         .and_then(|r| find_by_cloid(&r, coin, cloid))
                         .expect("has_order=true ⇒ oid bulunmalı");
                     if let Some(m) = self.machines.get_mut(coin) {
@@ -3466,6 +3502,26 @@ impl Engine {
                     tracing::warn!(
                         "[RECON] cloid={cloid} coin={coin} kanıt YOK ({attempts} recheck) → Flat"
                     );
+                    return Ok(());
+                }
+                ReconAction::Unknown => {
+                    // REST sorgusu başarısız: "emir yok" KANITI YOK.
+                    // Emir kimliği ve ReconciliationPending korunur;
+                    // yeni girişler kilitlenir (gate.lock).
+                    self.gate.lock();
+                    tracing::error!(
+                        "[RECON] cloid={cloid} coin={coin} borsa durumu DOĞRULANAMADI \
+                         (REST başarısız) — emir kimliği ve ReconciliationPending \
+                         korunuyor, yeni girişler kilitli"
+                    );
+                    if attempts < RECON_MAX_ATTEMPTS {
+                        attempts += 1;
+                        tokio::time::sleep(std::time::Duration::from_millis(RECON_RECHECK_MS))
+                            .await;
+                        continue;
+                    }
+                    // Deneme hakkı bitti ama hâlâ Unknown: Flat'a GEÇME,
+                    // pending + lock korunur (operatör/sonraki döngü çözer).
                     return Ok(());
                 }
             }
@@ -5818,32 +5874,43 @@ mod recon_pending_tests {
     /// timeout AMA order borsada var → LinkOid.
     #[test]
     fn timeout_order_borsada_var() {
-        assert_eq!(recon_decide(true, false, 0), ReconAction::LinkOid);
+        assert_eq!(recon_decide(true, false, true, 0), ReconAction::LinkOid);
     }
 
     /// timeout VE fill gerçekleşmiş (emir yok, pozisyon var) → ToPosition.
     #[test]
     fn timeout_fill_gerceklesmis() {
-        assert_eq!(recon_decide(false, true, 0), ReconAction::ToPosition);
+        assert_eq!(recon_decide(false, true, true, 0), ReconAction::ToPosition);
     }
 
     /// timeout VE order gerçekten yok → önce Retry; hak biterse Flat.
     #[test]
     fn timeout_order_gercekten_yok() {
-        assert_eq!(recon_decide(false, false, 0), ReconAction::Retry);
-        assert_eq!(recon_decide(false, false, 1), ReconAction::Retry);
+        assert_eq!(recon_decide(false, false, true, 0), ReconAction::Retry);
+        assert_eq!(recon_decide(false, false, true, 1), ReconAction::Retry);
         assert_eq!(
-            recon_decide(false, false, RECON_MAX_ATTEMPTS),
+            recon_decide(false, false, true, RECON_MAX_ATTEMPTS),
             ReconAction::Flat
         );
     }
 
-    /// delayed visibility: 1. recheck kanıtsız, 2. recheck'te emir göründü
-    /// → LinkOid (anlık Flat sanılmadı — emir kurtarıldı).
+    /// REST sorgusu BAŞARISIZ (Unknown) → Flat YASAK; Unknown döner
+    /// (emir kimliği ve ReconciliationPending korunur).
+    #[test]
+    fn recon_unknown_rest_basarisiz() {
+        assert_eq!(recon_decide(false, false, false, 0), ReconAction::Unknown);
+        assert_eq!(
+            recon_decide(false, false, false, RECON_MAX_ATTEMPTS),
+            ReconAction::Unknown
+        );
+        // Found/ToPosition önceliği korunur (verified olmasa bile emir varsa LinkOid)
+        assert_eq!(recon_decide(true, false, false, 0), ReconAction::LinkOid);
+        assert_eq!(recon_decide(false, true, false, 0), ReconAction::ToPosition);
+    }
     #[test]
     fn gecikmeli_gorunurluk() {
-        assert_eq!(recon_decide(false, false, 0), ReconAction::Retry);
-        assert_eq!(recon_decide(true, false, 1), ReconAction::LinkOid);
+        assert_eq!(recon_decide(false, false, true, 0), ReconAction::Retry);
+        assert_eq!(recon_decide(true, false, true, 1), ReconAction::LinkOid);
     }
 
     /// duplicate retry: order + pozisyon AYNI ANDA görünürse (fill+rest)
@@ -5851,7 +5918,7 @@ mod recon_pending_tests {
     /// bildirimi ayrı akışla gelir).
     #[test]
     fn duplicate_retry_emir_oncelikli() {
-        assert_eq!(recon_decide(true, true, 0), ReconAction::LinkOid);
+        assert_eq!(recon_decide(true, true, true, 0), ReconAction::LinkOid);
     }
 
     /// DURUM MAKİNESİ akışı: UNKNOWN → ReconciliationPending (anlık Flat
