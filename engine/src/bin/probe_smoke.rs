@@ -38,6 +38,29 @@ async fn assert_flat(ex: &mut engine::Executor, coin: &str) -> Result<()> {
     Ok(())
 }
 
+/// Emrin açık listeye düşmesini bekle (eventual consistency: place sonrası
+/// ilk sorgu listeyi kaçırabilir). REST hatası → Err (gizlenmez).
+async fn wait_for_open(
+    ex: &mut engine::Executor,
+    coin: &str,
+    target_oid: i64,
+    tries: usize,
+) -> Result<Option<i64>> {
+    for n in 1..=tries {
+        let rows = ex
+            .refresh_open_orders_all()
+            .await
+            .context("smoke: açık emir listesi sorgusu başarısız")?;
+        if let Some(r) = rows.iter().find(|r| r.oid == target_oid && r.coin == coin) {
+            return Ok(Some(r.oid));
+        }
+        if n < tries {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+    }
+    Ok(None)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("TESTNET").as_deref() != Ok("1") {
@@ -104,22 +127,11 @@ async fn main() -> Result<()> {
         info_oi.sz, info_oi.px
     );
 
-    // 3) açık-listede OID bazında doğrula + 4) iptal + iptali doğrula
-    let rows = ex
-        .refresh_open_orders_all()
-        .await
-        .context("smoke: açık emir listesi sorgusu başarısız")?;
-    let found = rows
-        .iter()
-        .find(|r| r.oid == target_oid && r.coin == coin)
-        .or(if target_oid == 0 {
-            rows.iter().find(|r| r.coin == coin)
-        } else {
-            None
-        });
-    if let Some(r) = found {
-        let oid = r.oid;
-        println!("[SMOKE] açık emir DOĞRULANDI: {} oid={oid}", r.coin);
+    // 3) açık-listede OID bazında doğrula (retry'li — eventual consistency)
+    //    + 4) iptal + iptali doğrula
+    let found_oid = wait_for_open(&mut ex, &coin, target_oid, 5).await?;
+    if let Some(oid) = found_oid {
+        println!("[SMOKE] açık emir DOĞRULANDI: {coin} oid={oid}");
         ex.cancel(&coin, oid).await?;
         println!("[SMOKE] cancel OK");
         // iptalin gerçekte işlendiğini OID bazında tekrar kontrol et
@@ -132,9 +144,25 @@ async fn main() -> Result<()> {
         }
         println!("[SMOKE] iptal DOĞRULANDI (oid listede yok) ✓");
     } else {
-        // OID listelenmiyor: doldu/reddedildi/liste gecikmesi. Kanıt
-        // üretemezsek temiz çıkamayız — flat kesin doğrulanmalı.
-        println!("[SMOKE] oid={target_oid} açık listede YOK (dolma/reddetme/gecikme)");
+        // OID listelenmiyor → orderStatus ile SON DURUMU sor (dürüst kanıt:
+        // rejected ise emir YERLEŞTİRİLEMEMİŞ demektir → smoke BAŞARISIZ).
+        let addr = ex.user().to_string();
+        let st = info
+            .order_status(&addr, target_oid)
+            .await
+            .context("smoke: orderStatus sorgusu başarısız")?;
+        let inner = st
+            .get("order")
+            .and_then(|o| o.get("status"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("bilinmiyor");
+        if inner == "rejected" {
+            anyhow::bail!("emir REDDEDİLDİ (orderStatus=rejected) — bakiye/marj kontrol et; smoke kanıt üretemedi");
+        }
+        anyhow::bail!(
+            "oid={target_oid} {tries} denemede açık listede görünmedi (orderStatus={inner}) — place/cancel kanıtı tamamlanamadı",
+            tries = 5
+        );
     }
 
     // 5) pozisyon FLAT — REST hatası burada FAIL üretir
