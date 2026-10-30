@@ -41,10 +41,39 @@ jobs:
           if echo "$API_URL" "$WS_URL" | grep -qiE "mainnet|api\.hyperliquid\.xyz"; then
             echo "TEHLİKE: secret mainnet görünümü taşıyor — job başlamaz."; exit 1
           fi
-          echo 'KAPI OK: yalnız testnet.'
+          # URL FORMAT DENETİMİ — secret'a tırnak/boşluk/eksik şema girilirse
+          # probe 'HTTP 0: builder error' ile belirsiz düşer; burada net mesaj:
+          # uzunluk çözümlemesi (değer YAZDIRILMAZ — yalnız biçim kanıtı).
+          api_trimmed="$(echo "$API_URL" | tr -d '[:space:]')"
+          ws_trimmed="$(echo "$WS_URL" | tr -d '[:space:]')"
+          if [ "${#api_trimmed}" -ne "${#API_URL}" ] || [ "${#ws_trimmed}" -ne "${#WS_URL}" ]; then
+            echo "HATA: API_URL/WS_URL secret'ında BOŞLUK/satır sonu var — tırnak ve boşluk olmadan yeniden gir."; exit 1
+          fi
+          case "$API_URL" in
+            https://*) echo "API_URL şema OK (https://) — uzunluk ${#API_URL}" ;;
+            *) echo "HATA: API_URL 'https://' ile başlamalı (girilen uzunluk ${#API_URL})"; exit 1 ;;
+          esac
+          case "$WS_URL" in
+            wss://*) echo "WS_URL şema OK (wss://) — uzunluk ${#WS_URL}" ;;
+            *) echo "HATA: WS_URL 'wss://' ile başlamalı (girilen uzunluk ${#WS_URL})"; exit 1 ;;
+          esac
+          case "$TESTNET_API_WALLET_SECRET" in
+            ""|*" "*) echo "HATA: TESTNET_API_WALLET_SECRET boş veya boşluklu"; exit 1 ;;
+            *[!0-9a-fA-F]*|0x*) echo "HATA: private key 0x'siz 64 hex karakter olmalı (uzunluk ${#TESTNET_API_WALLET_SECRET})"; exit 1 ;;
+          esac
+          if [ "${#TESTNET_API_WALLET_SECRET}" -ne 64 ]; then
+            echo "HATA: private key uzunluğu ${#TESTNET_API_WALLET_SECRET} — 64 hex olmalı (0x'siz)"; exit 1
+          fi
+          case "$TESTNET_API_WALLET_ADDRESS" in
+            0x*) echo "ADDRESS şema OK — uzunluk ${#TESTNET_API_WALLET_ADDRESS}" ;;
+            *) echo "HATA: TESTNET_API_WALLET_ADDRESS '0x' ile başlamalı (uzunluk ${#TESTNET_API_WALLET_ADDRESS})"; exit 1 ;;
+          esac
+          echo 'KAPI OK: yalnız testnet + secret formatı geçerli.'
         env:
           API_URL: ${{ secrets.API_URL }}
           WS_URL: ${{ secrets.WS_URL }}
+          TESTNET_API_WALLET_SECRET: ${{ secrets.TESTNET_API_WALLET_SECRET }}
+          TESTNET_API_WALLET_ADDRESS: ${{ secrets.TESTNET_API_WALLET_ADDRESS }}
   e2e:
     needs: guard
     runs-on: ubuntu-latest
@@ -65,7 +94,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          TESTNET=1 ./target/release/probe_smoke SUI 12
+          TESTNET=1 ./target/release/probe_smoke SUI 20
         env:
           TESTNET: '1'
           NETWORK: testnet
