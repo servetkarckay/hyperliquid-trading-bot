@@ -105,3 +105,7 @@ jobs:
           HYPERLIQUID_WS_URL: ${{ secrets.WS_URL }}
           HYPERLIQUID_PRIVATE_KEY: ${{ secrets.TESTNET_API_WALLET_SECRET }}
           API_WALLET_ADDRESS: ${{ secrets.TESTNET_API_WALLET_ADDRESS }}
+          # Master (fon tutan) adres — ayrı agent wallet kullanıldıysa
+          # TESTNET_USER_ADDRESS girilir; yoksa API wallet adresi kullanılır
+          # (anahtar doğrudan cüzdan anahtarıysa aynıdır).
+          USER_ADDRESS: ${{ secrets.TESTNET_USER_ADDRESS || secrets.TESTNET_API_WALLET_ADDRESS }}
