@@ -1905,6 +1905,43 @@ impl Engine {
                 }
             }
 
+            // SL/TP YÖN KONTRATI DOĞRULAMASI (recovery sonrası zorunlu):
+            // LONG → sl < entry (ve tp varsa entry < tp);
+            // SHORT → sl > entry (ve tp varsa tp < entry).
+            // İhlalde stop kurulmaz, kritik uyarı — yanlış tarafta stop
+            // kurulmasını engeller.
+            if let Some(attr) = self.entry_attr.get(coin) {
+                let sl_ok = if is_long {
+                    sl_px < attr.entry_px
+                } else {
+                    sl_px > attr.entry_px
+                };
+                if !sl_ok {
+                    tracing::error!(
+                        "[SL] {coin} SL YÖN KONTRATI İHLALİ: side={} entry={} sl={} — stop kurulmadı",
+                        if is_long { "LONG" } else { "SHORT" },
+                        attr.entry_px,
+                        sl_px
+                    );
+                    continue;
+                }
+                if let Some(tp) = attr.tp_px {
+                    let tp_ok = if is_long {
+                        attr.entry_px < tp
+                    } else {
+                        tp < attr.entry_px
+                    };
+                    if !tp_ok {
+                        tracing::error!(
+                            "[SL] {coin} TP YÖN KONTRATI İHLALİ: side={} entry={} tp={} — TP geçersiz",
+                            if is_long { "LONG" } else { "SHORT" },
+                            attr.entry_px,
+                            tp
+                        );
+                    }
+                }
+            }
+
             // SON SAVUNMA: kayıt düşmüşse borsada gerçekten stop var mı diye
             // bak. WS olayı (`triggered`/`canceled`) `user` dolumundan dakikalar
             // önce geliyor; aradaki boşlukta motor aynı stop'u ikinci kez
@@ -3472,34 +3509,31 @@ impl Engine {
                         .get(coin)
                         .cloned()
                         .unwrap_or_default();
+                    // yön pozisyon işaretinden türetilir (szi > 0 → Long)
+                    let side = if pos.szi > 0.0 {
+                        crate::state_machine::Side::Long
+                    } else {
+                        crate::state_machine::Side::Short
+                    };
                     if let Some(m) = self.machines.get_mut(coin) {
-                        let side = if pos.szi > 0.0 {
-                            crate::state_machine::Side::Long
-                        } else {
-                            crate::state_machine::Side::Short
-                        };
-                        let _ = side;
                         m.recon_to_position(pos.entry_px, pos.szi.abs());
                     }
                     // sentetik attr (recovery kontratı): kapanış sayılır;
-                    // voter kanıtı YAZILMAZ (sahipsiz stratejiye kredi yok)
+                    // voter kanıtı YAZILMAZ (sahipsiz stratejiye kredi yok).
+                    // YÖN: pos.szi işaretinden türetilen `side` verilir —
+                    // sabit Long yazılırsa SHORT kurtarma yanlış tarafta
+                    // SL/TP üretir (güvenlik açığı).
                     let now = hyperliquid_api::now_ms();
                     if let Some(m) = self.machines.get(coin) {
                         if let Some((_s, entry, size)) = m.in_position() {
                             self.entry_attr.insert(
                                 coin.to_string(),
-                                synth_recovered_attr(
-                                    coin,
-                                    crate::state_machine::Side::Long,
-                                    entry,
-                                    size,
-                                    now,
-                                ),
+                                synth_recovered_attr(coin, side, entry, size, now),
                             );
                         }
                     }
                     tracing::info!(
-                        "[RECON] cloid={cloid} coin={coin} FILL kanıtı → pozisyon devri"
+                        "[RECON] cloid={cloid} coin={coin} FILL kanıtı → pozisyon devri (side={side:?})"
                     );
                     return Ok(());
                 }
