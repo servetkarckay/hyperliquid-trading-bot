@@ -13,7 +13,6 @@ use async_trait::async_trait;
 
 use crate::aggregator::Candle;
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeRecord {
     pub coin: String,
