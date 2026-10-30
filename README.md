@@ -6,6 +6,32 @@ Hyperliquid üzerinde çalışan, tek stratejili (MRE) canlı trading botu. Rust
 
 Bot, Hyperliquid evrenindeki tüm perp'leri (≈179 coin) 1h mumlar üzerinde tarar ve **Mean-Reversion & Overreaction Engine (MRE)** stratejisiyle aşırı sapma anlarında kontra pozisyon alır. Her 5 dakikada bir tam evren taraması + tahsis + yürütme döngüsü çalışır. Pozisyonlar borsada asılı SL/TP trigger'larıyla korunur; trailing stop ratchet uygulanır. Öğrenme, net performans (fee + gerçek USDC funding dahil) üzerinden R-bazlı ağırlık güncellemesi yapar.
 
+## ⚠️ Sorumluluk reddi
+
+Bu bot **eğitim ve araştırma amaçlıdır**. Finansal tavsiye değildir. Kullanım riski size aittir. Gerçek para ile çalıştırmadan önce testnet'te doğrulayın. Yazarlar, botun kullanımından doğan hiçbir kayıptan sorumlu değildir.
+
+## Kurulum
+
+```bash
+# 1. Klonla
+git clone https://github.com/servetkarckay/hyperliquid-trading-bot.git
+cd hyperliquid-trading-bot
+
+# 2. Konfigürasyon
+cp .env.example .env
+# .env'i düzenle: NETWORK, HYPERLIQUID_API_URL, HYPERLIQUID_WS_URL,
+# HYPERLIQUID_PRIVATE_KEY, API_WALLET_ADDRESS, USER_ADDRESS, ...
+
+# 3. Derle
+cargo build --release --workspace
+
+# 4. Testnet'te doğrula (E2E)
+gh workflow run testnet-e2e.yml -f confirm_testnet=TESTNET
+
+# 5. Çalıştır
+bash scripts/start_bot_mainnet.sh
+```
+
 ## Mimari
 
 ```
