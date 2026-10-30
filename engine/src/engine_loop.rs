@@ -2483,13 +2483,12 @@ impl Engine {
         let mut mre_intents: std::collections::HashMap<String, Option<strategy::mre::TradeIntent>> =
             std::collections::HashMap::new();
         for coin in self.loop_cfg.coins.clone() {
-            let mut candles: Vec<data::Candle> = self
+            let candles: Vec<data::Candle> = self
                 .agg
                 .history(&coin, self.loop_cfg.interval_secs)
                 .to_vec();
-            if let Some(cur) = self.agg.current(&coin, self.loop_cfg.interval_secs) {
-                candles.push(cur);
-            }
+            // SADECE kapanmış mumlar kullanılır (replay ile hizalı; açık
+            // (henüz kapanmamış) mum sinyal üretmez — dürüst veri).
             if candles.len() < 60 {
                 summaries.push((coin.clone(), "SKIP: mum yetersiz".into()));
                 continue;
@@ -3238,6 +3237,9 @@ impl Engine {
                     // (c[last−6] TP) gelir — canlı ve replay AYNI niyeti
                     // kullanır. AllocationManager formülü yalnız fallback.
                     let mre_intent = mre_intents.get(&e.coin).cloned().flatten();
+                    // intent geçerlilik süresi kontrolü (süresi dolmuş niyet kullanılmaz)
+                    let mre_intent =
+                        mre_intent.filter(|i| hyperliquid_api::now_ms() as i64 <= i.expires_at);
                     let (sl_px, intent_tp) = if let Some(ref intent) = mre_intent {
                         let sl_ok = if intent.long {
                             intent.sl < entry_px
