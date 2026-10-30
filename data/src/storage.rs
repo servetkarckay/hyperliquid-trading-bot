@@ -1,4 +1,4 @@
-//! STORAGE — kalıcılık soyutlaması (trait + üç gerçekleme).
+//! STORAGE — kalıcılık soyutlaması (trait + gerçekleştirmeler).
 //!
 //! 1. `Storage` trait: trades / candles / ctx / funding kaydetme-okuma.
 //! 2. `MemoryStorage`: test ve düşük-konfig fallback.
@@ -6,8 +6,6 @@
 //!    ile kullanılır (hl_trades / hl_candles / hl_funding / hl_ctx /
 //!    hl_strategy_performance). Canlı bot bu katmanı KULLANMAZ; canlı state
 //!    JSON dosyalarında tutulur.
-//! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li) —
-//!    şu an kullanılmıyor.
 //!
 //! URL'ler boşsa sistem Memory ile ÇALIŞMAYA devam eder (indirimli mod —
 //! arşiv/backtest kaybı loglanır).
@@ -504,63 +502,6 @@ impl Storage for ClickHouseStorage {
         trimmed.parse::<u64>().map_err(|e| {
             anyhow::anyhow!("[STORAGE] trade_count parse edilemedi ('{trimmed}'): {e}")
         })
-    }
-}
-
-/// Redis — sıcak önbellek (son mids/ctx/candle). `REDIS_URL` ile aktifleşir.
-/// Bağımlılık: redis crate (tokio). Sunucu yoksa tüm metotlar hata döner;
-/// kullanım `REDIS_URL` varlığına göre opsiyoneldir.
-pub struct RedisCache {
-    conn: redis::aio::ConnectionManager,
-}
-
-impl RedisCache {
-    /// REDIS_URL .env'de tanımlıysa bağlanır, yoksa None.
-    pub async fn from_env() -> Result<Option<Self>> {
-        let url = std::env::var("REDIS_URL").unwrap_or_default();
-        if url.is_empty() {
-            return Ok(None);
-        }
-        let client = redis::Client::open(url)?;
-        let conn = redis::aio::ConnectionManager::new(client).await?;
-        Ok(Some(Self { conn }))
-    }
-
-    /// Son mids haritasını JSON olarak yaz (TTL saniye)
-    pub async fn set_mids(&mut self, mids: &HashMap<String, f64>, ttl: u64) -> Result<()> {
-        let payload = serde_json::to_string(mids)?;
-        redis::cmd("SETEX")
-            .arg("hl:mids")
-            .arg(ttl)
-            .arg(payload)
-            .query_async::<()>(&mut self.conn)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn get_mids(&mut self) -> Result<Option<HashMap<String, f64>>> {
-        let v: Option<String> = redis::cmd("GET")
-            .arg("hl:mids")
-            .query_async(&mut self.conn)
-            .await?;
-        Ok(v.and_then(|s| serde_json::from_str(&s).ok()))
-    }
-
-    /// Son ctx state'i coin başına yaz (TTL saniye)
-    pub async fn set_ctx(&mut self, c: &crate::market_ctx::CtxState, ttl: u64) -> Result<()> {
-        let payload = serde_json::to_string(c)?;
-        redis::cmd("SETEX")
-            .arg(format!("hl:ctx:{}", c.coin))
-            .arg(ttl)
-            .arg(payload)
-            .query_async::<()>(&mut self.conn)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn ping(&mut self) -> Result<()> {
-        redis::cmd("PING").query_async::<()>(&mut self.conn).await?;
-        Ok(())
     }
 }
 

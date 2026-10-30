@@ -16,5 +16,5 @@ pub mod universe;
 pub use aggregator::{Aggregator, AggregatorConfig, Candle};
 pub use ingestor::{CoinInfo, Ingestor, IngestorConfig, StreamEvent, Universe};
 pub use market_ctx::{CtxState, MarketCtx};
-pub use storage::{MemoryStorage, RedisCache, Storage, TradeRecord};
+pub use storage::{MemoryStorage, Storage, TradeRecord};
 pub use universe::{TradingUniverse, UniverseSpec};
