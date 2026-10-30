@@ -1718,27 +1718,15 @@ impl Engine {
         // 502/connection reset). Borsa stop'ları `openOrders` taramasından
         // geri yüklemezsek motor aynı stop'u ikinci kez kuruyor.
         //
-        // Tarama yalnız eksiklik varsa yapılır (döngü başına ek REST yok).
-        // `dedupe_sl` aynı coin'de birden fazla stop bulursa **en yenisini
-        // bırakıp öncekilerini iptal eder** — çift-stop birikimini
-        // kendi kendine temizler.
-        let open_pos = self
-            .executor
-            .positions()
-            .values()
-            .filter(|p| p.szi.abs() > 1e-12)
-            .count();
-        if self.executor.sl_orders.len() < open_pos {
-            match self.executor.refresh_orders().await {
-                Ok(cands) => {
-                    let n = self.executor.dedupe_sl(cands).await;
-                    if n > 0 {
-                        tracing::info!("[SL] {n} artık stop temizlendi");
-                    }
-                }
-                Err(e) => tracing::warn!("[SL] openOrders taraması başarısız: {e}"),
-            }
-        }
+        // GÜVENLİK (stale OID): sayı karşılaştırması YETMEZ — her açık
+        // pozisyon için OID'nin gerçekten açık emirler arasında bulunduğu
+        // doğrulanmalı. Eski/iptal edilmiş stop kayıtları sl_orders'tan
+        // temizlenir; aksi halde ensure_sl() "stop var" sanıp yeni stop
+        // kurmaz ve pozisyon korumasız kalır.
+        //
+        // Sorgu BAŞARISIZSA koruma "varmış gibi" varsayılmaz: yeni girişler
+        // kilitlenir, operatöre kritik uyarı verilir, bu döngüde ensure_sl
+        // atlanır (stale sl_orders'a güvenilmez).
         let pos: Vec<(String, f64)> = self
             .executor
             .positions()
@@ -1746,6 +1734,33 @@ impl Engine {
             .filter(|(_, p)| p.szi.abs() > 1e-12)
             .map(|(c, p)| (c.clone(), p.szi))
             .collect();
+        if pos.is_empty() {
+            return;
+        }
+        match self.executor.refresh_orders().await {
+            Ok(cands) => {
+                // borsa gerçeğine göre sl_orders'ı yeniden kur: açık emirlerde
+                // bulunmayan OID'leri (iptal edilmiş/kaçırılmış) temizle.
+                let open_oids: std::collections::HashSet<i64> =
+                    cands.iter().map(|(_, o)| *o).collect();
+                self.executor
+                    .sl_orders
+                    .retain(|_coin, oid| open_oids.contains(oid));
+                let n = self.executor.dedupe_sl(cands).await;
+                if n > 0 {
+                    tracing::info!("[SL] {n} artık stop temizlendi");
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[SL] openOrders taraması BAŞARISIZ: {e} — koruma DOĞRULANAMADI, \
+                     yeni girişler kilitli"
+                );
+                self.gate.lock();
+                // Bu döngüde ensure_sl ATLANIR: stale sl_orders'a güvenilmez.
+                return;
+            }
+        }
         for (coin, szi) in &pos {
             let sl_px = match self.entry_attr.get(coin) {
                 Some(a) => {
