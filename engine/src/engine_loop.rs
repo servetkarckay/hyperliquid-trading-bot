@@ -2428,13 +2428,7 @@ impl Engine {
             let (bid, ask, _imb) = book.unwrap_or((0.0, 0.0, 0.0));
             let taker = self.agg.taker_balance(&coin).map(|(_, _, r)| r);
 
-            let rejim_input = MarketInput {
-                coin: coin.clone(),
-                candles: candles.clone(),
-                ctx: ctx.clone(),
-                ..MarketInput::default()
-            };
-            let gate = classify(&rejim_input)
+            let gate = classify(&candles)
                 .map(|(lbl, _)| lbl.gate())
                 .unwrap_or(RegimeGate::Open);
 
@@ -5621,7 +5615,7 @@ mod golden_path_tests {
         );
         assert!(cs.score > 0.0);
         // ── 3) REJİM: kapı (bozuk girdi → güvenli varsayım) ──
-        let gate = strategy::regime_detection::classify(&input)
+        let gate = strategy::regime_detection::classify(&input.candles)
             .map(|(l, _)| l.gate())
             .unwrap_or(strategy::ensemble::RegimeGate::Open);
         let cs = ens.apply_regime(cs, gate);

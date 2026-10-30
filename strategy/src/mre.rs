@@ -7,7 +7,7 @@
 //!    pazarda geçerli); VolSpike/Squeeze (Blocked) da geçmez. MR/GEÇİŞ
 //!    (Open) onaylı.
 //! 2. **De Bondt-Thaler Z**: 6-bar aşırı hareket, 100-bar log-return
-//!    RMS normalize — Z ≤ −2.5 panik (kontra LONG) / Z ≥ +2.5 euphoria
+//!    std normalize — Z ≤ −2.5 panik (kontra LONG) / Z ≥ +2.5 euphoria
 //!    (kontra SHORT). (Doküman formülü: Z-Score(Price) < −2.5.)
 //! 3. **GARCH σ teyidi**: GARCH(1,1) koşullu vol — σ_next/σ_long-run
 //!    ≥ 1.0: anomali volatil patlama yaratsın (doğal oran 1.0 eşiği;
@@ -87,14 +87,11 @@ pub fn rank_band_at(universe_returns: &[(String, f64)], coin: &str) -> Option<Ra
     let rank = ranked.iter().position(|(c, _)| c == coin)?;
     let n = ranked.len();
     let top_k = (n as f64 * 0.2).ceil() as usize;
-    let pct = rank as f64 / n as f64;
     if rank < top_k {
         Some(RankBand::Top)
-    } else if rank >= n - top_k {
+    } else if rank >= n.saturating_sub(top_k) {
         Some(RankBand::BottomShort)
-    } else if pct > 0.4 && pct < 0.6 {
-        Some(RankBand::Mid)
-    } else if pct > 0.6 {
+    } else if rank >= n.saturating_sub(2 * top_k) {
         Some(RankBand::Bottom)
     } else {
         Some(RankBand::Mid)
@@ -120,7 +117,7 @@ pub struct ReversionPlan {
     pub note: String,
 }
 
-/// Replay kontratı: üretim zinciriyle birebir AYNI (Z → rejim → GARCH
+/// Replay kontratı: üretim zinciriyle SONUÇ birebir aynı (Z → rejim → GARCH
 /// → kesit) ama kesit bantları `rank_band_at` ile — tarihsel veri kümesi
 /// 8 coin (kanonik ≥20 kontratı replay küçük evrenünde bilinçli
 /// esner; dokümante sapma, eşik AYARLAMASI değildir).
@@ -316,12 +313,7 @@ pub fn infaz_mumu_ok(candles: &[Candle], long: bool) -> bool {
 
 /// Rejim etiketi (MRE: TREND ve Blocked red dediliyor).
 fn regime_label(candles: &[Candle]) -> Option<(RegimeLabel, String)> {
-    let input = MarketInput {
-        coin: String::new(),
-        candles: candles.to_vec(),
-        ..MarketInput::default()
-    };
-    classify(&input)
+    classify(candles)
 }
 
 fn regime_permits_mre(label: &RegimeLabel) -> bool {
@@ -338,10 +330,11 @@ pub fn z_overreaction(candles: &[Candle], z_esik: f64) -> Option<(f64, bool)> {
     let r = indicators::log_returns(&c);
     let sd = {
         let w = &r[r.len().saturating_sub(SD_WINDOW)..];
-        (w.iter().map(|x| x * x).sum::<f64>() / w.len() as f64).sqrt()
+        let mean = w.iter().sum::<f64>() / w.len() as f64;
+        (w.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / w.len() as f64).sqrt()
     };
-    let move6 = c[c.len() - 1] / c[c.len() - 1 - MOVE_N] - 1.0;
-    let z = move6 / (sd * (MOVE_N as f64).sqrt()).max(1e-9);
+    let move6 = (c[c.len() - 1] / c[c.len() - 1 - MOVE_N]).ln();
+    let z = move6 / (sd.max(1e-9) * (MOVE_N as f64).sqrt());
     if z <= -z_esik {
         Some((z, true))
     } else if z >= z_esik {
@@ -361,7 +354,7 @@ pub fn garch_threshold(candles: &[Candle], _th: f64) -> Option<f64> {
     let r = indicators::log_returns(&c);
     let from = r.len().saturating_sub(300);
     let (omega, alpha, beta, _ll) = indicators::garch11_fit(&r[from..], 20);
-    let vars = indicators::garch11_variance(&r, omega, alpha, beta);
+    let vars = indicators::garch11_variance(&r[from..], omega, alpha, beta);
     let v = vars.last().copied().filter(|x| x.is_finite() && *x > 0.0)?;
     let sigma_next = v.sqrt();
     let sigma_longrun = (omega / (1.0 - alpha - beta).max(1e-9)).sqrt();

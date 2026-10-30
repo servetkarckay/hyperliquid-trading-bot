@@ -20,7 +20,6 @@ use math::indicators;
 use serde_json::Value;
 use strategy::mre::{plan_replay, MIN_BARS};
 use strategy::regime_detection::classify;
-use strategy::MarketInput;
 
 fn parse_candles(v: &Value) -> Vec<Candle> {
     v.as_array()
@@ -306,12 +305,7 @@ fn main() {
                 .fold(f64::MIN, f64::max);
             let sweep_hi2 = hh[m] > hh20 && cc[m] < oo[m];
             let regime = {
-                let input = MarketInput {
-                    coin: String::new(),
-                    candles: cs.to_vec(),
-                    ..MarketInput::default()
-                };
-                classify(&input)
+                classify(cs)
                     .map(|(lb, _)| format!("{lb:?}"))
                     .unwrap_or_default()
             };

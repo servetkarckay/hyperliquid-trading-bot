@@ -23,6 +23,7 @@
 //! TEK KAYNAK: strateji oy'u ve motor kapısı AYNI karar ağacını
 //! (`classify`) kullanır — iki kopya karar ağacı sapamaz.
 //! <200 mum → Skip/None; deterministik, replay-idempotent, panik yok.
+use data::Candle;
 use math::indicators;
 use math::stats;
 
@@ -95,14 +96,14 @@ pub(crate) fn vol_percentile(r: &[f64]) -> f64 {
 
 /// TrendBoost bilinçli sınır: kütüphane pozisyonu "TREND" = TrendBoost.
 /// (strateji oy'su ayrı; bu eşleme RegimeLabel::gate'te tanımlı)
-pub fn classify(input: &crate::MarketInput) -> Option<(RegimeLabel, String)> {
+pub fn classify(candles: &[Candle]) -> Option<(RegimeLabel, String)> {
     use crate::closes;
-    let c = closes(&input.candles);
+    let c = closes(candles);
     if c.len() < 200 {
         return None;
     }
-    let h: Vec<f64> = input.candles.iter().map(|x| x.h).collect();
-    let l: Vec<f64> = input.candles.iter().map(|x| x.l).collect();
+    let h: Vec<f64> = candles.iter().map(|x| x.h).collect();
+    let l: Vec<f64> = candles.iter().map(|x| x.l).collect();
 
     // VERİ DÜRÜSTLÜĞÜ: bozuk göstergenin sesiyle kapı YÖNETİLMEZ —
     // ADX/Hurst hesaplanamazsa None → motor güvenli varsayıma (Open) döner;
