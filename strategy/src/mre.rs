@@ -21,6 +21,12 @@
 //!    yere düşmüş); zirve shortunda (SHORT) infaz mumu ZİRVEDE olmalı
 //!    (aralık > 2.7×ATR: coşku tam delirmede). Kanıt: 83 gün × 179 coin
 //!    replay (754 işlem) — pf 1.41→1.95; 3 ufukta + 2 yarıda tutarlı.
+//! 6. **PANİK-DİP LONG**: LONG yalnız gerçek panik dipinde (ret6 ≤
+//!    −6.3%). Sıradan dip alma pahalıya düşüş piyasasında birikir
+//!    (May-Tem 2026: filtresiz LONG ΣR −51.3R). Taze 79-coin/190-gün
+//!    out-of-sample teyit: filtreyle May-Tem −2.8R, Ağu-Eki pf 1.99,
+//!    toplam pf 1.28→1.53, MDD 62.3R→15.9R (%47→%15 equity). SHORT'a
+//!    uygulanmaz.
 //!
 //! Fiyat planı: hedef = aşırı hareketin başlangıcı (c[last−6]) —
 //! "ortalamaya dönüş" literal hedefi; SL = 1.5×ATR14 risk tavanı.
@@ -62,6 +68,13 @@ const SD_WINDOW: usize = 100;
 /// değerin ALTINDA (panik dinmiş), SHORT'ta ÜSTÜNDE (coşku zirvede)
 /// olmalı — 83 gün replay'de türetilen keskin ayrım (bkz. modül doc 5).
 const INFAZ_ATR_K: f64 = 2.7;
+/// PANİK-DİP LONG eşiği: son 6 bar (MOVE_N) kapanış getirisinin yüzde
+/// sınırı. LONG yalnız GERÇEK panik dipinde açılır (ret6 ≤ −6.3%);
+/// sıradan dipler pahalıya düşüş piyasasında birikir (May-Tem 2026 replay
+/// kaybı −51.3R). Madencilik bulgusu taze 79-coin/190-gün veride
+/// out-of-sample teyit edildi: filtre sonrası May-Tem −2.8R, Ağu-Eki
+/// pf 1.99, MDD 62.3R → 15.9R. SHORT tarafına uygulanmaz.
+pub const PANIK_DIP_RET6: f64 = -6.3;
 /// Bar aralığı (saatlik) — TradeIntent zaman alanları için.
 const BAR_MS: i64 = 3_600_000;
 
@@ -152,6 +165,10 @@ pub fn replay_chain(
     let (z, long) = z_overreaction(candles, tune.z_esik)?;
     // infaz mumu kuralı — replay kontratı üretimle birebir
     if !infaz_mumu_ok(candles, long) {
+        return None;
+    }
+    // PANİK-DİP LONG — replay kontratı üretimle birebir
+    if long && !panic_dip_ok(candles) {
         return None;
     }
     let ratio = garch_threshold(candles, tune.sigma_ratio)?;
@@ -278,6 +295,11 @@ impl Mre {
         if !infaz_mumu_ok(candles, long) {
             return None;
         }
+        // ── 2c) PANİK-DİP LONG: sıradan dip alınmaz; yalnız gerçek panik
+        //    dipinde (ret6 ≤ −6.3%). Canlı/replay aynı kontrat.
+        if long && !panic_dip_ok(candles) {
+            return None;
+        }
         // ── 1) Rejim: TREND/Blocked red (AND zincirinde geç katman ama
         //    erken eleme ucuz)
         let (label, _) = regime_label(candles)?;
@@ -327,6 +349,24 @@ pub fn infaz_mumu_ok(candles: &[Candle], long: bool) -> bool {
     } else {
         rng > INFAZ_ATR_K * atr
     }
+}
+
+/// PANİK-DİP koşulu — LONG girişleri için. Son MOVE_N barın kümülatif
+/// kapanış getiri(%)'si `PANIK_DIP_RET6`'dan az olmalı. Kısa seri /
+/// sayısal bozukluk → güvenli red (false). Canlı ve replay AYNI
+/// fonksiyonu kullanır (kanonik kontrat).
+pub fn panic_dip_ok(candles: &[Candle]) -> bool {
+    let c = closes(candles);
+    let n = c.len();
+    if n < MOVE_N + 1 {
+        return false;
+    }
+    let prev = c[n - 1 - MOVE_N];
+    if !(prev.is_finite() && prev > 0.0) {
+        return false;
+    }
+    let ret6 = (c[n - 1] / prev - 1.0) * 100.0;
+    ret6.is_finite() && ret6 <= PANIK_DIP_RET6
 }
 
 /// Rejim etiketi (MRE: TREND ve Blocked red dediliyor).
@@ -480,5 +520,65 @@ mod tests {
         // ATR hesaplanamazsa (yetersiz veri) kapı YOK
         assert!(!infaz_mumu_ok(&flat(10, 100.0), true));
         assert!(!infaz_mumu_ok(&flat(10, 100.0), false));
+    }
+
+    #[test]
+    fn panik_dip_esigi() {
+        // PANİK dip: son 6 barda −%7 kümulatif düşüş → LONG OK
+        let mut cs = flat(120, 100.0);
+        let drops = [-1.0, -2.0, -3.0, -4.5, -5.5, -7.0]; // 100 → 93.0
+        for (k, d) in drops.iter().enumerate() {
+            let i = 114 + k;
+            cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
+        }
+        assert!(panic_dip_ok(&cs), "gerçek panik dip OK");
+        // sıradan dip: −%3 → red
+        let mut cs = flat(120, 100.0);
+        let drops = [-0.5, -1.0, -1.5, -2.0, -2.5, -3.0]; // 100 → 97.0
+        for (k, d) in drops.iter().enumerate() {
+            let i = 114 + k;
+            cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
+        }
+        assert!(!panic_dip_ok(&cs), "sıradan dip red");
+        // yükselen seri → red
+        assert!(!panic_dip_ok(&flat(120, 100.0)), "düşüş yoksa red");
+        // kısa seri (MOVE_N+1 altı) → güvenli red
+        assert!(!panic_dip_ok(&flat(6, 100.0)));
+        // ret6 eşiğin hemen altında/üstünde: −6.31 OK, −6.29 red
+        // (f64 sınır noktasında ölçüm hatası olur; anlamlı kıyas kullanılır)
+        let mut cs = flat(120, 100.0);
+        let drops = [-1.0, -2.0, -3.0, -4.0, -5.0, -6.31]; // 100 → 93.69
+        for (k, d) in drops.iter().enumerate() {
+            let i = 114 + k;
+            cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
+        }
+        assert!(panic_dip_ok(&cs), "eşik altı OK");
+        let mut cs = flat(120, 100.0);
+        let drops = [-1.0, -2.0, -3.0, -4.0, -5.0, -6.29]; // 100 → 93.71
+        for (k, d) in drops.iter().enumerate() {
+            let i = 114 + k;
+            cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
+        }
+        assert!(!panic_dip_ok(&cs), "eşik üstü red");
+    }
+
+    #[test]
+    fn plan_zinciri_panik_dip_uygulanir() {
+        // plan_tuned + replay_chain: panik OLMAYAN long artığını red.
+        // −%3 dip (yeterli z) + sakin mum + MR rejimi → eskiden LONG
+        // dönerdi; artık None.
+        let mut cs = flat(120, 100.0);
+        let drops = [-0.5, -1.0, -1.5, -2.0, -2.5, -3.0];
+        for (k, d) in drops.iter().enumerate() {
+            let i = 114 + k;
+            cs[i] = candle((i as i64) * H, 100.0, 100.2, 100.0 + d, 100.0 + d, 1200.0);
+        }
+        let mut u: Vec<(String, f64)> = (0..20).map(|i| (format!("C{i}"), 0.01)).collect();
+        u[0] = ("TEST".into(), -0.20); // TEST kesitte en dip → Bottom
+        assert!(
+            Mre::plan_entity(&cs, &u, "TEST").is_none(),
+            "sıradan dip LONG red"
+        );
+        assert!(replay_chain(&cs, &u, "TEST", &MreTune::default()).is_none());
     }
 }

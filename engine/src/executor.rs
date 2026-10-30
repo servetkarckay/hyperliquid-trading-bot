@@ -1235,20 +1235,40 @@ impl Executor {
     /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
     /// giriş emrini bulamazdı.
     /// CLOID ile emir durumu sorgula (Hyperliquid orderStatus — oid olarak
-    /// cloid string kabul eder). Emir açık ise Some(oid), bulunamazsa None.
-    /// Sorgu başarısızsa Err (Unknown).
+    /// cloid string kabul eder). Emir AÇIK ise Some(oid), açık değilse
+    /// (filled/canceled/triggered/rejected/unknownOid) None. Şema bozuksa
+    /// veya sorgu başarısızsa Err → reconciliation Unknown kalır (Flat
+    /// YASAK). RESMÎ ŞEMA (docs — "Query order status by oid or cloid"):
+    /// `{"status":"order","order":{"order":{...,"oid":N,...},
+    /// "status":"open|filled|...","statusTimestamp":...}}`
+    /// Missing → `{"status":"unknownOid"}`. OID yolu: order.order.oid.
     pub async fn order_status_cloid(&self, cloid: &str) -> Result<Option<i64>> {
         let v = self.info.order_status_cloid(&self.user, cloid).await?;
-        if let Some(o) = v.get("order") {
-            if let Some(oid) = o["oid"].as_i64() {
-                return Ok(Some(oid));
-            }
-            // status "order" ama oid yok → şema bozuk
-            let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
-            if status == "order" {
-                bail!("orderStatus yanıtı şema bozuk (oid yok): {v}");
-            }
+        // Emir yok kanıtı — borsa bunu açıkça söyler.
+        let top = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        if top == "unknownOid" {
+            return Ok(None);
         }
+        // Bulundu: sarmalayıcı + iç order nesnesi.
+        let outer = v
+            .get("order")
+            .ok_or_else(|| anyhow::anyhow!("orderStatus yanıtı 'order' sarmalayıcı yok: {v}"))?;
+        let inner = outer
+            .get("order")
+            .ok_or_else(|| anyhow::anyhow!("orderStatus yanıtı iç 'order' nesnesi yok: {v}"))?;
+        let inner_status = outer.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        if inner_status.is_empty() {
+            bail!("orderStatus: iç status yok (şema bozuk): {v}");
+        }
+        if inner_status == "open" {
+            // Emir hâlâ dinleniyor → OID bağla. OID okunamıyorsa şema bozuk
+            // (açık emir OID'siz olmaz) — asla None sanılmaz.
+            let oid = inner["oid"]
+                .as_i64()
+                .ok_or_else(|| anyhow::anyhow!("orderStatus: emir AÇIK ama oid okunamadı: {v}"))?;
+            return Ok(Some(oid));
+        }
+        // filled/canceled/triggered/rejected/... → emir artık açık değil.
         Ok(None)
     }
 
@@ -1489,10 +1509,19 @@ impl Executor {
             }
             let position_value: f64 = p["positionValue"]
                 .as_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+                .ok_or_else(|| anyhow::anyhow!("position {coin}: positionValue eksik/bozuk"))?
+                .parse()
+                .map_err(|_| anyhow::anyhow!("position {coin}: positionValue sayı değil"))?;
             if !position_value.is_finite() {
                 bail!("position {coin}: positionValue finite değil");
+            }
+            // Risk limitleri (coin tavanı + toplam maruziyet) BU alana dayanır:
+            // açık pozisyonda (szi ≠ 0) value ≤ 0 anlamsızdır — sıfır
+            // varsayılmaz, sorgu başarısız sayılır.
+            if szi.abs() >= 1e-12 && position_value <= 0.0 {
+                bail!(
+                    "position {coin}: açık pozisyon için positionValue geçersiz ({position_value})"
+                );
             }
             let unrealized_pnl: f64 = p["unrealizedPnl"]
                 .as_str()

@@ -12,7 +12,7 @@
 //!
 //! Bu binary normal bot koşusunun PARÇASI DEĞİLDİR — yalnız elle smoke.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use hyperliquid_api::{Config, Info, Tif};
 
 #[tokio::main]
@@ -64,14 +64,22 @@ async fn main() -> Result<()> {
     println!("[SMOKE] place sonucu: {info_oi:?}");
 
     // 3) açık-listede doğrula + 4) iptal
-    let rows = ex.refresh_open_orders_all().await.unwrap_or_default();
+    // REST hatası → probe BAŞARISIZ (boş liste SANILMAZ; aksi hâlde iptal
+    // adımı atlanıp smoke 'başarılı' görünürdü — figür kanıt).
+    let rows = ex
+        .refresh_open_orders_all()
+        .await
+        .context("smoke: açık emir listesi sorgusu başarısız")?;
     if let Some(r) = rows.iter().find(|r| r.coin == coin) {
         let (cn, oid) = (r.coin.clone(), r.oid);
         println!("[SMOKE] açık emir DOĞRULANDI: {cn} oid={oid}");
         ex.cancel(&coin, oid).await?;
         println!("[SMOKE] cancel OK");
-        // iptalin gerçekte işlendiğini tekrar kontrol et
-        let rows2 = ex.refresh_open_orders_all().await.unwrap_or_default();
+        // iptalin gerçekte işlendiğini tekrar kontrol et (REST hatası → fail)
+        let rows2 = ex
+            .refresh_open_orders_all()
+            .await
+            .context("smoke: iptal doğrulama sorgusu başarısız")?;
         if rows2.iter().any(|r2| r2.coin == coin) {
             anyhow::bail!("cancel sonrası emir hâlâ açık — smoke FİGÜR hata");
         }
