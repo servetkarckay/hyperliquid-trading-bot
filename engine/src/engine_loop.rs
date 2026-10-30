@@ -138,6 +138,9 @@ pub struct EntryAttr {
     /// (`exit_reason_from_fill`, F). Analytical hedef ve actual emir AYRI
     /// kavramlardır ama AYNI formülden (`tp_from_entry`) türetilir.
     pub tp_px: Option<f64>,
+    /// TP MRE kanonik intent'ten (c[last−6]) mi geldi? true ise
+    /// apply_real_fill AllocationManager formülüyle ÜZERİNE yazmaz.
+    pub tp_from_intent: bool,
     /// çıkış sebebi: gerçek kapanış sebebi (MFE>0 TP demek DEĞİL)
     pub exit_reason: Option<ExitReason>,
 }
@@ -181,7 +184,15 @@ impl EntryAttr {
         }
         let planned = self.entry_px;
         self.entry_px = rest_entry;
-        let tp = self.set_analytical_tp(cfg);
+        // TP yeniden türetme: MRE intent'ten gelen tp_px (c[last−6])
+        // korunur — set_analytical_tp (AllocationManager formülü) ile
+        // ÜZERİNE yazılmaz. Yalnız fallback (tp_px=None) durumunda
+        // AllocationManager formülü uygulanır.
+        let tp = if self.tp_from_intent {
+            self.tp_px
+        } else {
+            self.set_analytical_tp(cfg)
+        };
         tracing::info!(
             "[SL] {} giriş fiyatı düzeltildi: karar(defter)={:.8} dolum(REST)={:.8} \
              kayma={:+.3}% → analytical TP={}",
@@ -522,6 +533,7 @@ pub fn synth_recovered_attr(
         size: size.abs(),
         ts,
         tp_px: None,
+        tp_from_intent: false,
         exit_reason: None,
     }
 }
@@ -2461,6 +2473,9 @@ impl Engine {
         // ===== FAZ 1 — TARAMA =====
         let mut evals: Vec<CycleEval> = Vec::new();
         let mut summaries: Vec<(String, String)> = Vec::new();
+        // MRE kanonik TradeIntent haritası (canlı TP/SL için).
+        let mut mre_intents: std::collections::HashMap<String, Option<strategy::mre::TradeIntent>> =
+            std::collections::HashMap::new();
         for coin in self.loop_cfg.coins.clone() {
             let mut candles: Vec<data::Candle> = self
                 .agg
@@ -2545,6 +2560,18 @@ impl Engine {
                     }
                 })
                 .collect();
+            // MRE kanonik TradeIntent'ı sakla (canlı TP/SL için).
+            for (name, sig) in &signals {
+                if name == "MRE" {
+                    let intent = match sig {
+                        Signal::Long { trade_intent, .. } | Signal::Short { trade_intent, .. } => {
+                            trade_intent.clone()
+                        }
+                        _ => None,
+                    };
+                    mre_intents.insert(coin.clone(), intent);
+                }
+            }
             let cs = self.ensemble.combine(signals);
             let cs = self.ensemble.apply_regime(cs, gate);
             summaries.push((
@@ -3191,6 +3218,33 @@ impl Engine {
                     if let Err(err) = self.executor.ensure_leverage(&coin_lv, lev).await {
                         tracing::warn!("{coin_lv}: kaldıraç ayarlanamadı ({err})");
                     }
+                    // MRE kanonik TradeIntent: SL/TP MRE'nin kendi planından
+                    // (c[last−6] TP) gelir — canlı ve replay AYNI niyeti
+                    // kullanır. AllocationManager formülü yalnız fallback.
+                    let mre_intent = mre_intents.get(&e.coin).cloned().flatten();
+                    let (sl_px, intent_tp) = if let Some(ref intent) = mre_intent {
+                        let sl_ok = if intent.long {
+                            intent.sl < entry_px
+                        } else {
+                            intent.sl > entry_px
+                        };
+                        let tp_ok = if intent.long {
+                            intent.tp > entry_px
+                        } else {
+                            intent.tp < entry_px
+                        };
+                        if sl_ok && tp_ok {
+                            (intent.sl, Some(intent.tp))
+                        } else {
+                            tracing::warn!(
+                                "{}: MRE intent SL/TP kontrat ihlali — AllocationManager fallback",
+                                e.coin
+                            );
+                            (cand.sl_px, None)
+                        }
+                    } else {
+                        (cand.sl_px, None)
+                    };
                     let mut attr = EntryAttr {
                         coin: e.coin.clone(),
                         ts: hyperliquid_api::now_ms(),
@@ -3201,18 +3255,29 @@ impl Engine {
                             .unwrap_or_default(),
                         side: side_sm,
                         entry_px,
-                        risk_px: (entry_px - cand.sl_px).abs().max(entry_px * 1e-4),
+                        risk_px: (entry_px - sl_px).abs().max(entry_px * 1e-4),
                         size: sz,
-                        // Analytical TP, tahsis anında karar fiyatından türetilir
-                        tp_px: None,
+                        // Analytical TP: MRE intent'ten (c[last−6]) veya
+                        // fallback AllocationManager formülünden.
+                        tp_px: intent_tp,
+                        tp_from_intent: intent_tp.is_some(),
                         exit_reason: None,
                     };
-                    // TP formülü ÜRETİMDE de aynı fonksiyondan gelir.
-                    // Buradaki değer PLAN (henüz dolum yok); `apply_real_fill`
-                    // gelince gerçek dolumla YENİDEN türetilir.
-                    if let Some(tp) = attr.set_analytical_tp(&self.am.cfg) {
+                    // TP formülü: MRE intent varsa onu kullan (c[last−6]);
+                    // yoksa AllocationManager formülü (fallback).
+                    if intent_tp.is_none() {
+                        if let Some(tp) = attr.set_analytical_tp(&self.am.cfg) {
+                            tracing::info!(
+                                "[TP] {} analytical hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
+                                e.coin,
+                                entry_px,
+                                attr.risk_px,
+                                tp
+                            );
+                        }
+                    } else if let Some(tp) = intent_tp {
                         tracing::info!(
-                            "[TP] {} analytical hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
+                            "[TP] {} MRE intent hedef (plan): entry={:.8} risk={:.8} TP={:.8}",
                             e.coin,
                             entry_px,
                             attr.risk_px,
@@ -4547,6 +4612,7 @@ mod tp_entry_tests {
             size: 1.0,
             ts: 0,
             tp_px: None,
+            tp_from_intent: false,
             exit_reason: None,
         }
     }
@@ -5678,6 +5744,7 @@ mod golden_path_tests {
             strategy::Signal::Long {
                 strength: 0.7,
                 note: "golden stub".into(),
+                trade_intent: None,
             }
         }
     }

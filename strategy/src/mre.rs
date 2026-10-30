@@ -62,6 +62,8 @@ const SD_WINDOW: usize = 100;
 /// değerin ALTINDA (panik dinmiş), SHORT'ta ÜSTÜNDE (coşku zirvede)
 /// olmalı — 83 gün replay'de türetilen keskin ayrım (bkz. modül doc 5).
 const INFAZ_ATR_K: f64 = 2.7;
+/// Bar aralığı (saatlik) — TradeIntent zaman alanları için.
+const BAR_MS: i64 = 3_600_000;
 
 /// Coinin kesit sıralamasındaki **dilimi** — tek kaynak (strateji +
 /// engine + replay aynı fonksiyonu kullanır).
@@ -106,15 +108,23 @@ pub fn rank_band(universe_returns: &[(String, f64)], coin: &str) -> Option<RankB
     rank_band_at(universe_returns, coin)
 }
 
-/// Fiyat planı (replay/doğrulama için açık).
+/// Kanonik işlem niyeti (TradeIntent) — canlı engine ve replay AYNI
+/// mantığı kullanır. SL/TP/entry MRE'nin kendi planından gelir
+/// (c[last−6] hedefi); AllocationManager formülü ile çakışmaz.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReversionPlan {
+pub struct TradeIntent {
     pub long: bool,
     pub entry: f64,
     pub sl: f64,
     pub tp: f64,
     pub strength: f64,
     pub note: String,
+    /// Sinyal üretildiği an (epoch ms) — mum kapanış zamanı.
+    pub signal_ts: i64,
+    /// Sinyal mumunun timestamp'i (entry koşulunun değerlendirildiği bar).
+    pub signal_candle_ts: i64,
+    /// Niyetin geçerlilik süresi (epoch ms) — bu süreden sonra niyet iptal.
+    pub expires_at: i64,
 }
 
 /// Replay kontratı: üretim zinciriyle SONUÇ birebir aynı (Z → rejim → GARCH
@@ -125,7 +135,7 @@ pub fn plan_replay(
     candles: &[Candle],
     universe_returns: &[(String, f64)],
     coin: &str,
-) -> Option<ReversionPlan> {
+) -> Option<TradeIntent> {
     replay_chain(candles, universe_returns, coin, &MreTune::default())
 }
 
@@ -134,7 +144,7 @@ pub fn replay_chain(
     universe_returns: &[(String, f64)],
     coin: &str,
     tune: &MreTune,
-) -> Option<ReversionPlan> {
+) -> Option<TradeIntent> {
     let (label, _) = regime_label(candles)?;
     if !regime_permits_mre(&label) {
         return None;
@@ -167,7 +177,7 @@ fn build_plan(
     ratio: f64,
     band: RankBand,
     sl_mult: f64,
-) -> Option<ReversionPlan> {
+) -> Option<TradeIntent> {
     let c = closes(candles);
     let last = c.len() - 1;
     let entry = c[last];
@@ -187,13 +197,19 @@ fn build_plan(
     let note = format!(
         "MRE katmanları ✓ · Z={z:+.2}σ · σ_oranı={ratio:.2} · rank={band:?} · infaz mumu ✓ · rejim TAMAM"
     );
-    Some(ReversionPlan {
+    let signal_candle_ts = candles.last().map(|c| c.t).unwrap_or(0);
+    let signal_ts = signal_candle_ts;
+    let expires_at = signal_candle_ts + (MOVE_N as i64) * BAR_MS;
+    Some(TradeIntent {
         long,
         entry,
         sl,
         tp,
         strength,
         note,
+        signal_ts,
+        signal_candle_ts,
+        expires_at,
     })
 }
 
@@ -213,21 +229,23 @@ impl Strategy for Mre {
                 reason: "MRE için evren getirisi < 20 coin".into(),
             };
         }
-        let Some(plan) = Self::plan_entity(&input.candles, &input.universe_returns, &input.coin)
+        let Some(intent) = Self::plan_entity(&input.candles, &input.universe_returns, &input.coin)
         else {
             return Signal::Hold {
                 note: "MRE: katman zinciri tamamlanmadı (rejim/Z/σ/rank onayı eksik)".into(),
             };
         };
-        if plan.long {
+        if intent.long {
             Signal::Long {
-                strength: plan.strength,
-                note: plan.note,
+                strength: intent.strength,
+                note: intent.note.clone(),
+                trade_intent: Some(intent),
             }
         } else {
             Signal::Short {
-                strength: plan.strength,
-                note: plan.note,
+                strength: intent.strength,
+                note: intent.note.clone(),
+                trade_intent: Some(intent),
             }
         }
     }
@@ -239,7 +257,7 @@ impl Mre {
         candles: &[Candle],
         universe_returns: &[(String, f64)],
         coin: &str,
-    ) -> Option<ReversionPlan> {
+    ) -> Option<TradeIntent> {
         Self::plan_tuned(candles, universe_returns, coin, &MreTune::default())
     }
 
@@ -249,7 +267,7 @@ impl Mre {
         universe_returns: &[(String, f64)],
         coin: &str,
         tune: &MreTune,
-    ) -> Option<ReversionPlan> {
+    ) -> Option<TradeIntent> {
         if candles.len() < MIN_BARS || universe_returns.len() < 20 {
             return None;
         }

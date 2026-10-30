@@ -98,13 +98,13 @@ impl Ensemble {
         for (name, sig) in signals {
             let w = self.cfg.weights.get(&name).copied().unwrap_or(1.0);
             match sig {
-                Signal::Long { strength, note } => {
+                Signal::Long { strength, note, .. } => {
                     score += w * strength;
                     wsum += w;
                     contributors.push((name.clone(), w * strength));
                     notes.push(format!("{name}[+{strength:.2}]: {note}"));
                 }
-                Signal::Short { strength, note } => {
+                Signal::Short { strength, note, .. } => {
                     score -= w * strength;
                     wsum += w;
                     contributors.push((name.clone(), -w * strength));
@@ -215,6 +215,7 @@ mod tests {
                 Signal::Long {
                     strength: 0.6,
                     note: "a".into(),
+                    trade_intent: None,
                 },
             ),
             (
@@ -222,6 +223,7 @@ mod tests {
                 Signal::Short {
                     strength: 0.2,
                     note: "b".into(),
+                    trade_intent: None,
                 },
             ),
             ("C".into(), Signal::Hold { note: "c".into() }),
@@ -258,6 +260,7 @@ mod tests {
             Signal::Long {
                 strength: 0.9,
                 note: "x".into(),
+                trade_intent: None,
             },
         )]);
         let blocked = e.apply_regime(long_cs.clone(), RegimeGate::Blocked);
@@ -275,6 +278,7 @@ mod tests {
                 Signal::Short {
                     strength: 0.7,
                     note: "x".into(),
+                    trade_intent: None,
                 },
             ),
             (
@@ -282,6 +286,7 @@ mod tests {
                 Signal::Short {
                     strength: 0.5,
                     note: "y".into(),
+                    trade_intent: None,
                 },
             ),
         ]);
@@ -348,6 +353,7 @@ mod exit_channel_tests {
                 Signal::Long {
                     strength: 0.9,
                     note: "a".into(),
+                    trade_intent: None,
                 },
             ),
             (
@@ -403,6 +409,7 @@ mod exit_channel_tests {
                 Signal::Long {
                     strength: 0.8,
                     note: "a".into(),
+                    trade_intent: None,
                 },
             ),
             ("B".into(), Signal::Hold { note: "b".into() }),
@@ -423,6 +430,7 @@ mod exit_channel_tests {
                 Signal::Long {
                     strength: 0.9,
                     note: "giriş".into(),
+                    trade_intent: None,
                 },
             ),
             (
@@ -454,6 +462,7 @@ mod exit_channel_tests {
             Signal::Long {
                 strength: 0.8,
                 note: "x".into(),
+                trade_intent: None,
             },
         )]);
         assert!((cs.score - 0.4).abs() < 1e-9, "{cs:?}");

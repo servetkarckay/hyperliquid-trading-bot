@@ -88,10 +88,14 @@ pub enum Signal {
     Long {
         strength: f64,
         note: String,
+        /// Kanonik işlem niyeti (SL/TP/entry/zaman) — canlı ve replay
+        /// AYNI niyeti kullanır; None ise strateji niyet üretmedi.
+        trade_intent: Option<mre::TradeIntent>,
     },
     Short {
         strength: f64,
         note: String,
+        trade_intent: Option<mre::TradeIntent>,
     },
     Hold {
         note: String,
