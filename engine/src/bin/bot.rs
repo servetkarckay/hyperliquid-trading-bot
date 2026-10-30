@@ -240,10 +240,20 @@ async fn main() -> anyhow::Result<()> {
     // Risk hafızası KALICI: peak_equity + halted restart'ta yüklenir.
     // (Yüklenmezse 100→80'de halt eden hesap, restart'ta 80'i yeni peak
     // kabul ederek drawdown korumasını sıfırlamış olur.)
-    if engine.risk.load_state(&risk_state_path) {
-        tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
-    } else {
-        tracing::info!("[RISK] risk hafızası yok — fresh başlangıç (ilk koşu normal)");
+    match engine.risk.load_state(&risk_state_path) {
+        engine::risk_manager::RiskStateLoad::NotFound => {
+            tracing::info!("[RISK] risk hafızası yok — fresh başlangıç (ilk koşu normal)");
+        }
+        engine::risk_manager::RiskStateLoad::Loaded => {
+            tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
+        }
+        engine::risk_manager::RiskStateLoad::Corrupt => {
+            anyhow::bail!(
+                "[RISK] risk hafızası BOZUK/OKUNAMAZ ({risk_state_path}) — \
+                 drawdown koruması kaybı riski; mainnet başlangıcı reddedildi. \
+                 Dosyayı onarın veya TESTNET_FRESH_START ile temizleyin."
+            );
+        }
     }
 
     // WIPE modunda temiz taban — TÜM pozisyonlar kapatılır ve açık

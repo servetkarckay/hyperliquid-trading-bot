@@ -72,11 +72,27 @@ pub enum RiskViolation {
     TooSmall(f64),
 }
 
+/// Risk state yüklemesinin sonucu — "dosya yok" (ilk koşu, OK) ile
+/// "bozuk/okunamaz" (güvenlik: koruma sıfırlanamaz) AYRILIR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiskStateLoad {
+    /// Dosya hiç yok → fresh başlangıç (OK, ilk koşu normal).
+    NotFound,
+    /// Başarıyla yüklendi.
+    Loaded,
+    /// Bozuk veya erişilemeyen dosya → koruma kaybı riski; mainnet
+    /// başlangıcı reddedilmeli.
+    Corrupt,
+}
+
 pub struct RiskManager {
     pub cfg: RiskConfig,
     peak_equity: f64,
     current_equity: f64,
     halted: Option<String>,
+    /// Risk state dosyası yazılamadığında true — yeni girişler kilitlenir
+    /// (save_state hatası sessizce yutulmaz).
+    save_failed: bool,
 }
 
 impl RiskManager {
@@ -86,6 +102,7 @@ impl RiskManager {
             peak_equity: 0.0,
             current_equity: 0.0,
             halted: None,
+            save_failed: false,
         }
     }
 
@@ -139,6 +156,9 @@ impl RiskManager {
     /// peak_equity + halted durumu `RISK_STATE_PATH`'a atomik yazılır/yüklenir.
     /// (Bu hafızayı kaybetmek, "100→80'de halt, restart'ta 80 yeni peak" tipi
     /// resetlenmiş risk koruması demektir.)
+    ///
+    /// Yazma hatası `Err` döner; çağıran (engine_loop) yeni girişleri
+    /// kilitlemelidir — sessiz yutma YASAK.
     pub fn save_state(&self, path: &str) -> anyhow::Result<()> {
         use serde::{Deserialize, Serialize};
         #[derive(Serialize, Deserialize)]
@@ -161,7 +181,10 @@ impl RiskManager {
         Ok(())
     }
 
-    pub fn load_state(&mut self, path: &str) -> bool {
+    /// Risk state yükler. **"Dosya yok" (NotFound, ilk koşu) ile
+    /// "bozuk/okunamaz" (Corrupt, güvenlik) AYRILIR**: bozuk durumda
+    /// mainnet başlangıcı reddedilmeli — koruma kaybı riski.
+    pub fn load_state(&mut self, path: &str) -> RiskStateLoad {
         use serde::{Deserialize, Serialize};
         #[derive(Serialize, Deserialize)]
         struct Persisted {
@@ -169,12 +192,28 @@ impl RiskManager {
             current_equity: f64,
             halted: Option<String>,
         }
-        let Ok(txt) = std::fs::read_to_string(path) else {
-            return false;
+        let txt = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return RiskStateLoad::NotFound;
+            }
+            Err(e) => {
+                tracing::error!(
+                    "risk hafızası OKUNAMADI ({path}): {e} — koruma kaybı riski, \
+                     mainnet başlangıcı reddedilmeli"
+                );
+                return RiskStateLoad::Corrupt;
+            }
         };
-        let Ok(p) = serde_json::from_str::<Persisted>(&txt) else {
-            tracing::error!("risk hafızası BOZUK ({path}) — sıfırdan başlatıldı (uyarı: drawdown hafızası sıfır)");
-            return false;
+        let p = match serde_json::from_str::<Persisted>(&txt) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!(
+                    "risk hafızası BOZUK ({path}): {e} — koruma kaybı riski, \
+                     mainnet başlangıcı reddedilmeli"
+                );
+                return RiskStateLoad::Corrupt;
+            }
         };
         self.peak_equity = p.peak_equity;
         self.current_equity = p.current_equity;
@@ -182,7 +221,21 @@ impl RiskManager {
         if self.halted.is_some() {
             tracing::error!("risk hafızası yüklendi — trading HALTED (operatör resume gerekli)");
         }
-        true
+        RiskStateLoad::Loaded
+    }
+
+    /// save_state yazma hatası sonrası çağrılır: yeni girişler kilitlenir
+    /// (risk hafızası yazılamadığı için drawdown koruması kayıp riski).
+    pub fn mark_save_failed(&mut self) {
+        self.save_failed = true;
+        if self.halted.is_none() {
+            self.halted = Some("risk state yazılamadı — girişler kilitli".into());
+        }
+        tracing::error!("risk hafızası YAZILAMADI — yeni girişler kilitlendi");
+    }
+
+    pub fn save_failed(&self) -> bool {
+        self.save_failed
     }
 
     /// Manuel resume (operatör kararı) — peak mevcut equity'ye çekilir
@@ -327,7 +380,7 @@ mod persistence_tests {
 
         // RESTART: yeni RiskManager → yükle
         let mut r2 = RiskManager::new(RiskConfig::default());
-        assert!(r2.load_state(path), "yüklenmeli");
+        assert_eq!(r2.load_state(path), RiskStateLoad::Loaded, "yüklenmeli");
         assert!(r2.halt_reason().is_some(), "halted kalıcı");
         // drawdown hafızası: peak hâlâ 100 → 85'te hâlâ halt bölgesi
         assert!(
@@ -352,10 +405,45 @@ mod persistence_tests {
         let path = path.to_str().unwrap();
         std::fs::write(path, "{ bozuk").unwrap();
         let mut r = RiskManager::new(RiskConfig::default());
-        assert!(!r.load_state(path), "bozuk dosya yüklenmez");
+        assert_eq!(
+            r.load_state(path),
+            RiskStateLoad::Corrupt,
+            "bozuk dosya yüklenmez"
+        );
         assert!(!r.is_halted());
         assert_eq!(r.halt_reason(), None);
         let _ = std::fs::remove_file(path);
+    }
+
+    /// Dosya hiç yok → NotFound (ilk koşu normal); peak sıfır kalır,
+    /// drawdown %0 döner (koruma henüz kurulmamış — ilk settled equity'de kurulur).
+    #[test]
+    fn risk_state_not_found_ilk_kosu() {
+        let dir = std::env::temp_dir().join("risk-persist-missing");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("risk.json");
+        let path = path.to_str().unwrap();
+        let _ = std::fs::remove_file(path);
+        let mut r = RiskManager::new(RiskConfig::default());
+        assert_eq!(r.load_state(path), RiskStateLoad::NotFound);
+        assert_eq!(r.peak_equity, 0.0);
+        assert!(!r.is_halted());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// save_state yazma hatası → save_failed flag + halted → girişler kilitli.
+    #[test]
+    fn save_state_hatasi_girisleri_kilitler() {
+        let r = RiskManager::new(RiskConfig::default());
+        assert!(!r.save_failed());
+        // geçersiz path (dizin olmayan parent) → save_state Err döner
+        let bad = "/proc/cannot/create/here/risk.json";
+        assert!(r.save_state(bad).is_err());
+        // mark_save_failed manuel tetikleme (engine_loop'un yaptığı)
+        let mut r = RiskManager::new(RiskConfig::default());
+        r.mark_save_failed();
+        assert!(r.save_failed());
+        assert!(r.is_halted());
     }
 
     /// PEAK SADECE SETTLED: açık pozisyonlu (unrealized) equity spike'ı

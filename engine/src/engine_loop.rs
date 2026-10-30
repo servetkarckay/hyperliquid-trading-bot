@@ -2886,8 +2886,12 @@ impl Engine {
         self.risk.update_equity(self.equity, settled);
         // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
         // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
+        // Save hatası → yeni girişler kilitlenir (drawdown koruması kayıp riski).
         if let Err(e) = self.risk.save_state(&self.risk_state_path) {
             tracing::error!("risk hafızası yazılamadı ({}): {e}", self.risk_state_path);
+            self.risk.mark_save_failed();
+            self.gate.lock();
+            tracing::error!("[RISK-LOCK] AKTİF — risk state yazılamadı, yeni girişler kilitli");
         }
 
         // oracle/mark referansı: emir fiyatı oracle bandının dışına kaçmasın
