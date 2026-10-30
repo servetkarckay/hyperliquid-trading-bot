@@ -7,11 +7,11 @@
 set -euo pipefail
 
 ROOT=/root/hyperliquid
-LOG=/tmp/opencode/bot-mainnet.log
+LOG=$ROOT/logs/bot-mainnet.log
 cd "$ROOT"
 
 # PID dosyası: aynı binary iki bot (testnet+mainnet) — pidfile ile ayır
-PIDFILE=/tmp/opencode/bot-mainnet.pid
+PIDFILE=$ROOT/logs/bot-mainnet.pid
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "mainnet bot zaten çalışıyor: $(cat "$PIDFILE")"
     exit 1

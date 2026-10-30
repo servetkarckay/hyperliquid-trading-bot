@@ -11,8 +11,8 @@
 # - Operatörün bilinçli olarak botu durdurma isteği için lock dosyası:
 #   `/tmp/opencode/watchdog.disabled` varsa watchdog restart YAPMAZ.
 ROOT=/root/hyperliquid
-LOG=/tmp/opencode/watchdog-mainnet.log
-PIDFILE=/tmp/opencode/bot-mainnet.pid
+LOG=$ROOT/logs/watchdog-mainnet.log
+PIDFILE=$ROOT/logs/bot-mainnet.pid
 DISABLED=/tmp/opencode/watchdog.disabled
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 if [ -f "$DISABLED" ]; then

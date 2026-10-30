@@ -14,6 +14,7 @@
 config/*.json
 config/*.jsonl
 config/*.prev
+logs/
 testnet_final/
 fuzz/artifacts/
 fuzz/target/
