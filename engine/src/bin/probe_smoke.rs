@@ -7,8 +7,8 @@
 //!   1. mainnet guard: TESTNET=1 yoksa HİÇBİR şey yapmaz (HATA).
 //!   2. küçük limit order yerleştirir (mid ×0.70 — derin bid, dinlenir).
 //!      notional varsayılanı $20: etkin bant değeri 20×0.70=$14 → borsa
-//!      minimumu $10'un ÜSTÜNDE (eskiden $12→$8.4 guard'a takılıp emir
-//!      hiç gönderilmiyordu — figür smoke).
+//!      minimumu $10'un ÜSTÜNDE ($12 seçildiğinde 0.70 bantta etkin
+//!      $8.4 kalır ve emir borsaya hiç gitmez).
 //!   3. emri KENDİ OID'siyle açık-listede DOĞRULAR (coin adı yetmez).
 //!   4. İPTAL eder; iptali OID bazında tekrar sorguyla DOĞRULAR.
 //!   5. pozisyon FLAT doğrular — REST hatası FAIL sayılır (asla flat

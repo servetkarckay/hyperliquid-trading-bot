@@ -328,8 +328,8 @@ async fn main() -> anyhow::Result<()> {
             // SUPERVISOR (kanıtlanan kod: api::supervisor::keepalive + 4
             // runtime testi): kullanıcı akışı (fill geri beslemesi!) öldüyse
             // SESSİZ ölü değildir — loglanır + 5 sn sonra yeniden başlatılır.
-            // (eskiden .ok() ile yutuluyordu: task ölürse bot fillsiz
-            // çalışmaya devam ederdi ve kimse göremezdi.)
+            // .ok() ile yutulmaz: task ölürse bot fillsiz çalışmaya devam
+            // eder ve kimse göremez.
             let cfg_task = cfg.clone();
             tokio::spawn(hyperliquid_api::supervisor::keepalive(
                 move |episode: u64| {

@@ -743,10 +743,9 @@ impl StrategyTracker {
 
     // ── PERSISTENCE ─────────────────────────────────────────────────────
     //
-    // Öğrenme **canlı**dır: restart'ta n/win/PF/ΣR korunmazsa sistem her
-    // seferinde "15 strateji × w=1.0" cold-start'a döner ve testnet'te
-    // günlerce süren kanıt toplama boşa gider. Durum diske yazılır ve
-    // restart'ta birebir yüklenir.
+    // Öğrenme **canlı**dır: restart'ta n/win/PF/ΣR korunmazsa sistem
+    // cold-start'a döner ve birikimli kanıt toplama boşa gider. Durum
+    // diske yazılır ve restart'ta birebir yüklenir.
     //
     // `entry_attr` (pozisyon başına, R hesabının girdisi) RAM'de kalır —
     // restart kabul edilebilir: sadece o pozisyonun kapanışında R kaydı

@@ -1,35 +1,30 @@
 //! MRE — MEAN-REVERSION & OVERREACTION ENGINE (Aşırı Sapma Modülü).
 //!
-//! 3 aşırı-tepki stratejisinin KATMAN ZİNCİRİ (dürüst mimari; bir katman
-//! vetoes → sinyal yok):
+//! Kontra (mean-reversion) stratejisi: piyasa panik/euforia anlarında
+//! aşırı sapmayı yakalar, 6-bar aşırı hareketin başlangıcına (c[last−6])
+//! geri dönüşü hedefler. 6 katmanlı veto zinciri — bir katman red → sinyal
+//! yok:
 //!
-//! 1. **Rejim**: `classify` TREND rejimini RED (trendless/çalkantılı
-//!    pazarda geçerli); VolSpike/Squeeze (Blocked) da geçmez. MR/GEÇİŞ
-//!    (Open) onaylı.
-//! 2. **De Bondt-Thaler Z**: 6-bar aşırı hareket, 100-bar log-return
-//!    std normalize — Z ≤ −2.5 panik (kontra LONG) / Z ≥ +2.5 euphoria
-//!    (kontra SHORT). (Doküman formülü: Z-Score(Price) < −2.5.)
-//! 3. **GARCH σ teyidi**: GARCH(1,1) koşullu vol — σ_next/σ_long-run
-//!    ≥ 1.0: anomali volatil patlama yaratsın (doğal oran 1.0 eşiği;
-//!    ayar yok). De Bondt-Thaler'ın hacim-teyid katmanının volatilite
-//!    karşılığı burada devralındı.
-//! 4. **Cross-Sectional rank**: kesit quintile — panik uzvu → evrenin
-//!    alt %40'ında (Bottom/BottomShort), euphoria → üst %20 (Top).
-//!    Orta bölgeler (Mid/adı yok) → Hold.
-//! 5. **İnfaz mumu kuralı (yönlü)**: sinyal barı aralığı/ATR14 — dip
-//!    alımında (LONG) infaz mumu DİNMIŞ olmalı (aralık ≤ 2.7×ATR: bıçak
-//!    yere düşmüş); zirve shortunda (SHORT) infaz mumu ZİRVEDE olmalı
-//!    (aralık > 2.7×ATR: coşku tam delirmede). Kanıt: 83 gün × 179 coin
-//!    replay (754 işlem) — pf 1.41→1.95; 3 ufukta + 2 yarıda tutarlı.
-//! 6. **PANİK-DİP LONG**: LONG yalnız gerçek panik dipinde (ret6 ≤
-//!    −6.3%). Sıradan dip alma pahalıya düşüş piyasasında birikir
-//!    (May-Tem 2026: filtresiz LONG ΣR −51.3R). Taze 79-coin/190-gün
-//!    out-of-sample teyit: filtreyle May-Tem −2.8R, Ağu-Eki pf 1.99,
-//!    toplam pf 1.28→1.53, MDD 62.3R→15.9R (%47→%15 equity). SHORT'a
-//!    uygulanmaz.
+//! 1. **Rejim**: `classify` TREND ve Blocked (VolSpike/Squeeze) rejimleri
+//!    RED; MeanReversion/GEÇİŞ onaylı. Trend piyasasında kontra uygulanmaz.
+//! 2. **De Bondt-Thaler Z**: 6-bar aşırı hareket, 100-bar log-return std
+//!    normalize. Z ≤ −2.5 panik (kontra LONG) / Z ≥ +2.5 euphoria (kontra
+//!    SHORT).
+//! 3. **GARCH σ teyidi**: GARCH(1,1) koşullu volatilite — σ_next/σ_long-run
+//!    ≥ 1.0: anomali volatil patlama yaratsın. De Bondt-Thaler'ın
+//!    hacim-teyid katmanının volatilite karşılığı.
+//! 4. **Cross-sectional rank**: kesit quintile — panik uzvu evrenin alt
+//!    %40'ında (Bottom/BottomShort), euphoria üst %20'de (Top). Orta
+//!    bölgeler → Hold.
+//! 5. **İnfaz mumu kuralı (yönlü)**: sinyal barı aralığı/ATR14. LONG'da
+//!    infaz mumu dinmiş olmalı (aralık ≤ 2.7×ATR); SHORT'ta infaz mumu
+//!    zirvede olmalı (aralık > 2.7×ATR).
+//! 6. **PANİK-DİP LONG**: LONG yalnız gerçek panik dipinde (son 6 bar
+//!    kümülatif getiri ≤ −6.3%). Sıradan dip alma pahalıya düşüş piyasasında
+//!    birikir. SHORT'a uygulanmaz.
 //!
-//! Fiyat planı: hedef = aşırı hareketin başlangıcı (c[last−6]) —
-//! "ortalamaya dönüş" literal hedefi; SL = 1.5×ATR14 risk tavanı.
+//! Fiyat planı: hedef = aşırı hareketin başlangıcı (c[last−6]); SL =
+//! 1.5×ATR14 risk tavanı. TP = c[last−6].
 //!
 //! Deterministik, replay-idempotent, panik yok; yetersiz veri → `Skip`.
 use crate::closes;
@@ -65,15 +60,13 @@ const ATR_N: usize = 14;
 const MOVE_N: usize = 6;
 const SD_WINDOW: usize = 100;
 /// İnfaz mumu eşiği: sinyal barı aralığının ATR14'e oranı. LONG'da bu
-/// değerin ALTINDA (panik dinmiş), SHORT'ta ÜSTÜNDE (coşku zirvede)
-/// olmalı — 83 gün replay'de türetilen keskin ayrım (bkz. modül doc 5).
+/// değerin altında (panik dinmiş), SHORT'ta üstünde (coşku zirvede)
+/// olmalı.
 const INFAZ_ATR_K: f64 = 2.7;
 /// PANİK-DİP LONG eşiği: son 6 bar (MOVE_N) kapanış getirisinin yüzde
-/// sınırı. LONG yalnız GERÇEK panik dipinde açılır (ret6 ≤ −6.3%);
-/// sıradan dipler pahalıya düşüş piyasasında birikir (May-Tem 2026 replay
-/// kaybı −51.3R). Madencilik bulgusu taze 79-coin/190-gün veride
-/// out-of-sample teyit edildi: filtre sonrası May-Tem −2.8R, Ağu-Eki
-/// pf 1.99, MDD 62.3R → 15.9R. SHORT tarafına uygulanmaz.
+/// sınırı. LONG yalnız gerçek panik dipinde açılır (ret6 ≤ −6.3%);
+/// sıradan dipler pahalıya düşüş piyasasında birikir. SHORT tarafına
+/// uygulanmaz.
 pub const PANIK_DIP_RET6: f64 = -6.3;
 /// Bar aralığı (saatlik) — TradeIntent zaman alanları için.
 const BAR_MS: i64 = 3_600_000;
@@ -291,12 +284,12 @@ impl Mre {
         // ── 2) Z katmanı: yön burada belirlenir
         let (z, long) = z_overreaction(candles, tune.z_esik)?;
         // ── 2b) İnfaz mumu kuralı: dip alımda mum dinmiş, zirve
-        //    shortunda infaz zirvede (83 gün replay kanıtı)
+        //    shortunda infaz zirvede
         if !infaz_mumu_ok(candles, long) {
             return None;
         }
         // ── 2c) PANİK-DİP LONG: sıradan dip alınmaz; yalnız gerçek panik
-        //    dipinde (ret6 ≤ −6.3%). Canlı/replay aynı kontrat.
+        //    dipinde (ret6 ≤ −6.3%).
         if long && !panic_dip_ok(candles) {
             return None;
         }
@@ -327,7 +320,7 @@ impl Mre {
 }
 
 /// İnfaz mumu kuralı (yönlü) — dip alımında son bar sakin, zirve
-/// shortunda son bar infaz. ATR hesaplanamazsa kapı YOK (güvenli red).
+/// shortunda son bar infaz. ATR hesaplanamazsa kapı yok (güvenli red).
 pub fn infaz_mumu_ok(candles: &[Candle], long: bool) -> bool {
     if candles.is_empty() {
         return false;
@@ -353,8 +346,8 @@ pub fn infaz_mumu_ok(candles: &[Candle], long: bool) -> bool {
 
 /// PANİK-DİP koşulu — LONG girişleri için. Son MOVE_N barın kümülatif
 /// kapanış getiri(%)'si `PANIK_DIP_RET6`'dan az olmalı. Kısa seri /
-/// sayısal bozukluk → güvenli red (false). Canlı ve replay AYNI
-/// fonksiyonu kullanır (kanonik kontrat).
+/// sayısal bozukluk → güvenli red (false). Canlı ve replay aynı fonksiyonu
+/// kullanır (kanonik kontrat).
 pub fn panic_dip_ok(candles: &[Candle]) -> bool {
     let c = closes(candles);
     let n = c.len();
@@ -564,9 +557,8 @@ mod tests {
 
     #[test]
     fn plan_zinciri_panik_dip_uygulanir() {
-        // plan_tuned + replay_chain: panik OLMAYAN long artığını red.
-        // −%3 dip (yeterli z) + sakin mum + MR rejimi → eskiden LONG
-        // dönerdi; artık None.
+        // plan_tuned + replay_chain: panik olmayan long adayını red.
+        // −%3 dip (yeterli z) + sakin mum + MR rejimi → None.
         let mut cs = flat(120, 100.0);
         let drops = [-0.5, -1.0, -1.5, -2.0, -2.5, -3.0];
         for (k, d) in drops.iter().enumerate() {

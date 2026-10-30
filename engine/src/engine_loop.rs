@@ -1,17 +1,20 @@
-//! ENGINE LOOP — ana motor: veri → strateji → ensemble → tahsis →
-//! durum makinesi → toplu emir → dolum → çıkış → öğrenme.
+//! ENGINE LOOP — ana motor: veri → strateji → tahsis → durum makinesi →
+//! toplu emir → dolum → çıkış → öğrenme.
 //!
 //! Fazlar (run_cycle):
-//! 1. TARAMA: her coin için kapanmış mumlar + canlı son bar → `MarketInput`
+//! 1. TARAMA: her coin için kapanmış mumlar → `MarketInput` → MRE stratejisi
+//!    (panik-izole) → rejim kapısı. Sadece kapanmış mumlar kullanılır; açık
+//!    mum sinyal üretmez (replay ile hizalı).
 //!
-//! → 15 strateji (panik-izole) → ensemble → rejim kapısı.
 //! 2. TAHSİS: conviction + korelasyon + bütçe → `Candidate`.
-//! 3. YÜRÜTME: makine `Action`'ları → WireOrder/Cancel — TEK batch POST.
-//! 4. ÇIKIŞLAR: SL/TP trigger'lar borsada asılı (TP fill →
 //!
-//! `ExitReason::TakeProfit`); trailing ratchet; makine ExitNow.
-//! ÇIKIŞ KANALLARI ensemble `exit_requested` + kesit (cross-sectional) rank kayması +
-//! turtle 55-bar altı — yalnız AÇIK pozisyonda ExitNow; Flat'ta emir yok.
+//! 3. YÜRÜTME: makine `Action`'ları → WireOrder/Cancel — TEK batch POST.
+//!
+//! 4. ÇIKIŞLAR: SL/TP trigger'lar borsada asılı (TP fill →
+//!    `ExitReason::TakeProfit`); trailing ratchet; makine ExitNow. Çıkış
+//!    kanalları: ensemble exit_requested + kesit rank kayması — yalnız AÇIK
+//!    pozisyonda ExitNow; Flat'ta emir yok.
+//!
 //! INVARIANT `entries_allowed = health_ok && !risk_locked`
 //! (`EntryGate` — alan değil, türetilmiş; kaynak taramasıyla korunur).
 //! ÖĞRENME: R kaydı → tracker → etkin ağırlık; canlı ağırlık snapshot'ı
@@ -916,11 +919,11 @@ impl Engine {
                 Vec::new()
             }
         };
-        // Açılışta borsada asılı kalan ÇİFT stop'ları temizle (Not:
-        // önceki koşudan kalan ikişer stop aynı pozisyonu kapatmaya çalışıyordu).
+        // Açılışta borsada asılı kalan çift stop'ları temizle (aynı pozisyonu
+        // iki ayrı stop kapatmaya çalışmasın).
         let n = executor.dedupe_sl(boot_cands).await;
         if n > 0 {
-            tracing::info!("[SL] açılışta {n} artık stop iptal edildi");
+            tracing::info!("[SL] açılışta {n} stop iptal edildi");
         }
         {
             let orphans: Vec<(String, i64)> = executor
@@ -1983,10 +1986,9 @@ impl Engine {
             // Trailing bu noktadan sonra `cur_sl_px`'yi de günceller: ilk
             // kurulumdan sonra hedef seviye takip edilsin.
             // `ensure_sl` YENİ stop kurduysa `cur_sl_px`'i güncelle.
-            // DİKKAT: idempotent dönüşte (`Ok(false)`) GÜNCELLEME YAPILMAZ —
-            // aksi halde trailing'in bir önceki satırda yeni taşıdığı seviye
-            // bir sonraki satırda sabit giriş stop'una geri yazılır ve
-            // trailing her döngü kendini sıfırlar (ratchet kaybı).
+            // Idempotent dönüşte (`Ok(false)`) GÜNCELLEME YAPILMAZ —
+            // aksi halde trailing'in az önce taşıdığı seviye sabit giriş
+            // stop'una geri yazılır ve trailing her döngü kendini sıfırlar.
             match self
                 .executor
                 .ensure_sl(coin, is_long, szi.abs(), sl_px)
@@ -2985,10 +2987,10 @@ impl Engine {
         // ── DÖNGÜ PROJEKSİYONU (borsa state'inden AÇIK AYRI) ──────────
         // pmap = döngü başındaki mevcut pozisyon anlık görüntüsü; cycle
         // içinde KABUL EDİLEN girişler borsaya düşmeden önce buraya
-        // eklenir → sonraki entry risk kontrolü önceki bu-cycle girişleri
-        // de görür (tek cycle'da toplam notional tavanı AŞILAMAZ).
-        // Kabul edilmeyen aday projeksiyona girmemli; Exit emirleri
-        // maruziyet EKLEMEZ.
+        // eklenir → sonraki entry risk kontrolü aynı cycle'daki önceki
+        // girişleri de görür (tek cycle'da toplam notional tavanı
+        // aşılamaz). Kabul edilmeyen aday projeksiyona girmemli; Exit
+        // emirleri maruziyet EKLEMEZ.
         let mut projection = CycleProjection::seeded(&pmap);
         // PEAK = SADECE SETTLED equity: pozisyon haritası bu döngüde borsadan
         // tazelendi (rest_sync_verified) → flat iken accountValue gerçekleşen
@@ -3034,7 +3036,7 @@ impl Engine {
                     // (`pre_pending` anlık görüntüsü). Aynı cycle'da evals'in yeni
                     // ürettiği karar (Flat→Pending{oid:0}) İLK GİRİŞTİR — engelli
                     // değildir; engellenseydi batch ASLA gönderilmez, makine
-                    // oid=0'da sonsuz beklerdi (canlı kanıt: 51 coin kilit).
+                    // oid=0'da sonsuz beklerdi.
                     if place_arm_gate(pre_pending.contains(&e.coin), self.machines.get(&e.coin)) {
                         tracing::info!(
                             "{}: cycle-başı bekleyen emir var — bu cycle'da ikinci entry atlandı",
@@ -3934,7 +3936,7 @@ mod trail_tests {
 
     #[test]
     fn trailing_asla_gevsetmez() {
-        // Tepe girişe döndü: hedef, önceki stop'un ALTINDA kalıyor.
+        // Tepe girişe döndü: hedef, mevcut stop'un ALTINDA kalıyor.
         let t = st(true, 100.0, 2.0, 100.0, 97.0);
         assert!(
             !better(&t, target(&t, 1.5), 0.25),
@@ -5424,7 +5426,7 @@ mod recon_contract_tests {
         // açılışlar
         assert!(is_open_fill("Open Long"));
         assert!(is_open_fill("Open Short"));
-        // ters çevirme: önceki taraf kapanır, YENİ TARAFA açılış
+        // ters çevirme: eski taraf kapanır, yeni tarafa açılış
         assert!(is_open_fill("Long > Short"));
         assert!(is_open_fill("Short > Long"));
         // bilinmeyen/boş şema → fail-safe: açılış SAYILMAZ
@@ -6302,7 +6304,7 @@ mod deadlock_fix_tests {
 
 #[cfg(test)]
 mod mutation_hardening_tests {
-    // MUTASYON KANITI: surviving mutantların her biri artık YAKALANIR.
+    // Mutant hardening: her surviving mutant bu testlerle yakalanır.
     use crate::state_machine::{PosState, PositionStateMachine, Side, SmConfig};
     use crate::track::{Health, Mode, PerformanceMetrics, StrategyTracker};
 

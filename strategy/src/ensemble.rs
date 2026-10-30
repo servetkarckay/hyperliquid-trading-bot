@@ -3,7 +3,7 @@
 //! Kurallar:
 //! 1. `combine`: Skip'ler SAYILMAZ; Long/Short ağırlıklı net skor
 //!
-//! [−1,1] (contributors audit); `Signal::Exit` → `exit_requested`
+//! [−1,1] (katkılar); `Signal::Exit` → `exit_requested`
 //! + `exit_contributors` (ÇIKIŞ KANALI — skora karışmaz, çoklu oy
 //!
 //! idempotent).
@@ -38,7 +38,7 @@ pub struct ConsensusSignal {
     /// Motor, `exit_requested && pozisyon açık` iken gerçek `ExitNow`
     /// yürütür; Flat pozisyonda hiçbir emir üretmez.
     pub exit_requested: bool,
-    /// Exit oyu veren stratejiler (audit/log). Tekrarlanan oylar **tek** girdi.
+    /// Exit oyu veren stratejiler (log). Tekrarlanan oylar **tek** girdi.
     pub exit_contributors: Vec<String>,
 }
 

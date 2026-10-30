@@ -1,4 +1,4 @@
-//! STRATEGY — sinyal sözleşmesi ve 15-strateji registry.
+//! STRATEGY — sinyal sözleşmesi ve MRE registry.
 //!
 //! Sözleşme:
 //! 1. `Strategy::evaluate(&MarketInput) -> Signal` — SAFTIR: pozisyon

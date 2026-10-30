@@ -111,8 +111,8 @@ pub struct FillEvent {
 /// Dolumun açılış/kapanış ayrımı `dir` alanından yapılır — `closedPnl`
 /// KULLANILMAZ. Hyperliquid fill şeması:
 /// "Open Long"/"Open Short" (açılış), "Close Long"/"Close Short"
-/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — önceki
-/// tarafı kapatıp yeniyi açar → yeni taraf için açılış).
+/// (kapanış), "Long > Short"/"Short > Long" (ters çevirme — eski tarafı
+/// kapatıp yeniyi açar → yeni taraf için açılış).
 ///
 /// `closedPnl == 0` kesinlikle "açılış" demek değildir: break-even
 /// kapanışta 0'dır; açılış-koruması `dir`-tabanlı ayrımla kurulur.
@@ -955,7 +955,7 @@ impl Executor {
     /// başarısız olursa ya da ağ koparsa pozisyon **sıfır korumasız** kalır.
     /// Not: `place_trigger` bazı coin'lerde fiyat ızgarası bulamayınca
     /// ("invalid price") denemelerde tamamen başarısız olabiliyor.
-    /// Doğru sırada, yerleştirme başarısızsa önceki stop **ayakta kalır** →
+    /// Doğru sırada, yerleştirme başarısızsa mevcut stop ayakta kalır →
     /// en kötü senaryo "trailing gerçekleşmedi", "korumasız pozisyon" değil.
     ///
     /// `grace` kapısı **bilinçli olarak atlanır**: bu bir *ikinci* stop değil,
@@ -986,13 +986,13 @@ impl Executor {
                     Ok(()) => {
                         self.open_orders.remove(&o);
                         tracing::info!(
-                            "[SL] {coin} önceki stop iptal edildi oid={o} (yeni={new_oid})"
+                            "[SL] {coin} mevcut stop iptal edildi oid={o} (yeni={new_oid})"
                         );
                     }
                     Err(e) => tracing::warn!(
                         coin,
                         oid = o,
-                        "önceki stop iptal edilemedi — İKİ STOP AÇIK KALABİLİR: {e}"
+                        "mevcut stop iptal edilemedi — İKİ STOP AÇIK KALABİLİR: {e}"
                     ),
                 }
             }
@@ -1470,7 +1470,7 @@ impl Executor {
         let st = self.info.clearinghouse_state(&self.user).await?;
         // KRİTİK: borsa ara sıra `null` döndürebilir. Null'da pozisyonları
         // SİLMEK, borsadaki açık pozisyonları "yok" saymak olur → bot onları
-        // yönetmezdi. Boş/çözümsüz yanıt = hatadır, önceki harita korunur.
+        // yönetmez. Boş/çözümsüz yanıt = hatadır, mevcut harita korunur.
         let arr = match st.get("assetPositions").and_then(|v| v.as_array()) {
             Some(a) => a.clone(),
             None => {

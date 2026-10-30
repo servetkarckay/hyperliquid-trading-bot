@@ -148,7 +148,7 @@ pub mod helpers {
         }
     }
 
-    /// Determinizm kanıtı: aynı parametre → birebir aynı seri.
+    /// Determinizm garantisi: aynı parametre → birebir aynı seri.
     #[test]
     fn ureticiler_deterministik() {
         let a = flat(10, 100.0);

@@ -506,8 +506,8 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("epoch.json");
         let path = path.to_str().unwrap();
-        // TEST İZOLASYONU: önceki yarıda-kesilmiş koşu kalıntısı
-        // (bozuk dosya) (a) adımını bozar — her koşuda temiz başla.
+        // TEST İZOLASYONU: yarıda-kesilmiş koşu kalıntısı (bozuk dosya)
+        // (a) adımını bozar — her koşuda temiz başla.
         let _ = std::fs::remove_file(path);
 
         // (a) dosya YOK → Ok(None) (ilk çalıştırma; yeni dönem açılır — bu YOL güvenli)

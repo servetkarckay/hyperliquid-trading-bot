@@ -140,7 +140,7 @@ pub fn round_px_for(x: f64, max_decimals: u32) -> f64 {
 
 /// ── PERP FİYAT PRECISION — TEK MERKEZİ KURAL ─────────────────────
 /// Kural (Hyperliquid): 1) 5 anlamlı hane; 2) szDecimals-uyumlu azami
-/// hane = 6 − szDecimals (kanıt: ME szd=1 → 5 hane; MEME szd=0 → 6 hane).
+/// hane = 6 − szDecimals (örnek: ME szd=1 → 5 hane; MEME szd=0 → 6 hane).
 /// TÜM emir yolları (normal limit / trigger / modify / replace SL / TP /
 /// flatten / exit) BU fonksiyona bağlanır — ad-hoc yuvarlama kalmaz.
 /// Sonuç ≤ 0 / non-finite → 0.0 (çağrı tarafı reddeder).
@@ -474,7 +474,7 @@ mod precision_tests {
     /// 5 anlamlı hane + azami hane = 6 − szDecimals.
     #[test]
     fn perp_price_szd_varyantlari() {
-        // ME (szd=1): probe kanıtı — 6 hane RED, 5 hane KABUL
+        // ME (szd=1): 6 hane RED, 5 hane KABUL
         assert_eq!(perp_price(0.07370625, 1), 0.07371);
         // MEME (szd=0): 6 hane kabul
         assert_eq!(perp_price(0.07370625, 0), 0.073706);
@@ -491,7 +491,7 @@ mod precision_tests {
 
     /// TÜM EMİR YOLLARI AYNI FINAL KURAL:
     /// normal limit (round_px_wire) = trigger triggerPx = perp_price(x, 0);
-    /// modify artık szDecimals-uyumlu (generic-5sig yalnız yuvarlama yok);
+    /// modify szDecimals-uyumlu (generic-5sig yalnız yuvarlama yok);
     /// SL/TP/flatten/exit → batch wire tek noktadan (verified-bağlı).
     #[test]
     fn tum_yollar_ayni_final_kural() {

@@ -187,7 +187,7 @@ mod e2e_matrix_tests {
             mach.is_recon_pending(),
             "source-scan: erken Flat yazarı yok"
         );
-        // çîrPersistent: grace-meşru → engine cleanup (önceki fixler)
+        // çîrPersistent: grace-meşru → engine cleanup
     }
 
     // ── 11) duplicate fill — aynı dolum iki kez → TOPLAM PnL BİR KEZ ──
