@@ -9,7 +9,7 @@
 #   "ok" sanıp mainnet'i yeniden başlatmıyordu. PIDFILE tabanlı kontrol
 #   kullanılır: mainnet botu start_bot_mainnet.sh tarafından yazılır.
 # - Operatörün bilinçli olarak botu durdurma isteği için lock dosyası:
-#   `/tmp/opencode/watchdog.disabled` varsa watchdog restart YAPMAZ.
+#   Devre disi birakma kilidi mevcutsa watchdog restart YAPMAZ.
 ROOT=/root/hyperliquid
 LOG=$ROOT/logs/watchdog-mainnet.log
 PIDFILE=$ROOT/logs/bot-mainnet.pid

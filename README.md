@@ -100,7 +100,7 @@ MRE'nin ürettiği `TradeIntent { long, entry, sl, tp, strength, note, signal_ts
 
 - Başlat: `bash scripts/start_bot_mainnet.sh` (pidfile: `logs/bot-mainnet.pid`)
 - Log: `sed 's/\x1b\[[0-9;]*m//g' logs/bot-mainnet.log`
-- Watchdog: `scripts/watchdog.sh` (devre dışı: `touch /tmp/opencode/watchdog.disabled`)
+- Watchdog: `scripts/watchdog.sh` (yeniden başlatmaları yönetir; devre dışı bırakma mekanizması script içinde belgelenmiştir)
 - State: `config/risk_state.json`, `config/track_state.json`, `config/trade_exits.jsonl`
 
 ## CI
