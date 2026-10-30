@@ -242,6 +242,41 @@ async fn main() -> anyhow::Result<()> {
     // kabul ederek drawdown korumasını sıfırlamış olur.)
     match engine.risk.load_state(&risk_state_path) {
         engine::risk_manager::RiskStateLoad::NotFound => {
+            if environment == "mainnet" {
+                // MAINNET: risk dosyası ilk kez oluşturuluyor → eski
+                // peak-equity geçmişi kaybolabilir. Açık operatör onayı +
+                // hesap doğrulaması zorunlu.
+                if std::env::var("RISK_STATE_INIT_CONFIRMED").as_deref() != Ok("1") {
+                    anyhow::bail!(
+                        "[RISK] Mainnet'te risk hafızası yok ({risk_state_path}). \
+                         Mevcut hesapta eski peak-equity geçmişi olabilir; \
+                         koruma kaybı riski. Hesap bakiyesi ve açık pozisyonları \
+                         doğruladıktan sonra RISK_STATE_INIT_CONFIRMED=1 ile \
+                         yeniden başlatın."
+                    );
+                }
+                // Hesap doğrulaması: açık pozisyon varsa koruma kaybı riski çok yüksek.
+                if let Err(e) = engine.executor.refresh_positions().await {
+                    anyhow::bail!("[RISK] Hesap pozisyonları doğrulanamadı: {e}");
+                }
+                let open = engine
+                    .executor
+                    .positions()
+                    .values()
+                    .filter(|p| p.szi.abs() > 1e-12)
+                    .count();
+                if open > 0 {
+                    anyhow::bail!(
+                        "[RISK] Mainnet'te açık pozisyon var ({open}) ve risk hafızası yok. \
+                         Önce pozisyonları kapatın veya peak-equity'yi manuel olarak \
+                         ayarlayın (RISK_STATE_PATH)."
+                    );
+                }
+                tracing::warn!(
+                    "[RISK] Mainnet fresh başlangıç ONAYLANDI (operatör): \
+                     hesapta açık pozisyon yok, RISK_STATE_INIT_CONFIRMED=1"
+                );
+            }
             tracing::info!("[RISK] risk hafızası yok — fresh başlangıç (ilk koşu normal)");
         }
         engine::risk_manager::RiskStateLoad::Loaded => {
