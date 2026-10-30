@@ -59,10 +59,11 @@ jobs:
           esac
           case "$TESTNET_API_WALLET_SECRET" in
             ""|*" "*) echo "HATA: TESTNET_API_WALLET_SECRET boş veya boşluklu"; exit 1 ;;
-            *[!0-9a-fA-F]*|0x*) echo "HATA: private key 0x'siz 64 hex karakter olmalı (uzunluk ${#TESTNET_API_WALLET_SECRET})"; exit 1 ;;
+            *[!0-9a-fA-F0x]*|0b*|0o*) echo "HATA: private key 64 hex karakter olmalı (uzunluk ${#TESTNET_API_WALLET_SECRET})"; exit 1 ;;
           esac
-          if [ "${#TESTNET_API_WALLET_SECRET}" -ne 64 ]; then
-            echo "HATA: private key uzunluğu ${#TESTNET_API_WALLET_SECRET} — 64 hex olmalı (0x'siz)"; exit 1
+          # 66 = '0x' + 64 hex (kullanıcı dostu) → smoke adımında soyulur.
+          if [ "${#TESTNET_API_WALLET_SECRET}" -ne 64 ] && [ "${#TESTNET_API_WALLET_SECRET}" -ne 66 ]; then
+            echo "HATA: private key uzunluğu ${#TESTNET_API_WALLET_SECRET} — 64 hex olmalı (0x'li veya 0x'siz)"; exit 1
           fi
           case "$TESTNET_API_WALLET_ADDRESS" in
             0x*) echo "ADDRESS şema OK — uzunluk ${#TESTNET_API_WALLET_ADDRESS}" ;;
@@ -94,6 +95,8 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
+          # '0x' önekli girilen key'i soy (66 → 64 hex; Config 0x'siz ister)
+          export HYPERLIQUID_PRIVATE_KEY="${HYPERLIQUID_PRIVATE_KEY#0x}"
           TESTNET=1 ./target/release/probe_smoke SUI 20
         env:
           TESTNET: '1'
