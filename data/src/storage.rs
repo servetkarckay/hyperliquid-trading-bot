@@ -13,8 +13,6 @@ use async_trait::async_trait;
 
 use crate::aggregator::Candle;
 
-const INSERT_RETRIES: u32 = 2; // ilkinden sonra tek retry — sonsuz retry yasak
-const INSERT_RETRY_MS: u64 = 500;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeRecord {
