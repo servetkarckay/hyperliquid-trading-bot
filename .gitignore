@@ -8,7 +8,12 @@
 .idea/
 .vscode/
 
-# Tool artifacts
+# Fuzz / mutation testing artifacts (dev tools, generated — repoya girmez)
+mutants.out/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/target/
+fuzz/Cargo.lock
 
 # Runtime state (bot her koşuda üretir/üzerine yazar — repoya girmez)
 config/*.json
