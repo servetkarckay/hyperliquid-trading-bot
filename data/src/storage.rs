@@ -2,11 +2,12 @@
 //!
 //! 1. `Storage` trait: trades / candles / ctx / funding kaydetme-okuma.
 //! 2. `MemoryStorage`: test ve düşük-konfig fallback.
-//! 3. `ClickHouseStorage` (CLICKHOUSE_URL): üretim arşivi — hl_trades /
-//!
-//! hl_candles / hl_funding / hl_ctx / hl_strategy_performance;
-//! JSONEachRow toplu yazım, ReplacingMergeTree dedup, resume imleci.
-//! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li).
+//! 3. `ClickHouseStorage` (CLICKHOUSE_URL): tarihsel arşiv — backfill_job
+//!    ile kullanılır (hl_trades / hl_candles / hl_funding / hl_ctx /
+//!    hl_strategy_performance). Canlı bot bu katmanı KULLANMAZ; canlı state
+//!    JSON dosyalarında tutulur.
+//! 4. `RedisCache` (REDIS_URL): sıcak mids/ctx önbelleği (TTL'li) —
+//!    şu an kullanılmıyor.
 //!
 //! URL'ler boşsa sistem Memory ile ÇALIŞMAYA devam eder (indirimli mod —
 //! arşiv/backtest kaybı loglanır).

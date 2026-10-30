@@ -56,7 +56,7 @@ Hyperliquid (WS + REST)
 ```
 
 - `api/` — REST/WS istemcisi, EIP-712 imza, endpoint ayrıştırma
-- `data/` — WS ingestor, mum agregasyonu, backfill, ClickHouse arşiv
+- `data/` — WS ingestor, mum agregasyonu, backfill (REST candleSnapshot/funding geçmişi), bağlam
 - `engine/` — döngü, tahsis, executor, risk manager, state machine, reconciliation, öğrenme
 - `math/` — göstergeler (ATR, RSI, MACD, Bollinger, GARCH, ADX, OBV, VWAP)
 - `strategy/` — MRE motoru + replay koşucusu
