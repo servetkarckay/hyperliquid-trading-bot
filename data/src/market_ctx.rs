@@ -194,7 +194,7 @@ impl MarketCtx {
     ///
     /// NEDEN: per-tick ΔOI OI stokunun ~1e-5'i mertebesindedir; %1.5'lük
     /// likidite-avı eşiği tick-aralığında ASLA tetiklenmez (canlı vakı:
-    /// kaldırılan SMC-L OI katmanı hep "gürültü" döndü). Anlamlı kanıt
+    /// per-tick OI katmanı hep "gürültü" döndü). Anlamlı kanıt
     /// bar-penceresinde (1 saat) ölçülür. Pencere dolmadıysa (açılış/buffer
     /// kısa) → None — sahte sıfır/kısmi kanıt ÜRETİLMEZ (veri-yok dürüstlüğü).
     pub fn delta_oi_window(&self, coin: &str, window_ms: i64) -> Option<f64> {

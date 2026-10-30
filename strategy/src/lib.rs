@@ -207,7 +207,7 @@ pub fn registry() -> Vec<Box<dyn Strategy>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InfoCluster {
     /// fiyat/trend/volume türevleri: Wyckoff, Dow, Turtle,
-    /// Squeeze Breakout, Elliott, Classic Indicators, Regime Detection
+    /// Elliott, Classic Indicators, Regime Detection
     Trend,
     /// kontra/ortalama-dönüş: Davranışsal
     MeanReversion,

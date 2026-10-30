@@ -1,4 +1,4 @@
-//! ENSEMBLE — 18 oyu tek karara birleştirir.
+//! ENSEMBLE — N oyu tek karara birleştirir.
 //!
 //! Kurallar:
 //! 1. `combine`: Skip'ler SAYILMAZ; Long/Short ağırlıklı net skor

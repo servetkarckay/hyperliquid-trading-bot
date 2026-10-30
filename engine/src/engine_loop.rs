@@ -5670,11 +5670,7 @@ mod golden_path_tests {
         let fill = cand.tp_px; // TP dolumu (kâr tarafı)
         let r = (fill - mid) / (mid - cand.sl_px).abs();
         // GERÇEK finalize akışı: attribution + trade-level portfolio (ikisi ayrı)
-        tracker.record_outcome_r(
-            vec!["Turtle".into(), "Squeeze Breakout".into()],
-            1_700_000_000,
-            r,
-        );
+        tracker.record_outcome_r(vec!["Turtle".into(), "Wyckoff".into()], 1_700_000_000, r);
         tracker.record_portfolio_outcome(1_700_000_000, r);
         assert_eq!(
             tracker.evidence_n("Turtle"),
