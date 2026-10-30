@@ -1194,8 +1194,15 @@ impl Executor {
     /// giriş emrini bulamazdı.
     pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
         let v = self.info.open_orders(&self.user).await?;
-        let arr = v.as_array().cloned().unwrap_or_default();
-        Ok(self.parse_open_orders(&arr))
+        // ŞEMA DOĞRULAMASI: Hyperliquid openOrders yanıtı bir dizi olmalı.
+        // null/nesne/eksik → "boş liste" sanılmaz; Err döner (Unknown).
+        // parse_open_orders() içi open_orders haritasını siler; kötü şemada
+        // eski harita korunur (stale OID temizlenmez ama en azından
+        // "emir yok" kanıtı üretilmez).
+        let arr = v.as_array().ok_or_else(|| {
+            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+        })?;
+        Ok(self.parse_open_orders(arr))
     }
 
     /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
@@ -1204,15 +1211,19 @@ impl Executor {
     /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
     pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
         let v = self.info.open_orders(&self.user).await?;
-        let arr = v.as_array().cloned().unwrap_or_default();
-        Ok(self.parse_open_orders(&arr))
+        let arr = v.as_array().ok_or_else(|| {
+            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+        })?;
+        Ok(self.parse_open_orders(arr))
     }
 
     pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
         let v = self.info.open_orders(&self.user).await?;
-        let arr = v.as_array().cloned().unwrap_or_default();
+        let arr = v.as_array().ok_or_else(|| {
+            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+        })?;
         let mut candidates: Vec<(String, i64)> = Vec::new();
-        let rows = self.parse_open_orders(&arr);
+        let rows = self.parse_open_orders(arr);
         for row in rows {
             let (cn, oid) = (row.coin.clone(), row.oid);
             // BORSA STOP'LARINI `reduceOnly + limitPx` EŞLEŞMESİYLE TANI:
