@@ -27,3 +27,6 @@ fuzz/Cargo.lock
 
 # Veri cache (tarama artefakti)
 .candles_cache.json
+
+# Coverage artifacts (cargo-llvm-cov)
+.coverage-summary.txt
