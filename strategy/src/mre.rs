@@ -368,7 +368,7 @@ pub fn garch_threshold(candles: &[Candle], _th: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strat_test_helpers::helpers::{candle, flat};
+    use crate::test_candles::helpers::{candle, flat};
 
     const H: i64 = 3_600_000;
 

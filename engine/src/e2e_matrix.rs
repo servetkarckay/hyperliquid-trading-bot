@@ -297,7 +297,7 @@ mod e2e_matrix_tests {
     }
 
     // ── 20) malformed/stale data: SKIP (sahte-0 yok) — num() sözleşme + ──
-    // strateji SKIP zaten strat_test_helpers'ta yaygın; bu senarionun E2E-
+    // strateji SKIP zaten test_candles'ta yaygın; bu senarionun E2E-
     // uzunluk: bozuk mum → SKIP. num testleri ingestor'da. Burada üst kısım
     // yalnız Track-level bozuk-G lisans durumlarına restore — düz durum:
     #[test]

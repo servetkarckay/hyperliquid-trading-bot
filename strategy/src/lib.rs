@@ -16,7 +16,7 @@
 //! 4. `MarketInput`: kapanmış mumlar + canlı son bar + canlı bağlam
 //!
 //! (funding/OI/taker/imbalance/universe_returns).
-//! 5. `registry`: tek temel modül (MRE); `strat_test_helpers` yalnız-test
+//! 5. `registry`: tek temel modül (MRE); `test_candles` yalnız-test
 //!
 //! deterministik mum üreteci.
 pub mod ensemble;
@@ -245,5 +245,4 @@ pub(crate) fn closes(candles: &[Candle]) -> Vec<f64> {
 pub const STRATEGY_COUNT: usize = 1;
 
 #[cfg(test)]
-#[path = "strat_test_helpers.rs"]
-pub mod strat_test_helpers;
+pub mod test_candles;
