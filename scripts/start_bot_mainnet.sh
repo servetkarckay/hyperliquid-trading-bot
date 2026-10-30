@@ -21,12 +21,6 @@ grep -q "^NETWORK=mainnet" .env || { echo ".env NETWORK=mainnet değil"; exit 1;
 grep -q "^MAINNET_CONFIRMED=1" .env || { echo "MAINNET_CONFIRMED=1 yok"; exit 1; }
 
 # Depo (CH arşiv) sağlık
-CH_URL=$(grep -E "^CLICKHOUSE_URL" .env | cut -d= -f2)
-CH_URL=${CH_URL:-http://localhost:8123}
-if ! curl -so /dev/null -w '%{http_code}' --max-time 4 "$CH_URL/" --data-binary "SELECT 1" | grep -q 200; then
-    echo "CH depo sağlıksız — Memory fallback ile devam (arşiv kapalı)"
-fi
-
 [ -f "$LOG" ] && cp "$LOG" "$LOG.prev"
 
 # Ortam: .env.mainnet TAM yükle (dotenvy zaten-set edileni ezmez —
