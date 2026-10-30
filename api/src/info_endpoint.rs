@@ -99,7 +99,20 @@ impl Info {
         Ok(serde_json::from_value(v)?)
     }
 
-    /// Hesap durumu (pozisyonlar, margin, nonce) — user: GERÇEK hesap adresi (agent değil!)
+    /// Kullanıcının GERÇEK funding ödemeleri/alacakları (USDC).
+    /// fundingHistory piyasa oranlarını döner; userFunding hesabın gerçekten
+    /// aldığı/ödediği USDC funding hareketlerini döner. Öğrenme için NET
+    /// performans ölçümünde bu kullanılır.
+    pub async fn user_funding(&self, user: &str, start_ms: i64, end_ms: i64) -> Result<Value> {
+        self.c
+            .info(json!({
+                "type": "userFunding",
+                "user": user.to_ascii_lowercase(),
+                "startTime": start_ms,
+                "endTime": end_ms
+            }))
+            .await
+    }
     pub async fn clearinghouse_state(&self, user: &str) -> Result<Value> {
         self.c
             .info(json!({ "type": "clearinghouseState", "user": user.to_ascii_lowercase() }))

@@ -261,6 +261,13 @@ pub struct Executor {
     /// coin -> biriken `closedPnl`. Pozisyon kapanınca R-çarpanı (PF tabanlı
     /// terfi) bu değerden hesaplanır; `take_closed_pnl` bir kez okuyup siler.
     closed_pnl: HashMap<String, f64>,
+    /// coin -> biriken fee (USDC). closedPnl'den düşülerek NET R hesaplanır.
+    closed_fee: HashMap<String, f64>,
+    /// coin -> biriken gerçek funding ödemesi (USDC, userFunding).
+    /// Pozisyon kapanınca R'den düşülür (net performans).
+    funding_by_coin: HashMap<String, f64>,
+    /// son funding sorgu zamanı (ms) — incremental fetch.
+    last_funding_ts: i64,
     fill_count: usize,
     /// kaldıracı ayarlanmış coinler (tembel, bir kez)
     lev_done: HashSet<String>,
@@ -378,6 +385,9 @@ impl Executor {
             tp_fill_flags: HashMap::new(),
             realized_pnl: 0.0,
             closed_pnl: HashMap::new(),
+            closed_fee: HashMap::new(),
+            funding_by_coin: HashMap::new(),
+            last_funding_ts: 0,
             fill_count: 0,
         })
     }
@@ -1563,6 +1573,10 @@ impl Executor {
             .as_str()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
+        let fee: f64 = f["fee"]
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
         let dir_field: &str = f["dir"].as_str().unwrap_or("");
         let mut closing_counted: std::collections::HashSet<String> =
             std::collections::HashSet::new();
@@ -1573,7 +1587,8 @@ impl Executor {
             return;
         }
         self.fill_count += 1;
-        self.realized_pnl += closed;
+        // NET PnL = closedPnl - fee (Hyperliquid fee ayrı gelir)
+        self.realized_pnl += closed - fee;
         // KAPANIŞ fill'i closedPnl=0 olsa bile (break-even) haritaya
         // yazılmalı — recon bloğunun kapanış kaydının tek güvenilir WS
         // işaretidir (0 yazmamak = break-even kapanışların kaybolması).
@@ -1581,9 +1596,10 @@ impl Executor {
         // ayrım `dir` ile yapılır.
         if !coin.is_empty() && !is_open_fill(dir_field) && !closing_counted.contains(&coin) {
             *self.closed_pnl.entry(coin.clone()).or_insert(0.0) += closed;
+            *self.closed_fee.entry(coin.clone()).or_insert(0.0) += fee;
             closing_counted.insert(coin.clone());
         }
-        tracing::info!(oid, coin = %coin, sz, px, closed, "fill(user)");
+        tracing::info!(oid, coin = %coin, sz, px, closed, fee, "fill(user)");
         if !coin.is_empty() && sz > 0.0 {
             let is_buy = f["side"].as_str().unwrap_or("B") == "B";
             // POZİSYON HARİTASINI GÜNCELLE. `refresh_positions` yalnız açılışta
@@ -1852,6 +1868,41 @@ impl Executor {
     /// R-çarpanı bir kez hesaplanmalı; ikinci kez sayılırsa bias olur).
     pub fn take_closed_pnl(&mut self, coin: &str) -> Option<f64> {
         self.closed_pnl.remove(coin)
+    }
+    /// Coin'in biriken fee'sini oku ve sil (NET R hesabı için).
+    pub fn take_closed_fee(&mut self, coin: &str) -> Option<f64> {
+        self.closed_fee.remove(coin)
+    }
+    /// Coin'in biriken gerçek funding ödemesini oku ve sil (NET R hesabı için).
+    pub fn take_closed_funding(&mut self, coin: &str) -> Option<f64> {
+        self.funding_by_coin.remove(coin)
+    }
+    /// Kullanıcının gerçek funding ödemelerini (userFunding) çekip
+    /// coin bazında biriktir. Sorgu başarısızsa sessizce atlanır
+    /// (bir sonraki döngüde tekrar denenebilir).
+    pub async fn refresh_user_funding(&mut self, start_ms: i64, end_ms: i64) -> Result<()> {
+        let v = self.info.user_funding(&self.user, start_ms, end_ms).await?;
+        let arr = match v.as_array() {
+            Some(a) => a,
+            None => return Ok(()), // şema beklenmedik → atla
+        };
+        for e in arr {
+            let coin = e["coin"].as_str().unwrap_or("").to_string();
+            if coin.is_empty() {
+                continue;
+            }
+            let usdc: f64 = e["usdc"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .or_else(|| e["usdc"].as_f64())
+                .unwrap_or(0.0);
+            *self.funding_by_coin.entry(coin).or_insert(0.0) += usdc;
+        }
+        self.last_funding_ts = end_ms;
+        Ok(())
+    }
+    pub fn last_funding_ts(&self) -> i64 {
+        self.last_funding_ts
     }
     pub fn fill_count(&self) -> usize {
         self.fill_count

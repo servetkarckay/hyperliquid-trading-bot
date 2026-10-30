@@ -1317,7 +1317,9 @@ impl Engine {
                     });
                     if let Some(attr) = self.entry_attr.remove(&coin) {
                         let risk_usd = attr.risk_px * attr.size.abs().max(f64::EPSILON);
-                        let r = fill_pnl / risk_usd.max(f64::EPSILON);
+                        let fee = self.executor.take_closed_fee(&coin).unwrap_or(0.0);
+                        let funding = self.executor.take_closed_funding(&coin).unwrap_or(0.0);
+                        let r = (fill_pnl - fee - funding) / risk_usd.max(f64::EPSILON);
                         self.tracker.record_outcome_r(
                             attr.voters.clone(),
                             hyperliquid_api::now_ms(),
@@ -1337,7 +1339,11 @@ impl Engine {
                     let sz = attr.size.abs().max(f64::EPSILON);
                     let risk_usd = attr.risk_px * sz;
                     let r = match self.executor.take_closed_pnl(&coin) {
-                        Some(p) => p / risk_usd.max(f64::EPSILON),
+                        Some(p) => {
+                            let fee = self.executor.take_closed_fee(&coin).unwrap_or(0.0);
+                            let funding = self.executor.take_closed_funding(&coin).unwrap_or(0.0);
+                            (p - fee - funding) / risk_usd.max(f64::EPSILON)
+                        }
                         None => {
                             let move_px = match attr.side {
                                 SmSide::Long => avg - attr.entry_px,
@@ -2976,6 +2982,16 @@ impl Engine {
         // equity'dir. Açık pozisyonlu mark-to-market equity'si peak'i şişiremez.
         let settled = self.rest_sync_verified && self.executor.positions().is_empty();
         self.risk.update_equity(self.equity, settled);
+        // Gerçek kullanıcı funding ödemeleri (userFunding) — piyasa oranları
+        // (fundingHistory) yerine hesabın gerçekten aldığı/ödediği USDC.
+        // Periyodik fetch; bir sonraki pozisyon kapanışında R'den düşülür.
+        let now_ms = hyperliquid_api::now_ms() as i64;
+        let start_ms = if self.executor.last_funding_ts() > 0 {
+            self.executor.last_funding_ts()
+        } else {
+            now_ms - 86_400_000
+        };
+        let _ = self.executor.refresh_user_funding(start_ms, now_ms).await;
         // Risk hafızası KALICI (restart drawdown hafızasını sıfırlamaz);
         // yazma hatası yutulmaz — sessiz yutulan yazma = sıfırlanmış risk.
         // Save hatası → yeni girişler kilitlenir (drawdown koruması kayıp riski).
