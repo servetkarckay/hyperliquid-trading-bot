@@ -129,6 +129,14 @@ MRE'nin ürettiği `TradeIntent { long, entry, sl, tp, strength, note, signal_ts
 - Watchdog: `scripts/watchdog.sh` (yeniden başlatmaları yönetir; devre dışı bırakma mekanizması script içinde belgelenmiştir)
 - State: `config/risk_state.json`, `config/track_state.json`, `config/trade_exits.jsonl`
 
+## Referral
+
+Hyperliquid hesabınızı bu linkle açın — işlem ücretlerinden %4 indirim alırsınız:
+
+**https://app.hyperliquid.xyz/join/GITHUB**
+
+(Referans kodu: `GITHUB`)
+
 ## CI
 
 - **PR-CI**: fmt, check, clippy (-D warnings), test, debug+release build — her push/PR.
