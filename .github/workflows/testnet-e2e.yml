@@ -58,18 +58,18 @@ jobs:
       - name: Build
         run: cargo build --release --workspace
         timeout-minutes: 15
-      # GERÇEK order akışı: küçük smoke order + iptal — script bot'la değil,
-      # küçük probe binary ile yapılır (ör. probe_px ile fiyat öğrenimi ve
-      # minimal SmokeOrder CLI). Isınma accounts: TESTNET_SECRETS gerekli.
+      # GERÇEK order akışı: probe_smoke testnet'te küçük limit order
+      # yerleştirir → açık listede doğrular → iptal eder → iptali doğrular
+      # → pozisyon FLAT doğrular. Her adım exit-code ile kanıtlanır.
       - name: Smoke order + cancel (testnet)
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          echo '{"api_url":"api.hyperliquid-testnet.xyz"}' > /tmp/env.json
-          echo '::notice::GERÇEK order adımları: probe_px ve executor unit
-          + mânâ kontrol (manual download). Bu günlükte BİNAY NE İFE YAZILMAZ.'
-          # NOT: aktüel will be wired — commit pattern:
-          #   probe_smoke --coin SUI --size 1 --cancel-after 5s
-          # Secret'lar GITHUB ACTIONS secrets üzerinden env'e geçilir.
+          TESTNET=1 ./target/release/probe_smoke SUI 12
         env:
-          API_WALLET_SECRET: ${{ secrets.TESTNET_API_WALLET_SECRET }}
+          TESTNET: '1'
+          NETWORK: testnet
+          HYPERLIQUID_API_URL: ${{ secrets.API_URL }}
+          HYPERLIQUID_WS_URL: ${{ secrets.WS_URL }}
+          HYPERLIQUID_PRIVATE_KEY: ${{ secrets.TESTNET_API_WALLET_SECRET }}
+          API_WALLET_ADDRESS: ${{ secrets.TESTNET_API_WALLET_ADDRESS }}
