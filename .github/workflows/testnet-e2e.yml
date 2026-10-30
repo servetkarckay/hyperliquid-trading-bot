@@ -97,6 +97,21 @@ jobs:
           set -euo pipefail
           # '0x' önekli girilen key'i soy (66 → 64 hex; Config 0x'siz ister)
           export HYPERLIQUID_PRIVATE_KEY="${HYPERLIQUID_PRIVATE_KEY#0x}"
+          # AGENT → MASTER çözümü: emir agent anahtarıyla MASTER hesabına
+          # girilir; sorgular (openOrders/positions/orderStatus) MASTER
+          # adresine yapılmalı. userRole agent'in master'ını söyler —
+          # role=agent ise USER_ADDRESS'i otomatik düzelt (adres genel
+          # bilgidir, sır değil).
+          ROLE=$(curl -sS -X POST "$HYPERLIQUID_API_URL/info" \
+            -H 'Content-Type: application/json' \
+            -d "{\"type\":\"userRole\",\"user\":\"$API_WALLET_ADDRESS\"}")
+          if echo "$ROLE" | grep -q '"agent"'; then
+            MASTER=$(echo "$ROLE" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['user'])")
+            if [ -n "$MASTER" ]; then
+              echo "[SMOKE] agent→master çözümlendi: $MASTER (agent: $API_WALLET_ADDRESS)"
+              export USER_ADDRESS="$MASTER"
+            fi
+          fi
           TESTNET=1 ./target/release/probe_smoke SUI 20
         env:
           TESTNET: '1'
@@ -107,5 +122,5 @@ jobs:
           API_WALLET_ADDRESS: ${{ secrets.TESTNET_API_WALLET_ADDRESS }}
           # Master (fon tutan) adres — ayrı agent wallet kullanıldıysa
           # TESTNET_USER_ADDRESS girilir; yoksa API wallet adresi kullanılır
-          # (anahtar doğrudan cüzdan anahtarıysa aynıdır).
+          # (yukarıdaki userRole çözümü agent durumunda otomatik düzeltir).
           USER_ADDRESS: ${{ secrets.TESTNET_USER_ADDRESS || secrets.TESTNET_API_WALLET_ADDRESS }}
