@@ -1318,8 +1318,15 @@ impl Engine {
                     if let Some(attr) = self.entry_attr.remove(&coin) {
                         let risk_usd = attr.risk_px * attr.size.abs().max(f64::EPSILON);
                         let fee = self.executor.take_closed_fee(&coin).unwrap_or(0.0);
-                        let funding = self.executor.take_closed_funding(&coin).unwrap_or(0.0);
-                        let r = (fill_pnl - fee - funding) / risk_usd.max(f64::EPSILON);
+                        let funding = self
+                            .executor
+                            .take_closed_funding(
+                                &coin,
+                                attr.ts as i64,
+                                hyperliquid_api::now_ms() as i64,
+                            )
+                            .unwrap_or(0.0);
+                        let r = (fill_pnl - fee + funding) / risk_usd.max(f64::EPSILON);
                         self.tracker.record_outcome_r(
                             attr.voters.clone(),
                             hyperliquid_api::now_ms(),
@@ -1341,8 +1348,15 @@ impl Engine {
                     let r = match self.executor.take_closed_pnl(&coin) {
                         Some(p) => {
                             let fee = self.executor.take_closed_fee(&coin).unwrap_or(0.0);
-                            let funding = self.executor.take_closed_funding(&coin).unwrap_or(0.0);
-                            (p - fee - funding) / risk_usd.max(f64::EPSILON)
+                            let funding = self
+                                .executor
+                                .take_closed_funding(
+                                    &coin,
+                                    attr.ts as i64,
+                                    hyperliquid_api::now_ms() as i64,
+                                )
+                                .unwrap_or(0.0);
+                            (p - fee + funding) / risk_usd.max(f64::EPSILON)
                         }
                         None => {
                             let move_px = match attr.side {

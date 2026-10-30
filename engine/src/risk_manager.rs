@@ -215,6 +215,29 @@ impl RiskManager {
                 return RiskStateLoad::Corrupt;
             }
         };
+        // Anlamsal doğrulama: peak_equity pozitif+finite, current_equity
+        // finite ve >=0 olmalı. Aksi halde drawdown hesabı etkisizleşir
+        // (peak<=0 → drawdown %0 → koruma çalışmaz).
+        if !p.peak_equity.is_finite() || p.peak_equity <= 0.0 {
+            tracing::error!(
+                "risk hafızası ANLAMSIZ ({path}): peak_equity={} — koruma kaybı riski",
+                p.peak_equity
+            );
+            return RiskStateLoad::Corrupt;
+        }
+        if !p.current_equity.is_finite() || p.current_equity < 0.0 {
+            tracing::error!(
+                "risk hafızası ANLAMSIZ ({path}): current_equity={} — koruma kaybı riski",
+                p.current_equity
+            );
+            return RiskStateLoad::Corrupt;
+        }
+        if let Some(ref h) = p.halted {
+            if h.trim().is_empty() {
+                tracing::error!("risk hafızası ANLAMSIZ ({path}): boş halted mesajı");
+                return RiskStateLoad::Corrupt;
+            }
+        }
         self.peak_equity = p.peak_equity;
         self.current_equity = p.current_equity;
         self.halted = p.halted;

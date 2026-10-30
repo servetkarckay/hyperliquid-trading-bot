@@ -140,10 +140,25 @@ impl Info {
             .await
     }
 
-    /// Emir durumu (oid veya cloid) — user: gerçek hesap adresi
+    /// Açık emirler (frontend şeması — reduceOnly, origSz, cloid içerir) —
+    /// user: gerçek hesap adresi. Stop sınıflandırması için bu kullanılır.
+    pub async fn frontend_open_orders(&self, user: &str) -> Result<Value> {
+        self.c
+            .info(json!({ "type": "frontendOpenOrders", "user": user.to_ascii_lowercase() }))
+            .await
+    }
+
+    /// Emir durumu — oid (i64) ile.
     pub async fn order_status(&self, user: &str, oid: i64) -> Result<Value> {
         self.c
             .info(json!({ "type": "orderStatus", "user": user.to_ascii_lowercase(), "oid": oid }))
+            .await
+    }
+
+    /// Emir durumu — cloid (string) ile.
+    pub async fn order_status_cloid(&self, user: &str, cloid: &str) -> Result<Value> {
+        self.c
+            .info(json!({ "type": "orderStatus", "user": user.to_ascii_lowercase(), "oid": cloid }))
             .await
     }
 

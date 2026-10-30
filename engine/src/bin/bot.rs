@@ -281,6 +281,14 @@ async fn main() -> anyhow::Result<()> {
         }
         engine::risk_manager::RiskStateLoad::Loaded => {
             tracing::info!("[RISK] hafıza yüklendi: {risk_state_path}");
+            if environment == "mainnet"
+                && std::env::var("RISK_STATE_INIT_CONFIRMED").as_deref() == Ok("1")
+            {
+                tracing::warn!(
+                    "[RISK] RISK_STATE_INIT_CONFIRMED=1 hâlâ .env'de — risk hafızası now mevcut; \
+                     güvenli olması için .env'den kaldırın (bir sonraki kayıp durumunda otomatik onay olmaz)."
+                );
+            }
         }
         engine::risk_manager::RiskStateLoad::Corrupt => {
             anyhow::bail!(

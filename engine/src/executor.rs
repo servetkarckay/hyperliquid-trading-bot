@@ -265,7 +265,12 @@ pub struct Executor {
     closed_fee: HashMap<String, f64>,
     /// coin -> biriken gerçek funding ödemesi (USDC, userFunding).
     /// Pozisyon kapanınca R'den düşülür (net performans).
-    funding_by_coin: HashMap<String, f64>,
+    /// (time, coin, usdc) funding olayları — pozisyon ömrüne bağlanır.
+    funding_events: Vec<(i64, String, f64)>,
+    /// (time, coin) dedup seti — restart/re-fetch'te aynı funding iki kez sayılmaz.
+    funding_seen: std::collections::HashSet<(i64, String)>,
+    /// coin -> pozisyon açılış zamanı (ms) — funding attribution için.
+    position_open_ts: HashMap<String, i64>,
     /// son funding sorgu zamanı (ms) — incremental fetch.
     last_funding_ts: i64,
     fill_count: usize,
@@ -386,7 +391,9 @@ impl Executor {
             realized_pnl: 0.0,
             closed_pnl: HashMap::new(),
             closed_fee: HashMap::new(),
-            funding_by_coin: HashMap::new(),
+            funding_events: Vec::new(),
+            funding_seen: std::collections::HashSet::new(),
+            position_open_ts: HashMap::new(),
             last_funding_ts: 0,
             fill_count: 0,
         })
@@ -1140,59 +1147,84 @@ impl Executor {
     /// `openOrders` yanıtını AYRIŞTIRIR ve `open_orders` cache'ini doldurur.
     /// `refresh_orders` (stop adayları) ve `refresh_open_orders_all`
     /// (reconciliation) aynı parser'ı kullanır — yeniden yazım yok.
-    fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Vec<OpenOrderRow> {
-        let mut rows = Vec::new();
-        self.open_orders.clear();
+    fn parse_open_orders(&mut self, arr: &[serde_json::Value]) -> Result<Vec<OpenOrderRow>> {
+        // ATOMİK doğrulama: geçici harita/vektör oluştur; her satır doğrulanır.
+        // Bir satır bile bozuksa Err döner, self.open_orders DEĞİŞMEZ
+        // (kısmi güncelleme yok — "emir yok" kanıtı üretilmez).
+        let mut tmp_orders: HashMap<i64, OrderInfo> = HashMap::new();
+        let mut tmp_rows: Vec<OpenOrderRow> = Vec::with_capacity(arr.len());
         for o in arr {
-            let oid = match o["oid"].as_i64() {
-                Some(x) => x,
-                None => continue,
-            };
-            let cn = o["coin"].as_str().unwrap_or("").to_string();
-            let asset_id = self.assets.get(&cn).map(|(a, _, _)| *a).unwrap_or(0);
-            let is_buy = o["side"] == "B";
-            let px = o["limitPx"]
+            // ZORUNLU alanlar — eksik/bozuk → tüm sorgu başarısız.
+            let oid = o["oid"]
+                .as_i64()
+                .ok_or_else(|| anyhow::anyhow!("openOrders satırı: oid eksik/bozuk"))?;
+            let cn = o["coin"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("openOrders satırı: coin eksik/bozuk"))?;
+            if cn.is_empty() {
+                bail!("openOrders satırı: coin boş");
+            }
+            let side = o["side"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("openOrders satırı: side eksik/bozuk"))?;
+            if side != "B" && side != "A" && side != "S" {
+                bail!("openOrders satırı: side geçersiz ({side})");
+            }
+            let is_buy = side == "B";
+            let px_str = o["limitPx"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("openOrders satırı: limitPx eksik/bozuk"))?;
+            let px: f64 = px_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("openOrders satırı: limitPx sayı değil"))?;
+            if !px.is_finite() || px <= 0.0 {
+                bail!("openOrders satırı: limitPx geçersiz ({px})");
+            }
+            let sz_str = o["sz"]
+                .as_str()
+                .or_else(|| o["origSz"].as_str())
+                .ok_or_else(|| anyhow::anyhow!("openOrders satırı: sz/origSz eksik"))?;
+            let sz: f64 = sz_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("openOrders satırı: sz sayı değil"))?;
+            if !sz.is_finite() || sz < 0.0 {
+                bail!("openOrders satırı: sz geçersiz ({sz})");
+            }
+            let orig_sz: f64 = o["origSz"]
                 .as_str()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+                .unwrap_or(sz);
             let reduce_only = o["reduceOnly"].as_bool().unwrap_or(false);
-            // reconciliation EMIR cloid'i üzerinden eşleşir. REST
-            // `openOrders` cloid'i `cloid` alanında döner.
             let cloid = o["cloid"].as_str().map(|s| s.to_string());
-            self.open_orders.insert(
+            let ts = o["timestamp"].as_u64().unwrap_or(0);
+            let asset_id = self.assets.get(cn).map(|(a, _, _)| *a).unwrap_or(0);
+            tmp_orders.insert(
                 oid,
                 OrderInfo {
                     oid,
                     asset: asset_id,
-                    coin: cn.clone(),
+                    coin: cn.to_string(),
                     is_buy,
-                    sz: o["origSz"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0),
+                    sz,
                     px,
                     tif: Tif::Gtc,
                     reduce_only,
-                    ts: o["timestamp"].as_u64().unwrap_or(0),
+                    ts,
                 },
             );
-            // satır sz'i = origSz (borsadaki gerçek lot) — cloid tuzu
-            // tanıması (coin+px+sz+tuz deterministiktir) origSz'ye ihtiyaç duyar.
-            let row_sz = o["origSz"]
-                .as_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
-            rows.push(OpenOrderRow {
-                coin: cn,
+            tmp_rows.push(OpenOrderRow {
+                coin: cn.to_string(),
                 oid,
                 cloid,
                 is_buy,
-                sz: row_sz,
+                sz: orig_sz,
                 px,
                 reduce_only,
             });
         }
-        rows
+        // Tüm satırlar doğrulandı → atomik swap.
+        self.open_orders = tmp_orders;
+        Ok(tmp_rows)
     }
 
     /// TÜM dinlenen açık emirleri `(coin, oid, cloid, reduce_only, ...)`
@@ -1203,16 +1235,13 @@ impl Executor {
     /// olduğu için o listede BULUNAMAZ — yani reconciliation hiçbir zaman
     /// giriş emrini bulamazdı.
     pub async fn refresh_open_orders_all(&mut self) -> Result<Vec<OpenOrderRow>> {
-        let v = self.info.open_orders(&self.user).await?;
-        // ŞEMA DOĞRULAMASI: Hyperliquid openOrders yanıtı bir dizi olmalı.
-        // null/nesne/eksik → "boş liste" sanılmaz; Err döner (Unknown).
-        // parse_open_orders() içi open_orders haritasını siler; kötü şemada
-        // eski harita korunur (stale OID temizlenmez ama en azından
-        // "emir yok" kanıtı üretilmez).
+        let v = self.info.frontend_open_orders(&self.user).await?;
         let arr = v.as_array().ok_or_else(|| {
-            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+            anyhow::anyhow!(
+                "frontendOpenOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı"
+            )
         })?;
-        Ok(self.parse_open_orders(arr))
+        self.parse_open_orders(arr)
     }
 
     /// Duran **reduce-only** emirleri `(coin, oid)` olarak döndürür — bunlar
@@ -1220,20 +1249,24 @@ impl Executor {
     /// Ham satırlar — TP oid geri yükleme (`restore_tp_orders`) bu satırları
     /// okur; `refresh_orders` YALNIZ SL tanıma mantığıyla süzüp döndürür.
     pub async fn fetch_open_order_rows(&mut self) -> Result<Vec<OpenOrderRow>> {
-        let v = self.info.open_orders(&self.user).await?;
+        let v = self.info.frontend_open_orders(&self.user).await?;
         let arr = v.as_array().ok_or_else(|| {
-            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+            anyhow::anyhow!(
+                "frontendOpenOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı"
+            )
         })?;
-        Ok(self.parse_open_orders(arr))
+        self.parse_open_orders(arr)
     }
 
     pub async fn refresh_orders(&mut self) -> Result<Vec<(String, i64)>> {
-        let v = self.info.open_orders(&self.user).await?;
+        let v = self.info.frontend_open_orders(&self.user).await?;
         let arr = v.as_array().ok_or_else(|| {
-            anyhow::anyhow!("openOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı")
+            anyhow::anyhow!(
+                "frontendOpenOrders yanıtı dizi değil (null/nesne) — şema doğrulanamadı"
+            )
         })?;
         let mut candidates: Vec<(String, i64)> = Vec::new();
-        let rows = self.parse_open_orders(arr);
+        let rows = self.parse_open_orders(arr)?;
         for row in rows {
             let (cn, oid) = (row.coin.clone(), row.oid);
             // BORSA STOP'LARINI `reduceOnly + limitPx` EŞLEŞMESİYLE TANI:
@@ -1406,41 +1439,73 @@ impl Executor {
                 bail!("clearinghouseState çözümsüz (null) — pozisyon haritası KORUNDU");
             }
         };
-        self.positions.clear();
-        for ap in arr {
+        // ATOMİK parse: geçici harita; her satır doğrulanır. Bozuk satır varsa
+        // Err döner ve mevcut pozisyon haritası DEĞİŞMEZ ("pozisyon yok"
+        // yanılgısı oluşmaz).
+        let mut tmp: HashMap<String, Position> = HashMap::new();
+        for ap in &arr {
             let p = &ap["position"];
-            let coin = p["coin"].as_str().unwrap_or("").to_string();
+            let coin = p["coin"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("position satırı: coin eksik/bozuk"))?;
             if coin.is_empty() {
-                continue;
+                continue; // boş coin satırı atlanır (şema gereği olmaz ama güvenli)
             }
-            self.positions.insert(
-                coin.clone(),
+            let szi_str = p["szi"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("position {coin}: szi eksik/bozuk"))?;
+            let szi: f64 = szi_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("position {coin}: szi sayı değil"))?;
+            if !szi.is_finite() {
+                bail!("position {coin}: szi finite değil");
+            }
+            let entry_str = p["entryPx"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("position {coin}: entryPx eksik/bozuk"))?;
+            let entry_px: f64 = entry_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("position {coin}: entryPx sayı değil"))?;
+            if !entry_px.is_finite() || entry_px <= 0.0 {
+                bail!("position {coin}: entryPx geçersiz ({entry_px})");
+            }
+            let position_value: f64 = p["positionValue"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            if !position_value.is_finite() {
+                bail!("position {coin}: positionValue finite değil");
+            }
+            let unrealized_pnl: f64 = p["unrealizedPnl"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            if !unrealized_pnl.is_finite() {
+                bail!("position {coin}: unrealizedPnl finite değil");
+            }
+            let leverage: f64 = p["leverage"]["value"]
+                .as_u64()
+                .map(|v| v as f64)
+                .unwrap_or(1.0);
+            let liquidation_px: Option<f64> = p["liquidationPx"]
+                .as_str()
+                .and_then(|s| s.parse().ok())
+                .filter(|x: &f64| x.is_finite());
+            tmp.insert(
+                coin.to_string(),
                 Position {
-                    szi: p["szi"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0),
-                    entry_px: p["entryPx"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0),
-                    position_value: p["positionValue"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0),
-                    unrealized_pnl: p["unrealizedPnl"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0.0),
-                    leverage: p["leverage"]["value"]
-                        .as_u64()
-                        .map(|v| v as f64)
-                        .unwrap_or(1.0),
-                    liquidation_px: p["liquidationPx"].as_str().and_then(|s| s.parse().ok()),
-                    coin,
+                    coin: coin.to_string(),
+                    szi,
+                    entry_px,
+                    position_value,
+                    unrealized_pnl,
+                    leverage,
+                    liquidation_px,
                 },
             );
         }
+        // Tüm satırlar doğrulandı → atomik swap.
+        self.positions = tmp;
         Ok(())
     }
 
@@ -1599,9 +1664,20 @@ impl Executor {
             *self.closed_fee.entry(coin.clone()).or_insert(0.0) += fee;
             closing_counted.insert(coin.clone());
         }
+        // Giriş (açılış) fill'indeki komisyon da pozisyonun net PnL'ine
+        // yansısın: giriş fee'si açılışta closed_fee'ye eklenir; kapanışta
+        // giriş+çıkış fee'leri birlikte düşülür.
+        if !coin.is_empty() && is_open_fill(dir_field) {
+            *self.closed_fee.entry(coin.clone()).or_insert(0.0) += fee;
+        }
         tracing::info!(oid, coin = %coin, sz, px, closed, fee, "fill(user)");
         if !coin.is_empty() && sz > 0.0 {
             let is_buy = f["side"].as_str().unwrap_or("B") == "B";
+            let was_flat = self
+                .positions
+                .get(&coin)
+                .map(|p| p.szi.abs() < 1e-12)
+                .unwrap_or(true);
             // POZİSYON HARİTASINI GÜNCELLE. `refresh_positions` yalnız açılışta
             // çağrılıyordu; WS dolumu haritaya yazılmadığı için motorun
             // gördüğü `positions` açılıştan beri BOŞ kaldı → `open_now` tavanı
@@ -1631,6 +1707,11 @@ impl Executor {
                             },
                         );
                     }
+                }
+                // pozisyon açılış zamanı (funding attribution için)
+                if was_flat {
+                    self.position_open_ts
+                        .insert(coin.clone(), hyperliquid_api::now_ms() as i64);
                 }
                 // STOP TETİKLENDİ (bu dolumun oid'i borsa stop'ununkiyle aynıysa):
                 // stop artık yerinde değildir; `sl_orders`'ta kalırsa döngü
@@ -1874,8 +1955,27 @@ impl Executor {
         self.closed_fee.remove(coin)
     }
     /// Coin'in biriken gerçek funding ödemesini oku ve sil (NET R hesabı için).
-    pub fn take_closed_funding(&mut self, coin: &str) -> Option<f64> {
-        self.funding_by_coin.remove(coin)
+    /// Yalnız pozisyon ömrü (open_ts..close_ts) içindeki kayıtlar sayılır;
+    /// eski pozisyonun funding'i yeni trade'e karışmaz.
+    pub fn take_closed_funding(&mut self, coin: &str, open_ts: i64, close_ts: i64) -> Option<f64> {
+        self.position_open_ts.remove(coin);
+        let mut sum = 0.0;
+        let mut found = false;
+        let mut keep = Vec::new();
+        for (t, c, u) in self.funding_events.drain(..) {
+            if c == coin && t >= open_ts && t <= close_ts {
+                sum += u;
+                found = true;
+            } else {
+                keep.push((t, c, u));
+            }
+        }
+        self.funding_events = keep;
+        if found {
+            Some(sum)
+        } else {
+            None
+        }
     }
     /// Kullanıcının gerçek funding ödemelerini (userFunding) çekip
     /// coin bazında biriktir. Sorgu başarısızsa sessizce atlanır
@@ -1887,16 +1987,28 @@ impl Executor {
             None => return Ok(()), // şema beklenmedik → atla
         };
         for e in arr {
-            let coin = e["coin"].as_str().unwrap_or("").to_string();
+            let delta = &e["delta"];
+            let coin = delta["coin"]
+                .as_str()
+                .or_else(|| e["coin"].as_str())
+                .unwrap_or("")
+                .to_string();
             if coin.is_empty() {
                 continue;
             }
-            let usdc: f64 = e["usdc"]
+            let usdc: f64 = delta["usdc"]
                 .as_str()
+                .or_else(|| e["usdc"].as_str())
                 .and_then(|s| s.parse().ok())
+                .or_else(|| delta["usdc"].as_f64())
                 .or_else(|| e["usdc"].as_f64())
                 .unwrap_or(0.0);
-            *self.funding_by_coin.entry(coin).or_insert(0.0) += usdc;
+            // Dedup: aynı (time, coin) yeniden işlenmesin (restart/re-fetch).
+            let time = e["time"].as_i64().unwrap_or(0);
+            if !self.funding_seen.insert((time, coin.clone())) {
+                continue;
+            }
+            self.funding_events.push((time, coin, usdc));
         }
         self.last_funding_ts = end_ms;
         Ok(())
